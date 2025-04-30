@@ -1,3 +1,4 @@
 .env
 .aider*
 .aider/
+node_modules/

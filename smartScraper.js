@@ -170,7 +170,8 @@ const launchPuppeteerBrowser = async (debug = false) => {
     logDebug(`[LAUNCH] Created temporary user data dir: ${userDataDir}`);
     const launchArgs = [
       "--no-sandbox",
-      // `--proxy-server=${MY_SOCKS5_PROXY}`, // Pass the raw string
+      // `--proxy-server=${MY_SOCKS5_PROXY}`,
+      "--disable-features=DnsOverHttps",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
       "--disable-accelerated-2d-canvas",
@@ -180,10 +181,10 @@ const launchPuppeteerBrowser = async (debug = false) => {
       "--font-render-hinting=none", // Added for consistency
       ...extensionArgs,
     ];
-    logDebug("[LAUNCH] Initializing browser instance...");
+    logDebug(`[LAUNCH] Initializing browser instance... ${launchArgs}`);
     browser = await puppeteer.launch({
       executablePath: EXECUTABLE_PATH,
-      headless: false, // Keep false as in original find-xpath.js
+      headless: "new",
       userDataDir,
       args: launchArgs,
       dumpio: debug && process.env.NODE_ENV === "development",
