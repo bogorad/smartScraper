@@ -19,7 +19,7 @@ const LLM_MODEL = process.env.LLM_MODEL;
 const EXECUTABLE_PATH =
   process.env.EXECUTABLE_PATH || "/usr/bin/google-chrome-stable"; // Adjust if needed
 const EXTENSION_PATHS = process.env.EXTENSION_PATHS; // Optional: Path to browser extensions
-const MY_SOCKS5_PROXY = process.env.MY_SOCKS5_PROXY;
+// const MY_SOCKS5_PROXY = process.env.MY_SOCKS5_PROXY;
 
 // Check required environment variables
 if (!OPENROUTER_API_KEY) {
@@ -36,10 +36,10 @@ if (!fs.existsSync(EXECUTABLE_PATH)) {
   );
   // Depending on your setup, you might want to exit here: process.exit(1);
 }
-if (!MY_SOCKS5_PROXY) {
-  console.error("FATAL: MY_SOCKS5_PROXY environment variable is not set.");
-  process.exit(1);
-}
+// if (!MY_SOCKS5_PROXY) {
+//   console.error("FATAL: MY_SOCKS5_PROXY environment variable is not set.");
+//   process.exit(1);
+// }
 
 // --- Constants from find-xpath.js ---
 const SCORE_WEIGHTS = {
