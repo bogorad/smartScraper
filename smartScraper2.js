@@ -66,7 +66,6 @@ if (!TWOCAPTCHA_API_KEY && DADADOME_DOMAINS.length > 0) { logError("FATAL: TWOCA
 else if (!TWOCAPTCHA_API_KEY) logWarn("WARN: TWOCAPTCHA_API_KEY missing; CAPTCHA solving disabled.");
 if (!MY_HTTP_PROXY) { logError("FATAL: MY_HTTP_PROXY missing."); process.exit(1); }
 
-
 // --- Storage Management ---
 const loadStorage = () => {
   logDebug("[Storage] Attempting to load storage...");
@@ -119,7 +118,7 @@ const parseProxyStringFor2Captcha = (proxyString) => {
         if (type !== "http" && type !== "https") { logError(`[2Captcha Proxy Parse] Unsupported protocol: ${type}.`); return null; }
         const address = url.hostname; if (!address) { logError(`[2Captcha Proxy Parse] Missing host: ${proxyString}`); return null; }
         const defaultPort = type === "https" ? 443 : 80; let port = parseInt(url.port, 10) || defaultPort; if (isNaN(port) || port <= 0 || port > 65535) { logWarn(`[2Captcha Proxy Parse] Invalid port "${url.port}", using ${defaultPort}.`); port = defaultPort; }
-        const login = url.username ? decodeURIComponent(url.username) : undefined; const password = url.password ? decodeURIComponent(url.password) : undefined;
+        const login = url.username ? decodeURIComponent(url.username) : undefined; const password = url.password ? decodeURIComponent(url.password || "") : undefined;
         const result = { type: type.toUpperCase(), address, port, login, password };
         logDebug(`[2Captcha Proxy Parse] Successfully parsed:`, { ...result, password: result.password ? '***' : undefined }); // Don't log password
         return result;
@@ -203,7 +202,7 @@ const solveDataDomeWith2Captcha = async (websiteURL, captchaUrl, userAgent) => {
 
 // --- Cookie Formatting ---
 const formatDataDomeCookie = (cookieString, targetUrl) => {
-  logDebug(`[Cookie] Formatting: ${cookieString.substring(0, 50)}...`); if (!cookieString?.includes("=")) return null;
+  logDebug(`[Cookie] Formatting: ${cookieString.substring(0, 50)}...`); if (cookieString?.includes("=")) return null;
   try { const parts = cookieString.split(";").map(p => p.trim()); const [name, ...valueParts] = parts[0].split("="); const value = valueParts.join("="); if (!name || !value) { logError("[Cookie] Bad name/value:", parts[0]); return null; } let domainFromUrl = null; try { domainFromUrl = new URL(targetUrl).hostname; } catch {} const cookie = { name: name.trim(), value: value.trim(), url: targetUrl, domain: undefined, path: "/", secure: false, httpOnly: false, sameSite: "Lax", expires: undefined };
     for (let i = 1; i < parts.length; i++) { const [attrNameInput, ...attrValueParts] = parts[i].split("="); const attrName = attrNameInput.trim().toLowerCase(); const attrValue = attrValueParts.join("=").trim(); switch (attrName) { case "path": cookie.path = attrValue || "/"; break; case "domain": cookie.domain = attrValue.startsWith(".") ? attrValue : `.${attrValue}`; break; case "secure": cookie.secure = true; break; case "samesite": const validSS = ["Lax", "Strict", "None"]; const capSS = attrValue.charAt(0).toUpperCase() + attrValue.slice(1).toLowerCase(); cookie.sameSite = validSS.includes(capSS) ? capSS : "Lax"; break; case "httponly": cookie.httpOnly = true; break; case "expires": try { const expiryDate = new Date(attrValue); if (!isNaN(expiryDate.getTime())) cookie.expires = Math.floor(expiryDate.getTime() / 1000); else logWarn(`[Cookie] Bad expires: ${attrValue}`); } catch { logWarn(`[Cookie] Bad expires: ${attrValue}`); } break; case "max-age": try { const maxAgeSec = parseInt(attrValue, 10); if (!isNaN(maxAgeSec)) cookie.expires = Math.floor(Date.now() / 1000) + maxAgeSec; else logWarn(`[Cookie] Bad max-age: ${attrValue}`); } catch { logWarn(`[Cookie] Bad max-age: ${attrValue}`); } break; default: logDebug(`[Cookie] Ignoring attr: ${attrName}`); break; } }
     if (!cookie.domain && domainFromUrl) { cookie.domain = domainFromUrl.startsWith('www.') ? `.${domainFromUrl.substring(4)}` : `.${domainFromUrl}`; if (cookie.domain === '.') cookie.domain = domainFromUrl; logDebug(`[Cookie] Derived domain: ${cookie.domain}`); } else if (!cookie.domain) logWarn("[Cookie] Domain missing.");
@@ -470,7 +469,6 @@ const findArticleXPathAndExtract = async (url, debug = false) => {
             const llmPaths = await getLlmCandidateXPaths(htmlContent, snippets, retry > 0 ? feedback : []);
             if (!llmPaths?.length) { logWarn(`[Discovery] LLM no candidates attempt ${retry+1}.`); if (retry < MAX_LLM_RETRIES) { await new Promise(r=>setTimeout(r,3000)); continue; } else break; }
             const newPaths = llmPaths.filter(x => !tried.has(x?.trim()));
-            if (newPaths.length === 0) { logWarn(`[Discovery] LLM only old paths attempt ${retry+1}.`); if (retry < MAX_LLM_RETRIES) { await new Promise(r=>setTimeout(r,2000)); continue; } else break; }
             logInfo(`[Discovery] Validating ${newPaths.length} new paths...`); feedback = []; let bestScoreThis = -1;
             const promises = newPaths.map(async x => { const tx = x?.trim(); if (!tx) return null; tried.add(tx); const res = await queryXPathWithDetails(page, tx, TAGS_TO_COUNT); return res.count >= 0 ? { xpath: tx, ...res } : null; });
             const results = (await Promise.all(promises)).filter(r => r !== null);
@@ -561,9 +559,7 @@ const getContent = async (url) => {
     logError(`[Main] Discovery failed or aborted for ${domain}.`);
     // Clear stored XPath if fetch was attempted with it and discovery also failed
     if (attemptedStoredFetch && knownXpath) {
-       logWarn(`[Main] Both stored fetch (XPath: ${knownXpath}) and discovery failed. Clearing stored XPath.`);
-       try { const currentStorage = loadStorage(); if (currentStorage[domain]) { delete currentStorage[domain].xpath; saveStorage(currentStorage); } }
-       catch (storageError) { logError(`[Main Cleanup] Failed clear XPath:`, storageError); }
+       logWarn(`[Main] Both stored fetch (XPath: ${knownXpath}) and discovery failed.`);
     }
     return { success: false, error: `Failed extraction for ${domain}. Fetch/Discovery failed.` };
   }
