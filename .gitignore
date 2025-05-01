@@ -2,3 +2,4 @@
 .aider*
 .aider/
 node_modules/
+site_storage.json

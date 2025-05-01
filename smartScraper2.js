@@ -1,7 +1,7 @@
-// smartScraper2.js corrected
+// smartScraper2.js (Using site_storage.json, Save HTML Pre-Extract, Conditional DataDome Check)
 
 // --- Required Libraries ---
-require("dotenv").config();
+require("dotenv").config(); // Load .env first
 const axios = require("axios");
 const puppeteer = require("puppeteer-core");
 const fs = require("fs");
@@ -9,2376 +9,572 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const { URL } = require("url");
-// Removed: require('http') - No longer needed for bridge
-// Removed: require('socks') - No longer needed for bridge
 
 // --- Configuration ---
-const STORAGE_FILE_PATH = path.join(__dirname, "xpath_storage.json");
+const STORAGE_FILE_PATH = path.join(__dirname, "site_storage.json");
 const LLM_API_BASE_URL = "https://openrouter.ai/api/v1";
 const LLM_CHAT_COMPLETIONS_ENDPOINT = `${LLM_API_BASE_URL}/chat/completions`;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const LLM_MODEL = process.env.LLM_MODEL;
 const EXECUTABLE_PATH =
-  process.env.EXECUTABLE_PATH || "/usr/bin/google-chrome-stable";
-const EXTENSION_PATHS = process.env.EXTENSION_PATHS;
+  process.env.EXECUTABLE_PATH || "/usr/bin/google-chrome-stable"; // Adjust as needed
+const EXTENSION_PATHS = process.env.EXTENSION_PATHS; // Optional: Comma-separated paths
 
 // --- Proxy & 2Captcha Configuration ---
 const TWOCAPTCHA_API_KEY = process.env.TWOCAPTCHA_API_KEY;
-// *** IMPORTANT: Use an HTTP proxy URL now ***
-const MY_HTTP_PROXY = process.env.MY_HTTP_PROXY; // e.g., "http://user:pass@host:port"
-const DADADOME_DOMAINS = ["wsj.com"]; // Add domains known to use DataDome here
+const MY_HTTP_PROXY = process.env.MY_HTTP_PROXY; // Read directly
+const DADADOME_DOMAINS = ["wsj.com"]; // Domains needing CAPTCHA checks
 const TWOCAPTCHA_CREATE_TASK_URL = "https://api.2captcha.com/createTask";
 const TWOCAPTCHA_GET_RESULT_URL = "https://api.2captcha.com/getTaskResult";
-const CAPTCHA_POLL_INTERVAL = 10000;
-const CAPTCHA_SOLVE_TIMEOUT = 180000;
+const CAPTCHA_POLL_INTERVAL = 10000; // 10 seconds
+const CAPTCHA_SOLVE_TIMEOUT = 180000; // 3 minutes
 
-// Removed: Local Proxy Bridge Configuration (LOCAL_PROXY_HOST, LOCAL_PROXY_PORT, localProxyServer)
+// --- HTML Saving Configuration ---
+const SAVE_HTML_ON_FAILURE = process.env.SAVE_HTML_ON_FAILURE === "true"; // For critical failures
+const FAILED_HTML_DIR = path.join(__dirname, "failed_html_dumps");
+const SAVE_HTML_ON_SUCCESS_NAV = process.env.SAVE_HTML_ON_SUCCESS_NAV === "true"; // For saving before extraction attempt
+const SUCCESSFUL_HTML_DIR = path.join(__dirname, "successful_html_dumps"); // Directory for pre-extraction saves
 
-// Check required environment variables
-if (!OPENROUTER_API_KEY) {
-  console.error("FATAL: OPENROUTER_API_KEY environment variable is not set.");
-  process.exit(1);
-}
-if (!LLM_MODEL) {
-  console.error("FATAL: LLM_MODEL environment variable is not set.");
-  process.exit(1);
-}
-if (!fs.existsSync(EXECUTABLE_PATH)) {
-  console.warn(
-    `WARN: EXECUTABLE_PATH "${EXECUTABLE_PATH}" does not exist. Puppeteer might fail.`,
-  );
-}
-if (!TWOCAPTCHA_API_KEY) {
-  console.error("FATAL: TWOCAPTCHA_API_KEY environment variable is not set.");
-  process.exit(1);
-}
-// *** Check for the HTTP proxy variable ***
-if (!MY_HTTP_PROXY) {
-  console.error("FATAL: MY_HTTP_PROXY environment variable is not set.");
-  console.error(
-    "Please set MY_HTTP_PROXY in your .env file (e.g., http://user:pass@host:port)",
-  );
-  process.exit(1);
-}
-
-// --- Constants from find-xpath.js ---
+// --- Constants ---
 const SCORE_WEIGHTS = {
-  isSingleElement: 80,
-  paragraphCount: 1,
-  unwantedPenaltyRatio: -75,
-  isSemanticTag: 75,
-  hasDescriptiveIdOrClass: 30,
-  textDensity: 50,
-  linkDensityPenalty: -30,
-  mediaPresence: 25,
+  isSingleElement: 80, paragraphCount: 1, unwantedPenaltyRatio: -75, isSemanticTag: 75,
+  hasDescriptiveIdOrClass: 30, textDensity: 50, linkDensityPenalty: -30, mediaPresence: 25,
   xpathComplexityPenalty: -5,
 };
 const MIN_PARAGRAPH_THRESHOLD = 5;
-const TAGS_TO_COUNT = [
-  "p",
-  "nav",
-  "aside",
-  "footer",
-  "header",
-  "ul",
-  "ol",
-  "img",
-  "a",
-  "video",
-  "audio",
-  "picture",
-];
+const TAGS_TO_COUNT = [ "p", "nav", "aside", "footer", "header", "ul", "ol", "img", "a", "video", "audio", "picture", ];
 const UNWANTED_TAGS = ["nav", "aside", "footer", "header"];
 const MAX_LLM_RETRIES = 2;
 const ENABLE_DEBUG_LOGGING = process.env.DEBUG === "true";
-const SAVE_HTML_ON_FAILURE = process.env.SAVE_HTML_ON_FAILURE === "true";
-const FAILED_HTML_DIR = path.join(__dirname, "failed_html_dumps");
 
 // --- Logging Utility ---
 const logInfo = (...args) => console.log("[INFO]", ...args);
-const logDebug = (...args) => {
-  if (ENABLE_DEBUG_LOGGING) console.log("[DEBUG]", ...args);
-};
+const logDebug = (...args) => { if (ENABLE_DEBUG_LOGGING) console.log("[DEBUG]", ...args); };
 const logWarn = (...args) => console.warn("[WARN]", ...args);
 const logError = (...args) => console.error("[ERROR]", ...args);
 
+// --- Initial Environment Value Log ---
+logDebug(`[ENV INIT] MY_HTTP_PROXY read from environment: "${MY_HTTP_PROXY}"`);
+logDebug(`[ENV INIT] TWOCAPTCHA_API_KEY read: ${TWOCAPTCHA_API_KEY ? 'Exists' : 'MISSING'}`);
+logDebug(`[ENV INIT] DADADOME_DOMAINS: ${JSON.stringify(DADADOME_DOMAINS)}`);
+
+// Check required environment variables
+if (!OPENROUTER_API_KEY) { logError("FATAL: OPENROUTER_API_KEY missing."); process.exit(1); }
+if (!LLM_MODEL) { logError("FATAL: LLM_MODEL missing."); process.exit(1); }
+if (!fs.existsSync(EXECUTABLE_PATH)) logWarn(`WARN: EXECUTABLE_PATH "${EXECUTABLE_PATH}" not found.`);
+if (!TWOCAPTCHA_API_KEY && DADADOME_DOMAINS.length > 0) { logError("FATAL: TWOCAPTCHA_API_KEY needed for DADADOME_DOMAINS."); process.exit(1); }
+else if (!TWOCAPTCHA_API_KEY) logWarn("WARN: TWOCAPTCHA_API_KEY missing; CAPTCHA solving disabled.");
+if (!MY_HTTP_PROXY) { logError("FATAL: MY_HTTP_PROXY missing."); process.exit(1); }
+
+
 // --- Storage Management ---
 const loadStorage = () => {
+  logDebug("[Storage] Attempting to load storage...");
   try {
     if (fs.existsSync(STORAGE_FILE_PATH)) {
       const rawData = fs.readFileSync(STORAGE_FILE_PATH, "utf8");
-      return JSON.parse(rawData);
+      logDebug("[Storage] File exists, read content snippet:", rawData.substring(0, 200) + (rawData.length > 200 ? '...' : ''));
+      const parsed = JSON.parse(rawData);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        logDebug("[Storage] Parsed successfully as object.");
+        return parsed;
+      } else {
+        logWarn(`[Storage] File ${STORAGE_FILE_PATH} invalid structure. Resetting.`);
+        return {};
+      }
     }
-    logInfo(
-      `Storage file not found at ${STORAGE_FILE_PATH}. Starting with empty storage.`,
-    );
+    logInfo(`[Storage] File ${STORAGE_FILE_PATH} not found. Starting empty.`);
     return {};
   } catch (error) {
-    logError(
-      `Failed to load or parse storage file ${STORAGE_FILE_PATH}:`,
-      error,
-    );
+    logError(`[Storage] Failed load/parse ${STORAGE_FILE_PATH}:`, error);
+    logWarn("[Storage] Starting empty due to error.");
     return {};
   }
 };
 const saveStorage = (data) => {
+  logDebug("[Storage] Attempting to save storage...");
   try {
-    const jsonData = JSON.stringify(data, null, 2);
-    fs.writeFileSync(STORAGE_FILE_PATH, jsonData, "utf8");
-    logDebug("Storage saved successfully.");
-  } catch (error) {
-    logError(`Failed to save storage file ${STORAGE_FILE_PATH}:`, error);
-  }
+     if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+        logError("[Storage] Attempted save non-object data. Aborting.", data); return;
+     }
+    fs.writeFileSync(STORAGE_FILE_PATH, JSON.stringify(data, null, 2), "utf8");
+    logDebug("[Storage] Saved successfully.");
+  } catch (error) { logError(`[Storage] Failed save ${STORAGE_FILE_PATH}:`, error); }
 };
 const getDomainFromUrl = (urlString) => {
-  try {
-    const url = new URL(urlString);
-    let hostname = url.hostname;
-    if (hostname.startsWith("www.")) {
-      hostname = hostname.substring(4);
-    }
-    return hostname.toLowerCase();
-  } catch (error) {
-    logError(`Invalid URL format: ${urlString}`, error);
-    return null;
-  }
+    logDebug(`[Util] Getting domain from URL: ${urlString}`);
+    try { const hostname = new URL(urlString).hostname; const domain = hostname.startsWith("www.") ? hostname.substring(4).toLowerCase() : hostname.toLowerCase(); logDebug(`[Util] Domain result: ${domain}`); return domain; }
+    catch (error) { logError(`[Util] Invalid URL for domain extraction: ${urlString}`, error); return null; }
 };
 
-// Removed: parseSocks5ProxyString function
-// Removed: REMOTE_SOCKS_CONFIG variable
-
-// --- Updated Proxy Parsing Utility (ONLY for 2Captcha API call) ---
-/**
- * Parses an HTTP proxy string for 2Captcha API details.
- * @param {string} proxyString - e.g., "http://user:pass@host:port"
- * @returns {{ type: string, address: string, port: number, login?: string, password?: string } | null} Parsed proxy info or null on error.
- */
+// --- Proxy Parsing Utility ---
 const parseProxyStringFor2Captcha = (proxyString) => {
-  if (!proxyString) {
-    logError("[2Captcha Proxy Parse] Proxy string is empty.");
-    return null;
-  }
-  try {
-    const url = new URL(proxyString);
-    const type = url.protocol.replace(":", "").toLowerCase(); // 'http' or 'https'
-    if (type !== "http" && type !== "https") {
-      logError(
-        `[2Captcha Proxy Parse] Unsupported proxy type: ${type}. Only http/https is expected now.`,
-      );
-      return null;
+    logDebug(`[Parser Internal] Received string for 2Captcha parse: "${proxyString}" (Length: ${proxyString?.length})`);
+    if (!proxyString) { logError("[2Captcha Proxy Parse] Proxy string empty/null."); return null; }
+    try {
+        logDebug("[Parser Internal] Attempting: new URL(proxyString)...");
+        const url = new URL(proxyString);
+        logDebug("[Parser Internal] new URL() succeeded.");
+        const type = url.protocol.replace(":", "").toLowerCase();
+        if (type !== "http" && type !== "https") { logError(`[2Captcha Proxy Parse] Unsupported protocol: ${type}.`); return null; }
+        const address = url.hostname; if (!address) { logError(`[2Captcha Proxy Parse] Missing host: ${proxyString}`); return null; }
+        const defaultPort = type === "https" ? 443 : 80; let port = parseInt(url.port, 10) || defaultPort; if (isNaN(port) || port <= 0 || port > 65535) { logWarn(`[2Captcha Proxy Parse] Invalid port "${url.port}", using ${defaultPort}.`); port = defaultPort; }
+        const login = url.username ? decodeURIComponent(url.username) : undefined; const password = url.password ? decodeURIComponent(url.password) : undefined;
+        const result = { type: type.toUpperCase(), address, port, login, password };
+        logDebug(`[2Captcha Proxy Parse] Successfully parsed:`, { ...result, password: result.password ? '***' : undefined }); // Don't log password
+        return result;
+    } catch (error) {
+        logError(`[2Captcha Proxy Parse] CRITICAL ERROR during 'new URL()' or processing for string: "${proxyString}"`);
+        logError("[2Captcha Proxy Parse] Error Name:", error.name); logError("[2Captcha Proxy Parse] Error Message:", error.message); logError("[2Captcha Proxy Parse] Error Stack:", error.stack); return null;
     }
-
-    const address = url.hostname;
-    if (!address) {
-      logError(
-        `[2Captcha Proxy Parse] Invalid proxy format: Missing host in ${proxyString}`,
-      );
-      return null;
-    }
-
-    let port = parseInt(url.port, 10);
-    if (!port || isNaN(port)) {
-      const defaultPort = type === "https" ? 443 : 80;
-      logWarn(
-        `[2Captcha Proxy Parse] Port not specified or invalid in "${proxyString}". Defaulting to ${defaultPort} for ${type.toUpperCase()} for 2Captcha API call.`,
-      );
-      port = defaultPort;
-    }
-
-    const login = url.username ? decodeURIComponent(url.username) : undefined;
-    const password = url.password
-      ? decodeURIComponent(url.password)
-      : undefined;
-
-    logDebug(
-      `[2Captcha Proxy Parse] Parsed for API: type=${type.toUpperCase()}, address=${address}, port=${port}, login=${login ? "***" : "N/A"}`,
-    );
-    return { type: type.toUpperCase(), address, port, login, password }; // 2Captcha expects uppercase type like 'HTTP'
-  } catch (error) {
-    logError(
-      `[2Captcha Proxy Parse] Failed to parse proxy string "${proxyString}":`,
-      error,
-    );
-    return null;
-  }
 };
 
-// Parse ONLY for 2Captcha API usage using the HTTP proxy string
-const PROXY_INFO_FOR_2CAPTCHA = parseProxyStringFor2Captcha(MY_HTTP_PROXY);
-if (!PROXY_INFO_FOR_2CAPTCHA) {
-  logError(
-    "FATAL: Could not parse MY_HTTP_PROXY for 2Captcha API details. Please check the format in your .env file (e.g., http://user:pass@host:port).",
-  );
-  process.exit(1);
+// Parse proxy for 2Captcha use early and check
+let PROXY_INFO_FOR_2CAPTCHA = null;
+const needsCaptchaCheckPotentially = TWOCAPTCHA_API_KEY && DADADOME_DOMAINS.length > 0;
+logDebug(`[Proxy Check] Needs 2Captcha potentially? ${needsCaptchaCheckPotentially}`);
+if (needsCaptchaCheckPotentially) {
+    logDebug(`[Proxy Check] Attempting to parse MY_HTTP_PROXY for 2Captcha: "${MY_HTTP_PROXY}"`);
+    PROXY_INFO_FOR_2CAPTCHA = parseProxyStringFor2Captcha(MY_HTTP_PROXY);
+    if (!PROXY_INFO_FOR_2CAPTCHA) {
+      logError("FATAL: Failed to parse MY_HTTP_PROXY for 2Captcha usage. Check format and parser logs.");
+      process.exit(1); // Exit if parsing fails and 2Captcha might be needed
+    } else {
+        logDebug("[Proxy Check] MY_HTTP_PROXY parsed successfully for 2Captcha.");
+    }
 }
 
-// Removed: startLocalProxyServer function
-// Removed: stopLocalProxyServer function
+// --- HTML Saving Utilities ---
+const saveFullHtmlPreExtract = async (url, htmlContent, saveDirectory) => {
+    logDebug(`[Save HTML Pre-Extract] Check triggered for URL: ${url}`);
+    if (!SAVE_HTML_ON_SUCCESS_NAV) { logDebug("[Save HTML Pre-Extract] Saving disabled by config."); return; }
+    if (!htmlContent || typeof htmlContent !== 'string' || htmlContent.trim().length === 0) { logWarn("[Save HTML Pre-Extract] No valid HTML content provided."); return; }
+    const domain = getDomainFromUrl(url); if (!domain) { logWarn("[Save HTML Pre-Extract] No domain."); return; }
+    const safeDomain = domain.replace(/[^a-z0-9\-.]/gi, "_"); const now = new Date(); const dateString = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+    try { await fs.promises.mkdir(saveDirectory, { recursive: true }); const filePrefix = `${safeDomain}-${dateString}-`; const files = await fs.promises.readdir(saveDirectory); let maxCounter = 0; files.forEach(file => { if (file.startsWith(filePrefix) && file.endsWith(".html")) { const match = file.match(/-(\d{3})\.html$/); if (match?.[1]) { const counter = parseInt(match[1], 10); if (!isNaN(counter) && counter > maxCounter) maxCounter = counter; } } }); const nextCounter = (maxCounter + 1).toString().padStart(3, '0'); const filename = `${filePrefix}${nextCounter}.html`; const filePath = path.join(saveDirectory, filename); logInfo(`[Save HTML Pre-Extract] Saving full HTML for ${domain} to: ${filePath}`); await fs.promises.writeFile(filePath, htmlContent, "utf8"); logDebug(`[Save HTML Pre-Extract] Saved OK.`); }
+    catch (error) { logError(`[Save HTML Pre-Extract] Failed save for ${url}:`, error); }
+};
+const saveHtmlOnFailure = async (url, html) => {
+    logDebug(`[Save Fail HTML] Check triggered for URL: ${url}`);
+    if (!SAVE_HTML_ON_FAILURE) { logDebug("[Save Fail HTML] Saving disabled by config."); return; }
+    if (!html || typeof html !== 'string' || html.trim().length === 0) { logWarn("[Save Fail HTML] No valid HTML content."); return; }
+    try { await fs.promises.mkdir(FAILED_HTML_DIR, { recursive: true }); const h = crypto.createHash("md5").update(url).digest("hex").substring(0, 8); const t = new Date().toISOString().replace(/[:.]/g, "-"); const d = getDomainFromUrl(url)?.replace(/[^a-z0-9\-.]/gi, "_") || "unknown"; const f = `failed_${d}_${t}_${h}.html`; const p = path.join(FAILED_HTML_DIR, f); logInfo(`[Save Fail HTML] Saving to ${p}`); await fs.promises.writeFile(p, html, "utf8"); }
+    catch (e) { logError(`[Save Fail HTML] Failed save for ${url}: ${e.message}`); }
+};
 
-// --- Puppeteer and Extraction Logic ---
-
-/**
- * Launches Puppeteer browser instance using the DIRECT HTTP proxy.
- * Handles proxy authentication setup.
- * @param {boolean} debug - Enable debug logging.
- * @returns {Promise<{ browser: puppeteer.Browser, userDataDir: string }>} - Browser instance and user data directory path.
- * @throws {Error} - If browser launch fails or proxy parsing fails.
- */
+// --- Puppeteer Launch and Cleanup ---
 const launchPuppeteerBrowser = async (debug = false) => {
-  let browser = null;
-  let userDataDir = null;
+  logDebug("[LAUNCH] Attempting to launch browser...");
+  let browser = null, userDataDir = null;
   try {
-    let extensionArgs = [];
-    if (EXTENSION_PATHS) {
-      logDebug(`[LAUNCH] Preparing extensions from: ${EXTENSION_PATHS}`);
-      extensionArgs = [
-        `--disable-extensions-except=${EXTENSION_PATHS}`,
-        `--load-extension=${EXTENSION_PATHS}`,
-      ];
-    }
-    userDataDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "puppeteer-user-data-"),
-    );
-    logDebug(`[LAUNCH] Created temporary user data dir: ${userDataDir}`);
-
-    // --- Parse HTTP Proxy for Puppeteer Launch and Authentication ---
-    const proxyUrlString = MY_HTTP_PROXY;
-    if (!proxyUrlString) {
-      // Should be caught earlier, but double-check
-      throw new Error("MY_HTTP_PROXY environment variable is not set!");
-    }
-
-    let proxyHostPort = null;
-    let proxyCredentials = null;
+    let extensionArgs = []; if (EXTENSION_PATHS) { logDebug(`[LAUNCH] Extensions: ${EXTENSION_PATHS}`); extensionArgs = [ `--disable-extensions-except=${EXTENSION_PATHS}`, `--load-extension=${EXTENSION_PATHS}` ]; }
+    userDataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "puppeteer-user-data-")); logDebug(`[LAUNCH] User data dir: ${userDataDir}`);
+    let proxyHostPort = null, proxyCredentials = null;
     try {
-      const parsedProxyUrl = new URL(proxyUrlString);
-      // Determine default port based on protocol if not specified
-      const defaultPort = parsedProxyUrl.protocol === "https:" ? 443 : 80;
-      const port = parsedProxyUrl.port || defaultPort;
-      proxyHostPort = `${parsedProxyUrl.hostname}:${port}`;
-
-      if (parsedProxyUrl.username) {
-        proxyCredentials = {
-          username: decodeURIComponent(parsedProxyUrl.username),
-          password: decodeURIComponent(parsedProxyUrl.password || ""),
-        };
-      }
-      logInfo(
-        `[LAUNCH] Configuring Puppeteer proxy server: ${proxyHostPort}` +
-          `${proxyCredentials ? " (Authentication will be handled via page.authenticate)" : ""}`,
-      );
-    } catch (parseError) {
-      logError(
-        `[LAUNCH] Failed to parse MY_HTTP_PROXY: ${proxyUrlString}`,
-        parseError,
-      );
-      throw new Error(`Invalid MY_HTTP_PROXY format: ${proxyUrlString}`);
-    }
-    // --- End Proxy Parsing ---
-
-    const launchArgs = [
-      "--no-sandbox",
-      `--proxy-server=${proxyHostPort}`, // *** CORRECT: Use only host:port ***
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--disable-gpu",
-      // "--use-gl=swiftshader",
-      "--window-size=1280,720",
-      // "--font-render-hinting=none",
-      "--ignore-certificate-errors", // May still be needed depending on proxy/target certs
-      ...extensionArgs,
-    ];
-    logDebug("[LAUNCH] Puppeteer launch arguments:", launchArgs);
-    logDebug("[LAUNCH] Initializing browser instance...");
-    browser = await puppeteer.launch({
-      executablePath: EXECUTABLE_PATH,
-      headless: "new", // Keep modern headless
-      userDataDir,
-      args: launchArgs,
-      dumpio: debug && process.env.NODE_ENV === "development",
-      timeout: 90000, // Keep increased timeout
-      ignoreHTTPSErrors: true, // Keep corresponding flag
-    });
-    logDebug("[LAUNCH] Browser launched successfully.");
-
-    // *** Store credentials on the browser context for page.authenticate later ***
-    const browserContext = browser.defaultBrowserContext();
-    browserContext.proxyCredentials = proxyCredentials; // Will be null if no auth needed
-
+        logDebug(`[LAUNCH] Parsing proxy for Puppeteer: "${MY_HTTP_PROXY}"`);
+        const parsedProxyUrl = new URL(MY_HTTP_PROXY);
+        const defaultPort = parsedProxyUrl.protocol === 'https:' ? 443 : 80; const port = parsedProxyUrl.port || defaultPort; proxyHostPort = `${parsedProxyUrl.hostname}:${port}`; if (parsedProxyUrl.username) proxyCredentials = { username: decodeURIComponent(parsedProxyUrl.username), password: decodeURIComponent(parsedProxyUrl.password || "") };
+        logInfo(`[LAUNCH] Puppeteer Proxy: ${proxyHostPort}${proxyCredentials ? " (Auth needed)" : ""}`);
+    } catch (parseError) { logError(`[LAUNCH] CRITICAL: Failed parsing MY_HTTP_PROXY for Puppeteer: ${MY_HTTP_PROXY}`, parseError); throw parseError; }
+    const launchArgs = [ "--no-sandbox", `--proxy-server=${proxyHostPort}`, "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-accelerated-2d-canvas", "--disable-gpu", "--window-size=1366,768", "--ignore-certificate-errors", ...extensionArgs ];
+    logDebug("[LAUNCH] Launch Args:", launchArgs);
+    browser = await puppeteer.launch({ executablePath: EXECUTABLE_PATH, headless: "new", userDataDir, args: launchArgs, dumpio: debug && process.env.NODE_ENV === "development", timeout: 90000, ignoreHTTPSErrors: true });
+    logDebug("[LAUNCH] Browser launched OK."); browser.defaultBrowserContext().proxyCredentials = proxyCredentials;
     return { browser, userDataDir };
-  } catch (error) {
-    logError("[LAUNCH] Failed to launch browser:", error.message);
-    if (userDataDir) {
-      try {
-        fs.rmSync(userDataDir, { recursive: true, force: true });
-        logDebug("[LAUNCH] Cleaned up user data dir after launch failure.");
-      } catch (e) {
-        if (debug) logError("[LAUNCH] Error cleaning up user data dir:", e);
-      }
-    }
-    throw error; // Re-throw the error
-  }
+  } catch (error) { logError("[LAUNCH] Browser launch failed:", error); if (userDataDir) { try { await fs.promises.rm(userDataDir, { recursive: true, force: true }); } catch {} } throw error; }
 };
-
-/**
- * Cleans up Puppeteer resources (page, browser, user data directory).
- * @param {puppeteer.Page | null} page
- * @param {puppeteer.Browser | null} browser
- * @param {string | null} userDataDir
- * @param {boolean} debug
- */
 const cleanupPuppeteer = async (page, browser, userDataDir, debug = false) => {
-  logDebug("[CLEANUP] Starting Puppeteer cleanup...");
-  if (page) {
-    try {
-      if (!page.isClosed()) {
-        await page.close();
-        logDebug("[CLEANUP] Page closed.");
-      } else {
-        logDebug("[CLEANUP] Page was already closed.");
-      }
-    } catch (e) {
-      if (debug) logError("[CLEANUP] Error closing page:", e.message);
-    }
-  }
-  if (browser) {
-    try {
-      if (browser.isConnected()) {
-        await new Promise((resolve) => setTimeout(resolve, 500)); // Short delay before closing
-        await browser.close();
-        logDebug("[CLEANUP] Browser closed.");
-      } else {
-        logDebug("[CLEANUP] Browser was already disconnected.");
-      }
-    } catch (e) {
-      if (debug) logError("[CLEANUP] Error closing browser:", e.message);
-    }
-  }
-  if (userDataDir) {
-    logDebug(`[CLEANUP] Removing user data dir: ${userDataDir}`);
-    try {
-      // Use async rm for potentially better handling on busy systems
-      await fs.promises.rm(userDataDir, { recursive: true, force: true });
-      logDebug("[CLEANUP] User data dir removed.");
-    } catch (err) {
-      if (err.code !== "ENOENT") {
-        // Ignore if already deleted
-        if (debug)
-          logError(
-            "[CLEANUP] Failed to remove user data dir:",
-            userDataDir,
-            err,
-          );
-      } else {
-        logDebug("[CLEANUP] User data dir already removed or never existed.");
-      }
-    }
-  }
-  logDebug("[CLEANUP] Puppeteer cleanup finished.");
+  logDebug("[CLEANUP] Starting...");
+  if (page && !page.isClosed()) { try { await page.close(); logDebug("[CLEANUP] Page closed."); } catch (e) { if (debug) logError("[CLEANUP] Error closing page:", e.message); } } else if (page?.isClosed()) logDebug("[CLEANUP] Page already closed.");
+  if (browser && browser.isConnected()) { try { await browser.close(); logDebug("[CLEANUP] Browser closed."); } catch (e) { if (debug) logError("[CLEANUP] Error closing browser:", e.message); } } else if (browser) logDebug("[CLEANUP] Browser disconnected.");
+  if (userDataDir) { logDebug(`[CLEANUP] Removing dir: ${userDataDir}`); try { await fs.promises.rm(userDataDir, { recursive: true, force: true }); logDebug("[CLEANUP] User data dir removed."); } catch (err) { if (err.code !== "ENOENT" && debug) logError("[CLEANUP] Failed rm dir:", userDataDir, err); } }
+  logDebug("[CLEANUP] Finished.");
 };
 
-// --- DataDome CAPTCHA Solver ---
-// Uses PROXY_INFO_FOR_2CAPTCHA which is parsed from MY_HTTP_PROXY
+// --- 2Captcha Solver ---
 const solveDataDomeWith2Captcha = async (websiteURL, captchaUrl, userAgent) => {
-  logInfo(`[2CAPTCHA] Attempting to solve DataDome for ${websiteURL}`);
-  logDebug(`[2CAPTCHA] Captcha URL: ${captchaUrl}`);
-  logDebug(`[2CAPTCHA] User Agent: ${userAgent}`);
-
-  // Use the specifically parsed info for 2Captcha API call
-  const taskPayload = {
-    type: "DataDomeSliderTask",
-    websiteURL: websiteURL,
-    captchaUrl: captchaUrl,
-    userAgent: userAgent,
-    proxyType: PROXY_INFO_FOR_2CAPTCHA.type, // Should be 'HTTP' or 'HTTPS' now
-    proxyAddress: PROXY_INFO_FOR_2CAPTCHA.address,
-    proxyPort: PROXY_INFO_FOR_2CAPTCHA.port,
-    ...(PROXY_INFO_FOR_2CAPTCHA.login && {
-      proxyLogin: PROXY_INFO_FOR_2CAPTCHA.login,
-    }),
-    ...(PROXY_INFO_FOR_2CAPTCHA.password && {
-      proxyPassword: PROXY_INFO_FOR_2CAPTCHA.password,
-    }),
-  };
-
-  const requestBody = {
-    clientKey: TWOCAPTCHA_API_KEY,
-    task: taskPayload,
-  };
-  if (ENABLE_DEBUG_LOGGING) {
-    const debugBody = { ...requestBody };
-    if (debugBody.task.proxyPassword) debugBody.task.proxyPassword = "***";
-    logDebug(
-      "[2CAPTCHA] Sending createTask request with body:",
-      JSON.stringify(debugBody, null, 2),
-    );
-  }
-
-  let taskId;
-  try {
-    const createTaskResponse = await axios.post(
-      TWOCAPTCHA_CREATE_TASK_URL,
-      requestBody,
-      { timeout: 30000 },
-    );
-    logDebug("[2CAPTCHA] createTask response:", createTaskResponse.data);
-    if (createTaskResponse.data.errorId !== 0) {
-      logError(
-        `[2CAPTCHA] createTask failed: ${createTaskResponse.data.errorCode} - ${createTaskResponse.data.errorDescription}`,
-      );
-      return null;
-    }
-    taskId = createTaskResponse.data.taskId;
-    logInfo(`[2CAPTCHA] Task created successfully. Task ID: ${taskId}`);
-  } catch (error) {
-    logError("[2CAPTCHA] Error sending createTask request:", error.message);
-    if (error.response)
-      logError("[2CAPTCHA] Response data:", error.response.data);
-    return null;
-  }
-
-  const startTime = Date.now();
-  while (Date.now() - startTime < CAPTCHA_SOLVE_TIMEOUT) {
-    logDebug(`[2CAPTCHA] Polling for result for Task ID: ${taskId}...`);
-    try {
-      await new Promise((resolve) =>
-        setTimeout(resolve, CAPTCHA_POLL_INTERVAL),
-      );
-      const getResultResponse = await axios.post(
-        TWOCAPTCHA_GET_RESULT_URL,
-        { clientKey: TWOCAPTCHA_API_KEY, taskId: taskId },
-        { timeout: 20000 },
-      );
-      logDebug("[2CAPTCHA] getTaskResult response:", getResultResponse.data);
-      if (getResultResponse.data.errorId !== 0) {
-        logError(
-          `[2CAPTCHA] getTaskResult failed: ${getResultResponse.data.errorCode} - ${getResultResponse.data.errorDescription}`,
-        );
-        if (
-          getResultResponse.data.errorCode === "ERROR_CAPTCHA_UNSOLVABLE" ||
-          getResultResponse.data.errorCode === "ERR_PROXY_CONNECTION_FAILED"
-        ) {
-          logError(
-            "[2CAPTCHA] CAPTCHA unsolvable or proxy failed according to 2Captcha worker. Check proxy validity/credentials sent to 2Captcha.",
-          );
-        }
-        return null; // Stop polling on error
-      }
-      const status = getResultResponse.data.status;
-      if (status === "ready") {
-        logInfo(
-          `[2CAPTCHA] CAPTCHA solved successfully for Task ID: ${taskId}`,
-        );
-        const solutionCookie = getResultResponse.data.solution?.cookie;
-        if (!solutionCookie) {
-          logError(
-            "[2CAPTCHA] Solution found but cookie is missing in response.",
-          );
-          return null;
-        }
-        logDebug("[2CAPTCHA] Received Cookie:", solutionCookie);
-        return solutionCookie;
-      } else if (status === "processing") {
-        logDebug("[2CAPTCHA] CAPTCHA is still processing...");
-      } else {
-        logWarn(`[2CAPTCHA] Unknown status received: ${status}`);
-      }
-    } catch (error) {
-      logError(
-        `[2CAPTCHA] Error polling getTaskResult for Task ID ${taskId}:`,
-        error.message,
-      );
-      if (error.response)
-        logError("[2CAPTCHA] Response data:", error.response.data);
-      // Don't immediately exit on polling error, maybe temporary network issue
-      await new Promise((resolve) =>
-        setTimeout(resolve, CAPTCHA_POLL_INTERVAL / 2),
-      );
-    }
-  }
-
-  logError(
-    `[2CAPTCHA] CAPTCHA solving timed out after ${CAPTCHA_SOLVE_TIMEOUT / 1000} seconds for Task ID: ${taskId}.`,
-  );
-  return null;
+  if (!TWOCAPTCHA_API_KEY || !PROXY_INFO_FOR_2CAPTCHA) { logError("[2CAPTCHA] Missing API Key/Proxy Info."); return { success: false, reason: 'CONFIG_ERROR' }; }
+  logInfo(`[2CAPTCHA] Solving for ${websiteURL}`); const taskPayload = { type: "DataDomeSliderTask", websiteURL, captchaUrl, userAgent, proxyType: PROXY_INFO_FOR_2CAPTCHA.type, proxyAddress: PROXY_INFO_FOR_2CAPTCHA.address, proxyPort: PROXY_INFO_FOR_2CAPTCHA.port, ...(PROXY_INFO_FOR_2CAPTCHA.login && { proxyLogin: PROXY_INFO_FOR_2CAPTCHA.login }), ...(PROXY_INFO_FOR_2CAPTCHA.password && { proxyPassword: PROXY_INFO_FOR_2CAPTCHA.password }) }; const requestBody = { clientKey: TWOCAPTCHA_API_KEY, task: taskPayload };
+  if (ENABLE_DEBUG_LOGGING) { const debugBody = JSON.parse(JSON.stringify(requestBody)); if (debugBody.task.proxyPassword) debugBody.task.proxyPassword = "***"; logDebug("[2CAPTCHA] Sending task:", JSON.stringify(debugBody, null, 2)); }
+  let taskId; try { const createTaskResponse = await axios.post(TWOCAPTCHA_CREATE_TASK_URL, requestBody, { timeout: 30000 }); logDebug("[2CAPTCHA] Create response:", createTaskResponse.data); if (createTaskResponse.data.errorId !== 0) { logError(`[2CAPTCHA] Create failed: ${createTaskResponse.data.errorCode} - ${createTaskResponse.data.errorDescription}`); return { success: false, reason: 'API_ERROR', details: createTaskResponse.data.errorCode }; } taskId = createTaskResponse.data.taskId; logInfo(`[2CAPTCHA] Task ID: ${taskId}`); } catch (error) { logError("[2CAPTCHA] Create request error:", error.message); return { success: false, reason: 'API_ERROR', details: error.message }; }
+  const startTime = Date.now(); while (Date.now() - startTime < CAPTCHA_SOLVE_TIMEOUT) { logDebug(`[2CAPTCHA] Polling Task ID: ${taskId}...`); try { await new Promise(r => setTimeout(r, CAPTCHA_POLL_INTERVAL)); const getResultResponse = await axios.post(TWOCAPTCHA_GET_RESULT_URL, { clientKey: TWOCAPTCHA_API_KEY, taskId }, { timeout: 20000 }); logDebug("[2CAPTCHA] Get response:", getResultResponse.data); if (getResultResponse.data.errorId !== 0) { const errorCode = getResultResponse.data.errorCode; logError(`[2CAPTCHA] Get failed: ${errorCode} - ${getResultResponse.data.errorDescription}`); if (errorCode === 'ERROR_CAPTCHA_UNSOLVABLE') return { success: false, reason: 'UNSOLVABLE' }; else if (errorCode === 'ERR_PROXY_CONNECTION_FAILED') return { success: false, reason: 'PROXY_ERROR' }; else return { success: false, reason: 'API_ERROR', details: errorCode }; } const status = getResultResponse.data.status; if (status === "ready") { logInfo(`[2CAPTCHA] Solved Task ID: ${taskId}`); const solutionCookie = getResultResponse.data.solution?.cookie; if (!solutionCookie) { logError("[2CAPTCHA] Solution missing cookie."); return { success: false, reason: 'API_ERROR', details: 'Missing cookie' }; } logDebug("[2CAPTCHA] Cookie:", solutionCookie.substring(0, 50) + '...'); return { success: true, cookie: solutionCookie }; } else if (status === "processing") logDebug("[2CAPTCHA] Still processing..."); else logWarn(`[2CAPTCHA] Unknown status: ${status}`); } catch (error) { logError(`[2CAPTCHA] Poll error Task ID ${taskId}:`, error.message); await new Promise(r => setTimeout(r, CAPTCHA_POLL_INTERVAL / 2)); } }
+  logError(`[2CAPTCHA] Timeout Task ID: ${taskId}.`); return { success: false, reason: 'TIMEOUT' };
 };
 
-// --- formatDataDomeCookie function remains the same ---
+// --- Cookie Formatting ---
 const formatDataDomeCookie = (cookieString, targetUrl) => {
-  logDebug(`[Cookie] Formatting cookie string: ${cookieString}`);
-  if (!cookieString || !cookieString.includes("=")) return null;
-  try {
-    const parts = cookieString.split(";").map((part) => part.trim());
-    const [name, ...valueParts] = parts[0].split("=");
-    const value = valueParts.join("=");
-    if (!name || !value) {
-      logError(
-        "[Cookie] Failed to parse name/value from cookie string:",
-        parts[0],
-      );
-      return null;
-    }
-    const cookie = {
-      name: name.trim(),
-      value: value.trim(),
-      url: targetUrl, // Needs URL for domain/path context if not provided
-      path: "/",
-      secure: false,
-      httpOnly: false,
-      sameSite: "Lax",
-    };
-
-    for (let i = 1; i < parts.length; i++) {
-      const [attrNameInput, ...attrValueParts] = parts[i].split("=");
-      const attrName = attrNameInput.trim().toLowerCase();
-      const attrValue = attrValueParts.join("=").trim();
-
-      switch (attrName) {
-        case "path":
-          cookie.path = attrValue || "/";
-          break;
-        case "domain":
-          // Ensure domain starts with a dot for subdomain matching if necessary
-          cookie.domain = attrValue.startsWith(".")
-            ? attrValue
-            : `.${attrValue}`;
-          break;
-        case "secure":
-          cookie.secure = true;
-          break;
-        case "samesite":
-          const validSameSite = ["Lax", "Strict", "None"];
-          const capitalizedSameSite =
-            attrValue.charAt(0).toUpperCase() +
-            attrValue.slice(1).toLowerCase();
-          if (validSameSite.includes(capitalizedSameSite)) {
-            cookie.sameSite = capitalizedSameSite;
-          } else {
-            logWarn(
-              `[Cookie] Unknown or invalid SameSite value: ${attrValue}. Using default 'Lax'.`,
-            );
-            cookie.sameSite = "Lax"; // Default or keep existing
-          }
-          break;
-        case "httponly":
-          cookie.httpOnly = true;
-          break;
-        case "expires":
-          try {
-            const expiryDate = new Date(attrValue);
-            if (!isNaN(expiryDate.getTime())) {
-              cookie.expires = Math.floor(expiryDate.getTime() / 1000);
-            } else {
-              logWarn(`[Cookie] Could not parse expires date: ${attrValue}`);
-            }
-          } catch (dateErr) {
-            logWarn(`[Cookie] Could not parse expires date: ${attrValue}`);
-          }
-          break;
-        case "max-age":
-          try {
-            const maxAgeSeconds = parseInt(attrValue, 10);
-            if (!isNaN(maxAgeSeconds)) {
-              cookie.expires = Math.floor(Date.now() / 1000) + maxAgeSeconds;
-            } else {
-              logWarn(
-                `[Cookie] Could not parse max-age as number: ${attrValue}`,
-              );
-            }
-          } catch (numErr) {
-            logWarn(`[Cookie] Could not parse max-age: ${attrValue}`);
-          }
-          break;
-        default:
-          // Ignore unknown attributes like 'priority' etc.
-          logDebug(`[Cookie] Ignoring unknown cookie attribute: ${attrName}`);
-          break;
-      }
-    }
-
-    // If domain wasn't explicitly set, derive it from the targetUrl
-    if (!cookie.domain) {
-      try {
-        const parsedUrl = new URL(targetUrl);
-        // Derive domain correctly: for 'www.example.com', use '.example.com' or 'www.example.com'
-        // Using '.hostname' is safer for subdomain matching.
-        cookie.domain = parsedUrl.hostname.startsWith("www.")
-          ? `.${parsedUrl.hostname.substring(4)}`
-          : `.${parsedUrl.hostname}`;
-
-        // Handle cases like bare domains (e.g., localhost, domain.local)
-        if (cookie.domain === ".") {
-          cookie.domain = parsedUrl.hostname; // Use the hostname directly if it doesn't look like a public domain
-        }
-        logDebug(`[Cookie] Derived domain from URL: ${cookie.domain}`);
-      } catch (urlError) {
-        logError(
-          `[Cookie] Could not parse target URL to derive domain: ${targetUrl}`,
-          urlError,
-        );
-        // Maybe don't fail entirely, let Puppeteer decide if domain is needed?
-        // Setting domain to null might be better if derivation fails.
-        cookie.domain = undefined;
-      }
-    }
-
-    // Final check: if sameSite is None, secure must be true
-    if (cookie.sameSite === "None" && !cookie.secure) {
-      logWarn(
-        "[Cookie] SameSite=None requires Secure attribute. Forcing secure=true.",
-      );
-      cookie.secure = true;
-    }
-
-    logDebug("[Cookie] Formatted cookie object:", cookie);
-    return cookie;
-  } catch (error) {
-    logError("[Cookie] Error parsing cookie string:", cookieString, error);
-    return null;
-  }
+  logDebug(`[Cookie] Formatting: ${cookieString.substring(0, 50)}...`); if (!cookieString?.includes("=")) return null;
+  try { const parts = cookieString.split(";").map(p => p.trim()); const [name, ...valueParts] = parts[0].split("="); const value = valueParts.join("="); if (!name || !value) { logError("[Cookie] Bad name/value:", parts[0]); return null; } let domainFromUrl = null; try { domainFromUrl = new URL(targetUrl).hostname; } catch {} const cookie = { name: name.trim(), value: value.trim(), url: targetUrl, domain: undefined, path: "/", secure: false, httpOnly: false, sameSite: "Lax", expires: undefined };
+    for (let i = 1; i < parts.length; i++) { const [attrNameInput, ...attrValueParts] = parts[i].split("="); const attrName = attrNameInput.trim().toLowerCase(); const attrValue = attrValueParts.join("=").trim(); switch (attrName) { case "path": cookie.path = attrValue || "/"; break; case "domain": cookie.domain = attrValue.startsWith(".") ? attrValue : `.${attrValue}`; break; case "secure": cookie.secure = true; break; case "samesite": const validSS = ["Lax", "Strict", "None"]; const capSS = attrValue.charAt(0).toUpperCase() + attrValue.slice(1).toLowerCase(); cookie.sameSite = validSS.includes(capSS) ? capSS : "Lax"; break; case "httponly": cookie.httpOnly = true; break; case "expires": try { const expiryDate = new Date(attrValue); if (!isNaN(expiryDate.getTime())) cookie.expires = Math.floor(expiryDate.getTime() / 1000); else logWarn(`[Cookie] Bad expires: ${attrValue}`); } catch { logWarn(`[Cookie] Bad expires: ${attrValue}`); } break; case "max-age": try { const maxAgeSec = parseInt(attrValue, 10); if (!isNaN(maxAgeSec)) cookie.expires = Math.floor(Date.now() / 1000) + maxAgeSec; else logWarn(`[Cookie] Bad max-age: ${attrValue}`); } catch { logWarn(`[Cookie] Bad max-age: ${attrValue}`); } break; default: logDebug(`[Cookie] Ignoring attr: ${attrName}`); break; } }
+    if (!cookie.domain && domainFromUrl) { cookie.domain = domainFromUrl.startsWith('www.') ? `.${domainFromUrl.substring(4)}` : `.${domainFromUrl}`; if (cookie.domain === '.') cookie.domain = domainFromUrl; logDebug(`[Cookie] Derived domain: ${cookie.domain}`); } else if (!cookie.domain) logWarn("[Cookie] Domain missing.");
+    if (cookie.sameSite === 'None' && !cookie.secure) { logWarn("[Cookie] SameSite=None needs Secure; forcing."); cookie.secure = true; }
+    logDebug("[Cookie] Formatted object:", cookie); return cookie;
+  } catch (error) { logError("[Cookie] Parsing error:", cookieString, error); return null; }
 };
 
+// --- DataDome Handling Logic ---
+const handleDataDomeIfNeeded = async (page, url, userAgent, debug = false) => {
+    logDebug(`[DataDome] handleDataDomeIfNeeded called for: ${url}`);
+    const domain = getDomainFromUrl(url);
+    const requiresCheck = DADADOME_DOMAINS.includes(domain);
+    logDebug(`[DataDome] Domain: ${domain}, Requires Check: ${requiresCheck}, API Key Set: ${!!TWOCAPTCHA_API_KEY}`);
+
+    if (requiresCheck && !TWOCAPTCHA_API_KEY) { logWarn(`[DataDome] ${domain} needs check, but no API key. Skipping.`); return true; }
+    if (!requiresCheck) { logDebug(`[DataDome] ${domain} not in list. Skipping.`); return true; }
+
+    logInfo(`[DataDome] Checking ${domain} for URL: ${url}`);
+    try {
+        // Note: Initial navigation happens *before* this function is called in the new logic
+        logDebug("[DataDome] Checking iframe (assuming navigation already happened)...");
+        let captchaUrl = null;
+        try {
+            const iframeSelector = 'iframe[src*="captcha-delivery.com"], iframe[src*="geo.captcha-delivery.com"]';
+            logDebug(`[DataDome] Waiting for selector: ${iframeSelector}`);
+            // Reduce wait time here as page should already be loaded somewhat
+            await page.waitForSelector(iframeSelector, { timeout: 20000, visible: true }).catch(() => logDebug("[DataDome] iframe selector not visible/found in time (post-nav)."));
+            const captchaFrameElement = await page.$(iframeSelector);
+            if (captchaFrameElement) {
+                captchaUrl = await page.evaluate(el => el.getAttribute("src"), captchaFrameElement);
+                logDebug(`[DataDome] iframe src attribute: ${captchaUrl}`);
+                if (captchaUrl) logInfo("[DataDome] Found CAPTCHA iframe post-navigation.");
+                else logWarn("[DataDome] iframe src missing post-navigation.");
+            } else { logDebug("[DataDome] iframe selector found no element post-navigation."); }
+        } catch (error) { logWarn(`[DataDome] iframe detect error post-navigation: ${error.message}. Checking content.`); }
+
+        if (!captchaUrl) {
+            logDebug("[DataDome] No captchaUrl found post-navigation, checking page content...");
+            const pageTitle = (await page.title())?.toLowerCase() || ""; const bodyText = await page.evaluate(() => document.body?.innerText?.toLowerCase() || ""); const blockedIndicators = ["blocked", "enable javascript", "checking browser", "access denied", "verify human"];
+            logDebug(`[DataDome] Post-Nav Page Title: ${pageTitle.substring(0,100)}, Body Text Snippet: ${(bodyText || '').substring(0, 200)}`);
+            if (blockedIndicators.some(ind => pageTitle.includes(ind) || bodyText.includes(ind))) { logError(`[DataDome] Page content indicates blocked post-navigation.`); return false; }
+            else { logInfo("[DataDome] No CAPTCHA iframe or block indicators found post-navigation. Assuming OK."); return true; }
+        }
+        logDebug(`[DataDome] captchaUrl to use: ${captchaUrl}`);
+
+        try { const fullCaptchaUrl = new URL(captchaUrl, url); const tParam = fullCaptchaUrl.searchParams.get("t"); logDebug(`[DataDome] t param: ${tParam}`); if (tParam === "bv") { logError(`[DataDome] IP banned (t=bv).`); return false; } if (tParam !== "fe") logWarn(`[DataDome] Unexpected t param: ${tParam}.`); } catch (e) { logWarn("[DataDome] Error parsing t param:", e.message); }
+
+        logDebug("[DataDome] Calling solveDataDomeWith2Captcha...");
+        const captchaResult = await solveDataDomeWith2Captcha(url, captchaUrl, userAgent);
+        logDebug("[DataDome] solveDataDomeWith2Captcha result:", captchaResult);
+
+        if (!captchaResult.success) { logError(`[DataDome] CAPTCHA solve failed: ${captchaResult.reason}`); return false; }
+
+        const dataDomeCookieString = captchaResult.cookie;
+        logDebug("[DataDome] Formatting solved cookie...");
+        const parsedCookie = formatDataDomeCookie(dataDomeCookieString, url);
+
+        if (parsedCookie?.name && parsedCookie?.value) {
+            logInfo(`[DataDome] Storing solved cookie: Name=${parsedCookie.name}`);
+            try { const storageData = loadStorage(); let domainEntry = storageData[domain] || {}; domainEntry.cookie_name = parsedCookie.name; domainEntry.cookie_value = parsedCookie.value; storageData[domain] = domainEntry; saveStorage(storageData); logDebug(`[DataDome] Cookie info saved for ${domain}.`); }
+            catch (storageError) { logError(`[DataDome] Failed save solved cookie:`, storageError); }
+        } else { logWarn("[DataDome] Could not parse solved cookie, skipping storage."); }
+
+        if (!parsedCookie) { logError("[DataDome] Cannot set cookie, parsing failed."); return false; }
+        try { logInfo("[DataDome] Setting cookie in browser..."); await page.setCookie(parsedCookie); logInfo("[DataDome] Cookie set OK."); }
+        catch (error) { logError("[DataDome] Failed set cookie in browser:", error); logDebug("[DataDome] Problematic cookie:", parsedCookie); return false; }
+
+        logInfo("[DataDome] Reloading page after CAPTCHA solve...");
+        try { await page.reload({ waitUntil: "networkidle0", timeout: 60000 }); logInfo("[DataDome] Reloaded OK."); }
+        catch (reloadError) { logError("[DataDome] Reload error:", reloadError); return false; }
+
+        const reloadedTitle = (await page.title())?.toLowerCase() || ""; const reloadedBodyText = await page.evaluate(() => document.body?.innerText?.toLowerCase() || ""); const blockedIndicatorsAfter = ["blocked", "enable javascript", "checking browser", "access denied", "verify human"]; if (blockedIndicatorsAfter.some(ind => reloadedTitle.includes(ind) || reloadedBodyText.includes(ind))) { logError("[DataDome] Still blocked after reload."); return false; }
+
+        logInfo("[DataDome] CAPTCHA handled successfully."); return true;
+
+    } catch (error) { logError(`[DataDome] Outer handling error for ${url}:`, error); return false; }
+};
+
+// --- Navigation and Page Preparation ---
 /**
- * Handles DataDome detection, solving, and cookie injection if needed.
- * Uses direct HTTP proxy configured at launch and page.authenticate.
+ * Navigates the page, handles proxy authentication, optional DataDome, and interactions.
  * @param {puppeteer.Page} page
  * @param {string} url
- * @param {string} userAgent - The user agent string being used.
  * @param {boolean} debug
- * @returns {Promise<boolean>} - true if successful or not needed, false on failure.
+ * @param {boolean} performDataDomeCheck - If true, run DataDome checks if applicable.
+ * @returns {Promise<boolean>} - True if navigation and preparation was successful.
  */
-const handleDataDomeIfNeeded = async (page, url, userAgent, debug = false) => {
-  const domain = getDomainFromUrl(url);
-  if (!DADADOME_DOMAINS.includes(domain)) {
-    logDebug(
-      `[DataDome] Domain "${domain}" not in DADADOME list. Skipping check.`,
-    );
-    return true;
-  }
+const navigateAndPreparePage = async (page, url, debug = false, performDataDomeCheck = true) => {
+    logDebug(`[NAVIGATE] navigateAndPreparePage called for: ${url}, performDataDomeCheck: ${performDataDomeCheck}`);
+    const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+    logDebug(`[NAVIGATE] Setting User Agent: ${userAgent}`);
+    await page.setUserAgent(userAgent);
+    logDebug("[NAVIGATE] Setting Viewport 1366x768");
+    await page.setViewport({ width: 1366, height: 768 });
+    logDebug("[NAVIGATE] Setting Extra HTTP Headers...");
+    await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9", Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7", "Sec-Ch-Ua": '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"', "Sec-Ch-Ua-Mobile": "?0", "Sec-Ch-Ua-Platform": '"Windows"', "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1", "Upgrade-Insecure-Requests": "1" });
 
-  logInfo(
-    `[DataDome] Domain "${domain}" requires CAPTCHA check for URL: ${url}`,
-  );
+    const browserContext = page.browserContext();
+    if (browserContext.proxyCredentials) { logDebug("[NAVIGATE] Auth setup..."); try { await page.authenticate(browserContext.proxyCredentials); logDebug("[NAVIGATE] Auth handler set."); } catch (authError) { logError("[NAVIGATE] Auth setup failed:", authError); return false; } }
+    else logDebug("[NAVIGATE] No proxy auth needed.");
 
-  try {
-    // 1. Initial Navigation (uses proxy via launch args + page.authenticate)
-    logDebug("[DataDome] Performing initial navigation to detect CAPTCHA...");
-    // Note: page.authenticate should already be set before this function is called
-    await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 }); // Increased timeout slightly
-    logDebug(
-      "[DataDome] Initial navigation complete. Checking for CAPTCHA iframe...",
-    );
-
-    // 2. Detect CAPTCHA Iframe
-    let captchaFrameElement;
-    let captchaUrl;
+    // Initial Navigation Attempt
+    let initialNavOk = false;
     try {
-      const iframeSelector =
-        'iframe[src*="captcha-delivery.com"], iframe[src*="geo.captcha-delivery.com"]'; // More robust selector
-      // Wait for the iframe itself, not necessarily visibility which can be tricky
-      await page.waitForSelector(iframeSelector, {
-        timeout: 35000, // Slightly longer wait for iframe
-      });
-      captchaFrameElement = await page.$(iframeSelector);
-      if (!captchaFrameElement) {
-        // If selector found but element is null after wait, something is odd
-        logWarn(
-          "[DataDome] CAPTCHA iframe selector matched but element retrieval failed. Checking page content.",
-        );
-        // Fall through to page content check
-      } else {
-        captchaUrl = await page.evaluate(
-          (el) => el.getAttribute("src"),
-          captchaFrameElement,
-        );
-        if (captchaUrl) {
-          logInfo("[DataDome] Found CAPTCHA iframe.");
-          logDebug(`[DataDome] Extracted captchaUrl: ${captchaUrl}`);
-        } else {
-          logWarn(
-            "[DataDome] Found CAPTCHA iframe element but failed to extract src attribute. Checking page content.",
-          );
-          // Fall through to page content check
-        }
-      }
-    } catch (error) {
-      // Timeout likely means no iframe found
-      logWarn(
-        `[DataDome] CAPTCHA iframe not detected within timeout or error occurred for ${url}. Error: ${error.message}. Checking page content for block indicators.`,
-      );
-      // Proceed to check page content even if iframe wasn't found or src failed
-    }
-
-    // If no captchaUrl was extracted, check page content for definitive block
-    if (!captchaUrl) {
-      const pageTitle = (await page.title())?.toLowerCase() || "";
-      const bodyText = await page.evaluate(
-        () => document.body?.innerText?.toLowerCase() || "",
-      );
-      const blockedIndicators = [
-        "blocked",
-        "enable javascript",
-        "checking your browser",
-        "access denied",
-        "verify you are human",
-      ];
-
-      if (
-        blockedIndicators.some(
-          (indicator) =>
-            pageTitle.includes(indicator) || bodyText.includes(indicator),
-        )
-      ) {
-        logError(
-          `[DataDome] Page content suggests a block even though iframe/src wasn't found. Title: ${pageTitle}`,
-        );
-        return false; // Definitely blocked
-      } else {
-        logInfo(
-          "[DataDome] No clear CAPTCHA iframe or block indicators found. Assuming page loaded correctly.",
-        );
-        return true; // Assume OK
-      }
-    }
-
-    // 3. Check 't' parameter (only if captchaUrl was found)
-    try {
-      const fullCaptchaUrl = new URL(captchaUrl, url); // Resolve relative URLs
-      const tParam = fullCaptchaUrl.searchParams.get("t");
-      logDebug(`[DataDome] Found 't' parameter value: ${tParam}`);
-      if (tParam === "bv") {
-        logError(
-          `[DataDome] IP address is banned (t=bv detected in captchaUrl). Change proxy IP and retry.`,
-        );
-        return false;
-      }
-      if (tParam !== "fe") {
-        logWarn(
-          `[DataDome] Unexpected 't' parameter value found: ${tParam}. Expected 'fe'. Proceeding cautiously.`,
-        );
-      }
-    } catch (e) {
-      logError(
-        "[DataDome] Failed to parse captchaUrl or get 't' parameter:",
-        e.message,
-      );
-      // Don't necessarily fail here, maybe 't' param isn't always present
-      logWarn("[DataDome] Proceeding despite error parsing 't' parameter.");
-    }
-
-    // 4. Solve CAPTCHA via 2Captcha
-    const dataDomeCookieString = await solveDataDomeWith2Captcha(
-      url,
-      captchaUrl,
-      userAgent, // Pass the actual user agent
-    );
-    if (!dataDomeCookieString) {
-      logError("[DataDome] Failed to solve CAPTCHA via 2Captcha.");
-      return false;
-    }
-
-    // 5. Set Cookie in Browser
-    const cookieObject = formatDataDomeCookie(dataDomeCookieString, url);
-    if (!cookieObject) {
-      logError("[DataDome] Failed to parse the solved datadome cookie string.");
-      return false;
-    }
-    try {
-      logInfo("[DataDome] Setting solved CAPTCHA cookie...");
-      await page.setCookie(cookieObject);
-      logInfo("[DataDome] Cookie set successfully.");
-    } catch (error) {
-      logError("[DataDome] Failed to set cookie in Puppeteer:", error);
-      // This could happen if the domain/path is wrong in the cookie object
-      return false;
-    }
-
-    // 6. Reload page with the cookie (uses proxy via launch args + page.authenticate)
-    logInfo("[DataDome] Reloading page with the CAPTCHA cookie...");
-    try {
-      await page.reload({ waitUntil: "networkidle0", timeout: 60000 }); // Increased timeout
-      logInfo("[DataDome] Page reloaded successfully after setting cookie.");
-    } catch (reloadError) {
-      logError(
-        "[DataDome] Error reloading page after setting cookie:",
-        reloadError,
-      );
-      // Check specific errors like auth failure again
-      if (
-        reloadError.message &&
-        reloadError.message.includes("net::ERR_PROXY_AUTHENTICATION_REQUIRED")
-      ) {
-        logError(
-          "[DataDome] CRITICAL: Proxy authentication failed during reload. Check credentials.",
-        );
-      } else if (reloadError.name === "TimeoutError") {
-        logError(
-          "[DataDome] CRITICAL: Timeout during reload. Proxy/Site issue.",
-        );
-      }
-      return false; // Failed to reload
-    }
-
-    // 7. Final check after reload
-    const reloadedTitle = (await page.title())?.toLowerCase() || "";
-    const reloadedBodyText = await page.evaluate(
-      () => document.body?.innerText?.toLowerCase() || "",
-    );
-    const blockedIndicatorsAfterReload = [
-      "blocked",
-      "enable javascript",
-      "checking your browser",
-      "access denied",
-      "verify you are human",
-    ];
-
-    if (
-      blockedIndicatorsAfterReload.some(
-        (indicator) =>
-          reloadedTitle.includes(indicator) ||
-          reloadedBodyText.includes(indicator),
-      )
-    ) {
-      logError(
-        "[DataDome] Page still shows blocked title/content after reload with cookie.",
-      );
-      return false;
-    }
-
-    logInfo("[DataDome] CAPTCHA handled successfully.");
-    return true; // CAPTCHA handled successfully
-  } catch (error) {
-    logError(
-      `[DataDome] Error during CAPTCHA handling process for ${url}:`,
-      error,
-    );
-    // Check for direct proxy connection errors during the initial goto
-    if (
-      error.message &&
-      (error.message.includes("net::ERR_PROXY_CONNECTION_FAILED") ||
-        error.message.includes("net::ERR_TUNNEL_CONNECTION_FAILED"))
-    ) {
-      logError(
-        "[DataDome] CRITICAL: Proxy connection failed during initial navigation. Check MY_HTTP_PROXY details (address, port) and ensure the proxy server is reachable.",
-      );
-    } else if (
-      error.message &&
-      error.message.includes("net::ERR_PROXY_AUTHENTICATION_REQUIRED")
-    ) {
-      logError(
-        "[DataDome] CRITICAL: Proxy authentication failed during initial navigation. Check username/password in MY_HTTP_PROXY.",
-      );
-    } else if (error.name === "TimeoutError") {
-      logError(
-        "[DataDome] CRITICAL: Timeout during DataDome handling (initial navigation or iframe wait). Proxy might be too slow or target site unresponsive.",
-      );
-    } else if (error.message) {
-      logError(
-        `[DataDome] Navigation/Page interaction error detail: ${error.message}`,
-      );
-    }
-    return false;
-  }
-};
-
-/**
- * Navigates the page, handles proxy authentication, potential DataDome, and performs initial interactions.
- * @param {puppeteer.Page} page - The Puppeteer page instance.
- * @param {string} url - The URL to navigate to.
- * @param {boolean} debug - Debug flag.
- * @returns {Promise<boolean>} - True if navigation and preparation was successful, false otherwise.
- */
-const navigateAndPreparePage = async (page, url, debug = false) => {
-  logDebug("[NAVIGATE] Setting Viewport and User-Agent...");
-  // Use a realistic, common user agent
-  const userAgent =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"; // Example: Use a recent Chrome UA
-  await page.setViewport({ width: 1366, height: 768 }); // Common desktop resolution
-  await page.setUserAgent(userAgent);
-
-  // Set common headers to mimic a real browser
-  await page.setExtraHTTPHeaders({
-    "Accept-Language": "en-US,en;q=0.9",
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7", // Updated Accept header
-    "Sec-Ch-Ua":
-      '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"', // Example Sec-CH-UA
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"', // Example Platform
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-  });
-
-  // --- *** Handle Proxy Authentication BEFORE any navigation *** ---
-  const browserContext = page.browserContext();
-  if (browserContext.proxyCredentials) {
-    logDebug(
-      "[NAVIGATE] Proxy credentials found, setting up authentication handler...",
-    );
-    try {
-      await page.authenticate(browserContext.proxyCredentials);
-      logDebug("[NAVIGATE] Authentication handler set successfully.");
-    } catch (authError) {
-      logError("[NAVIGATE] Failed to set page authentication:", authError);
-      // This usually shouldn't fail unless credentials format is wrong, but log it.
-      return false; // Cannot proceed without auth setup if credentials exist
-    }
-  } else {
-    logDebug(
-      "[NAVIGATE] No proxy credentials found, proceeding without authentication handler.",
-    );
-  }
-  // --- *** End Proxy Authentication *** ---
-
-  // --- Handle DataDome (will use authenticated proxy if set) ---
-  // Pass the userAgent we set earlier
-  const captchaHandled = await handleDataDomeIfNeeded(
-    page,
-    url,
-    userAgent,
-    debug,
-  );
-  if (!captchaHandled) {
-    logError(
-      `[NAVIGATE] Failed to handle DataDome CAPTCHA for ${url}. Aborting navigation prep.`,
-    );
-    return false;
-  }
-  // At this point, if DataDome was required, the page should be loaded correctly (or reloaded).
-
-  // --- Final Navigation/Verification ---
-  // Check if we are already on the correct URL after potential DataDome handling/reload.
-  const currentUrl = page.url();
-  logDebug(`[NAVIGATE] Current URL after potential DataDome: ${currentUrl}`);
-
-  // Only navigate explicitly if we are not on the target URL
-  // (e.g., DataDome wasn't needed, or the reload landed somewhere else unexpectedly)
-  if (!currentUrl || !currentUrl.startsWith(url.split("?")[0])) {
-    // Check base URL match
-    logDebug(
-      `[NAVIGATE] Current URL (${currentUrl}) doesn't match target (${url}). Explicitly navigating...`,
-    );
-    try {
-      await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
-      logDebug(`[NAVIGATE] Explicit navigation to ${url} successful.`);
+        logDebug(`[NAVIGATE] Initial page.goto(${url})...`);
+        await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
+        logDebug(`[NAVIGATE] Initial page.goto OK. Current URL: ${page.url()}`);
+        initialNavOk = true;
     } catch (navError) {
-      logError(
-        `[NAVIGATE] Error during explicit page.goto for ${url}:`,
-        navError,
-      );
-      // Check for specific proxy/network errors
-      if (navError.message) {
-        if (
-          navError.message.includes("net::ERR_PROXY_CONNECTION_FAILED") ||
-          navError.message.includes("net::ERR_TUNNEL_CONNECTION_FAILED")
-        ) {
-          logError(
-            "[NAVIGATE] CRITICAL: Proxy connection failed during explicit goto. Check proxy server availability/address/port.",
-          );
-        } else if (
-          navError.message.includes("net::ERR_PROXY_AUTHENTICATION_REQUIRED")
-        ) {
-          logError(
-            "[NAVIGATE] CRITICAL: Proxy authentication failed during explicit goto. Check username/password in MY_HTTP_PROXY.",
-          );
-        } else if (navError.message.includes("net::ERR_NAME_NOT_RESOLVED")) {
-          logError(
-            `[NAVIGATE] CRITICAL: DNS resolution failed for ${url}. Check network/DNS settings or URL validity.`,
-          );
-        } else if (
-          navError.message.includes("net::ERR_EMPTY_RESPONSE") ||
-          navError.message.includes("net::ERR_CONNECTION_CLOSED")
-        ) {
-          logError(
-            `[NAVIGATE] CRITICAL: Server closed connection unexpectedly for ${url}. Target site issue?`,
-          );
-        } else if (navError.name === "TimeoutError") {
-          logError(
-            "[NAVIGATE] CRITICAL: Timeout during explicit navigation. Proxy or target site too slow.",
-          );
-        } else if (navError.message.includes("net::ERR_NO_SUPPORTED_PROXIES")) {
-          // This error should NOT happen now, but check just in case
-          logError(
-            "[NAVIGATE] UNEXPECTED: Received ERR_NO_SUPPORTED_PROXIES. Proxy configuration issue still exists?",
-          );
+        logError(`[NAVIGATE] Initial page.goto error for ${url}:`, navError);
+        // Don't immediately return false, let DataDome check run if requested,
+        // as sometimes the error page itself contains the CAPTCHA iframe.
+        // However, if it's a critical proxy error, we should fail.
+        if (navError.message?.includes("net::ERR_PROXY_") || navError.message?.includes("net::ERR_NAME_NOT_RESOLVED")) {
+            logError("[NAVIGATE] Critical network/proxy error during initial goto. Failing.");
+            return false;
         }
-      }
-      return false; // Navigation failed
+        logWarn("[NAVIGATE] Initial goto failed, but proceeding to DataDome check just in case.");
     }
-  } else {
-    logDebug(
-      `[NAVIGATE] Already on target URL ${currentUrl} (or handled by DataDome/reload). Skipping redundant goto.`,
-    );
-    // Wait a bit to ensure scripts finish after potential reload
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
 
-  // --- Simulate Interaction (Optional but recommended) ---
-  logDebug(`[NAVIGATE] Simulating minor interaction...`);
-  try {
-    await page.mouse.move(Math.random() * 500 + 100, Math.random() * 500 + 100);
-    await page.evaluate(() => window.scrollBy(0, Math.random() * 300 + 100));
-    await new Promise((resolve) =>
-      setTimeout(resolve, 1000 + Math.random() * 1000),
-    ); // Variable short wait
-    await page.evaluate(() => window.scrollBy(0, Math.random() * 400 + 200));
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  } catch (interactionError) {
-    // Check if error is due to navigation interrupting interaction (less likely now but possible)
-    if (
-      !interactionError.message.includes("Navigation interrupted") &&
-      !interactionError.message.includes("Target closed")
-    ) {
-      logWarn(
-        "[NAVIGATE] Warning during post-load interaction:",
-        interactionError.message,
-      );
+    // --- Conditional DataDome Check ---
+    let captchaHandled = true; // Assume true if check is skipped
+    if (performDataDomeCheck) {
+        logDebug("[NAVIGATE] Explicit DataDome check requested. Calling handleDataDomeIfNeeded...");
+        captchaHandled = await handleDataDomeIfNeeded(page, url, userAgent, debug);
+        logDebug(`[NAVIGATE] handleDataDomeIfNeeded result: ${captchaHandled}`);
+        if (!captchaHandled) {
+            logError(`[NAVIGATE] Explicit DataDome handling failed/aborted for ${url}.`);
+            return false; // Fail if explicit check fails
+        }
     } else {
-      logDebug(
-        "[NAVIGATE] Post-load interaction interrupted, likely harmless.",
-      );
+        logDebug("[NAVIGATE] Skipping explicit DataDome check as requested.");
+        // If initial nav failed AND we skipped the check, we should probably fail here.
+        if (!initialNavOk) {
+             logError("[NAVIGATE] Initial navigation failed and DataDome check was skipped. Failing.");
+             return false;
+        }
     }
-  }
+    // --- End Conditional DataDome Check ---
 
-  const finalWaitDelay = 1500; // Reduced final static wait
-  logDebug(`[DELAY] Final short wait ${finalWaitDelay / 1000} seconds...`);
-  await new Promise((resolve) => setTimeout(resolve, finalWaitDelay));
 
-  logInfo(`[NAVIGATE] Page preparation complete for: ${page.url()}`);
-  return true; // Preparation successful
+    // Verify final URL state after potential navigation/reload
+    const finalUrl = page.url();
+    logDebug(`[NAVIGATE] URL after all checks/reloads: ${finalUrl}`);
+    // Basic check if we are on *some* page related to the domain, not about:blank
+    const targetDomain = getDomainFromUrl(url);
+    const finalDomain = getDomainFromUrl(finalUrl);
+    if (!finalUrl || finalUrl === 'about:blank' || (targetDomain && finalDomain !== targetDomain && !finalUrl.includes('captcha'))) { // Allow captcha URLs
+        logError(`[NAVIGATE] Ended up on unexpected URL: ${finalUrl}. Expected something like ${url}`);
+        // Check common block pages again just in case
+        const pageTitle = (await page.title())?.toLowerCase() || "";
+        const bodyText = await page.evaluate(() => document.body?.innerText?.toLowerCase() || "");
+        const blockedIndicators = ["blocked", "access denied", "error", "not found"];
+        if (blockedIndicators.some(ind => pageTitle.includes(ind) || bodyText.includes(ind))) {
+             logError(`[NAVIGATE] Final page content suggests an error/block page.`);
+        }
+        return false; // Fail if URL is wrong
+    }
+
+
+    logDebug(`[NAVIGATE] Simulating interaction...`);
+    try { await page.mouse.move(Math.random() * 500 + 100, Math.random() * 500 + 100); await page.evaluate(() => window.scrollBy(0, Math.random() * 200 + 50)); await new Promise(r => setTimeout(r, 750 + Math.random() * 500)); await page.evaluate(() => window.scrollBy(0, Math.random() * 300 + 100)); await new Promise(r => setTimeout(r, 500)); }
+    catch (interactionError) { if (!interactionError.message.includes("Target closed")) logWarn("[NAVIGATE] Interaction warning:", interactionError.message); }
+
+    logInfo(`[NAVIGATE] Page preparation complete for: ${page.url()}`); return true;
 };
 
-// --- getHtmlContent, extractArticleSnippets, queryXPathWithDetails, scoreElement ---
-// --- getLlmCandidateXPaths, saveHtmlOnFailure ---
-// --- These functions remain largely the same, minor logging/error handling adjustments possible ---
-
+// --- HTML Content and Snippet Extraction ---
 const getHtmlContent = async (page) => {
-  logDebug("[Puppeteer] Getting full page HTML...");
-  try {
-    if (page.isClosed()) {
-      logWarn("[Puppeteer] Attempted to get HTML from a closed page.");
-      return null;
-    }
-    const html = await page.content();
-    logDebug("[Puppeteer] Full HTML fetched.");
-    return html;
-  } catch (error) {
-    // Check if page closed during content() call
-    if (
-      error.message.includes("Target closed") ||
-      error.message.includes("Session closed")
-    ) {
-      logWarn(
-        "[Puppeteer] Page closed before HTML could be retrieved:",
-        error.message,
-      );
-    } else {
-      logError("[Puppeteer] Error getting full HTML:", error.message);
-    }
-    return null;
-  }
+    logDebug("[Puppeteer] getHtmlContent called...");
+    await new Promise(resolve => setTimeout(resolve, 250)); // Small delay
+    try {
+        if (page.isClosed()) { logWarn("[Puppeteer] Get HTML on closed page."); return null; }
+        const content = await page.content();
+        logDebug(`[Puppeteer] page.content() returned content length: ${content?.length ?? 'null'}`);
+        return content;
+    } catch (error) { logError("[Puppeteer] Get HTML error:", error.message); return null; }
+};
+const extractArticleSnippets = async (page, numSnippets = 5, minLength = 50) => {
+    logDebug("[Puppeteer] Extracting snippets..."); const selector = "p, h2, h3, li, blockquote";
+    try { if (page.isClosed()) { logWarn("[Puppeteer] Snippets on closed page."); return []; } return await page.$$eval(selector, (els, minL, maxS) => { const res = []; const isVis = el => { if (!el.offsetParent && el.tagName !== 'BODY') return false; const st = window.getComputedStyle(el); return st && st.display !== 'none' && st.visibility !== 'hidden' && st.opacity !== '0'; }; for (const el of els) { if (el.tagName === "SCRIPT" || el.tagName === "STYLE" || el.tagName === 'NOSCRIPT' || !isVis(el)) continue; const txt = el.textContent?.trim().replace(/\s+/g, ' '); if (txt && txt.length >= minL && txt.match(/[a-zA-Z]{3,}/)) { let snip = txt.substring(0, 250) + (txt.length > 250 ? "..." : ""); if (!res.some(r => r.includes(snip.substring(0, 50)))) res.push(snip); if (res.length >= maxS) break; } } return res; }, minLength, numSnippets); }
+    catch (error) { logError(`[Puppeteer] Snippet error: ${error.message}`); return []; }
 };
 
-const extractArticleSnippets = async (
-  page,
-  numSnippets = 5,
-  minLength = 50,
-) => {
-  logDebug("[Puppeteer] Extracting text snippets...");
-  const selector = "p, h2, h3, li, blockquote"; // Keep existing selector
-  try {
-    if (page.isClosed()) {
-      logWarn("[Puppeteer] Attempted to extract snippets from a closed page.");
-      return [];
-    }
-    const snippets = await page.$$eval(
-      selector,
-      (elements, minLen, maxSnippets) => {
-        const results = [];
-        const MIN_CHARS_AROUND_WORD = 10; // Ensure snippets have some context
-
-        const isVisible = (el) => {
-          if (!el.offsetParent && el.tagName !== "BODY") return false; // Basic visibility check
-          const style = window.getComputedStyle(el);
-          return (
-            style &&
-            style.display !== "none" &&
-            style.visibility !== "hidden" &&
-            style.opacity !== "0"
-          );
-        };
-
-        for (const el of elements) {
-          // Skip elements likely hidden or irrelevant
-          if (
-            el.tagName === "SCRIPT" ||
-            el.tagName === "STYLE" ||
-            el.tagName === "NOSCRIPT"
-          )
-            continue;
-          if (!isVisible(el)) continue; // Check computed style visibility
-
-          const text = el.textContent?.trim().replace(/\s+/g, " "); // Normalize whitespace
-
-          // Basic check for meaningful content (at least one word with surrounding chars)
-          if (
-            text &&
-            text.length >= minLen &&
-            text.match(/[a-zA-Z]{3,}/) &&
-            text.length > MIN_CHARS_AROUND_WORD
-          ) {
-            let snippet = text.substring(0, 250); // Keep truncation
-            if (text.length > 250) snippet += "...";
-
-            // Avoid adding duplicate snippets
-            if (!results.some((r) => r.includes(snippet.substring(0, 50)))) {
-              // Check start of snippet for similarity
-              results.push(snippet);
-            }
-
-            if (results.length >= maxSnippets) break;
-          }
-        }
-        return results;
-      },
-      minLength,
-      numSnippets,
-    );
-    logDebug(`[Puppeteer] Extracted ${snippets.length} valid snippets.`);
-    return snippets;
-  } catch (error) {
-    if (
-      error.message.includes("Target closed") ||
-      error.message.includes("Session closed")
-    ) {
-      logWarn(
-        "[Puppeteer] Page closed during snippet extraction:",
-        error.message,
-      );
-    } else {
-      logError(`[Puppeteer] Error extracting text snippets: ${error.message}`);
-    }
-    return [];
-  }
-};
-
+// --- XPath Querying, Scoring, LLM ---
 const queryXPathWithDetails = async (page, xpath, tagsToCount) => {
-  logDebug(`[Puppeteer] Querying XPath: ${xpath}`);
-  try {
-    if (page.isClosed()) {
-      logWarn(
-        `[Puppeteer] Attempted to query XPath "${xpath}" on a closed page.`,
-      );
-      return { count: 0, firstElementDetails: null };
-    }
-    const result = await page.evaluate(
-      (xpathSelector, tagsToCountArr) => {
-        try {
-          const evaluateResult = document.evaluate(
-            xpathSelector,
-            document,
-            null,
-            XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
-            null,
-          );
-          const count = evaluateResult.snapshotLength;
-          let firstElementDetails = null;
-
-          if (count > 0) {
-            const firstNode = evaluateResult.snapshotItem(0);
-            // Ensure it's an Element node before trying to access properties
-            if (firstNode && firstNode.nodeType === Node.ELEMENT_NODE) {
-              const el = firstNode;
-              const descendantCounts = {};
-              tagsToCountArr.forEach((tag) => {
-                descendantCounts[tag] = el.querySelectorAll(tag).length;
-              });
-              const totalDescendantElements = el.querySelectorAll("*").length;
-              const textContentSample =
-                el.textContent?.trim().replace(/\s+/g, " ").substring(0, 500) ||
-                ""; // Normalized text sample
-              const innerHTMLSample =
-                el.innerHTML?.trim().substring(0, 1000) || ""; // Trimmed HTML sample
-
-              firstElementDetails = {
-                tagName: el.tagName.toUpperCase(),
-                id: el.id || null, // Use null if empty
-                className: el.className || null, // Use null if empty
-                descendantCounts: descendantCounts,
-                textContentSample: textContentSample,
-                innerHTMLSample: innerHTMLSample,
-                totalDescendantElements: totalDescendantElements,
-              };
-            } else if (firstNode) {
-              // Log if the first result isn't an element (e.g., text node, comment)
-              console.warn(
-                `[Puppeteer Eval] XPath "${xpathSelector}" first result is Node Type ${firstNode.nodeType}, not an Element.`,
-              );
-            }
-          }
-          return { count, firstElementDetails };
-        } catch (evalError) {
-          // Catch errors within the evaluate function (e.g., invalid XPath syntax)
-          console.error(
-            `[Puppeteer Eval] XPath evaluation error for "${xpathSelector}": ${evalError.message}`,
-          );
-          return {
-            count: -1, // Indicate error
-            firstElementDetails: null,
-            error: evalError.message, // Pass error message back
-          };
-        }
-      },
-      xpath,
-      tagsToCount,
-    );
-
-    // Handle errors reported from page.evaluate
-    if (result.error) {
-      logWarn(
-        `[Puppeteer] Error evaluating XPath "${xpath}" in browser context: ${result.error}`,
-      );
-      return { count: 0, firstElementDetails: null }; // Treat as 0 found on error
-    }
-
-    logDebug(
-      `[Puppeteer] XPath query "${xpath}" found ${result.count} elements.`,
-    );
-    if (result.count > 0 && result.firstElementDetails) {
-      logDebug(
-        `[Puppeteer] Details obtained for first element (Tag: ${result.firstElementDetails.tagName}, P: ${result.firstElementDetails.descendantCounts?.p ?? 0}).`,
-      );
-    } else if (result.count > 0 && !result.firstElementDetails) {
-      logDebug(
-        // Changed from Warn to Debug as it might be expected sometimes
-        `[Puppeteer] XPath "${xpath}" found elements, but first result was not an Element node or details failed.`,
-      );
-    }
-    return result; // Return count and details (or null details)
-  } catch (error) {
-    if (
-      error.message.includes("Target closed") ||
-      error.message.includes("Session closed")
-    ) {
-      logWarn(
-        `[Puppeteer] Page closed during XPath query for "${xpath}":`,
-        error.message,
-      );
-    } else {
-      logError(
-        `[Puppeteer] Critical error querying XPath ${xpath}: ${error.message}`,
-      );
-    }
-    return { count: 0, firstElementDetails: null }; // Return 0 on critical errors
-  }
+    logDebug(`[Puppeteer] Query XPath: ${xpath}`); try { if (page.isClosed()) { logWarn(`[Puppeteer] XPath on closed page: ${xpath}`); return { count: 0, firstElementDetails: null }; } const result = await page.evaluate((xp, tags) => { try { const snap = document.evaluate(xp, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null); const cnt = snap.snapshotLength; let details = null; if (cnt > 0) { const node = snap.snapshotItem(0); if (node?.nodeType === Node.ELEMENT_NODE) { const el = node; const descCounts = {}; tags.forEach(t => { descCounts[t] = el.querySelectorAll(t).length; }); details = { tagName: el.tagName.toUpperCase(), id: el.id||null, className: el.className||null, descendantCounts: descCounts, textContentSample: el.textContent?.trim().replace(/\s+/g, ' ').substring(0, 500)||" ", innerHTMLSample: el.innerHTML?.trim().substring(0, 1000)||" ", totalDescendantElements: el.querySelectorAll("*").length }; } else if (node) console.warn(`[Eval] XPath "${xp}" first not Element: ${node.nodeType}`); } return { count: cnt, firstElementDetails: details }; } catch (e) { console.error(`[Eval] XPath error "${xp}": ${e.message}`); return { count: -1, error: e.message }; } }, xpath, tagsToCount); if (result.error) { logWarn(`[Puppeteer] Eval XPath error "${xpath}": ${result.error}`); return { count: 0, firstElementDetails: null }; } logDebug(`[Puppeteer] XPath "${xpath}" found ${result.count}.`); if (result.count > 0 && result.firstElementDetails) logDebug(`[Puppeteer] Details OK.`); else if (result.count > 0) logDebug(`[Puppeteer] First not Element.`); return result; }
+    catch (error) { logError(`[Puppeteer] Query XPath error ${xpath}: ${error.message}`); return { count: 0, firstElementDetails: null }; }
+};
+const scoreElement = (details, count, xpath) => {
+    const log = (...a) => { if (ENABLE_DEBUG_LOGGING) console.log("[SCORE]", ...a); }; if (!details?.descendantCounts || typeof details.totalDescendantElements !== 'number') { log(`Incomplete details ${xpath}. Score 0`); return 0; } let score = 0; const { tagName, id, className, descendantCounts, textContentSample, innerHTMLSample, totalDescendantElements } = details; const p = descendantCounts.p || 0; if (p < MIN_PARAGRAPH_THRESHOLD) { log(`${xpath} low paras (${p}). Score 0`); return 0; } score += p * SCORE_WEIGHTS.paragraphCount; log(`${xpath} Paras(${p}): +${(p*SCORE_WEIGHTS.paragraphCount).toFixed(1)}`); const unwanted = UNWANTED_TAGS.reduce((s, t) => s + (descendantCounts[t]||0), 0); if (totalDescendantElements > 5 && unwanted > 0) { const r = unwanted / totalDescendantElements; const pf = Math.min(1, r * 5); const pen = pf * SCORE_WEIGHTS.unwantedPenaltyRatio; score += pen; log(`${xpath} Unwanted(${r.toFixed(3)}): ${pen.toFixed(1)}`); } else if (unwanted > 1) { score += SCORE_WEIGHTS.unwantedPenaltyRatio*0.2; log(`${xpath} Unwanted(${unwanted}): ${(SCORE_WEIGHTS.unwantedPenaltyRatio*0.2).toFixed(1)}`); } if (tagName==="ARTICLE"||tagName==="MAIN") { score+=SCORE_WEIGHTS.isSemanticTag; log(`${xpath} Semantic(${tagName}): +${SCORE_WEIGHTS.isSemanticTag}`); } else if (tagName==="SECTION"||tagName==="DIV") { const descRgx = /article|content|body|story|main|post|entry|text|copy|primary|container/i; if ((id&&descRgx.test(id))||(className&&descRgx.test(className))) { score+=SCORE_WEIGHTS.hasDescriptiveIdOrClass; log(`${xpath} Descriptive ${tagName}: +${SCORE_WEIGHTS.hasDescriptiveIdOrClass}`); } else if(tagName==="DIV") { score-=5; log(`${xpath} Generic DIV: -5`); } } if (innerHTMLSample?.length > 50) { const txtLen = textContentSample?.length||0; const htmlLen = innerHTMLSample.length; if(htmlLen>0) { const density=txtLen/htmlLen; const bonus=Math.pow(density,0.5)*SCORE_WEIGHTS.textDensity; score+=bonus; log(`${xpath} Density(${density.toFixed(3)}): +${bonus.toFixed(1)}`); if(density<0.1&&txtLen>100) { score-=15; log(`${xpath} Low Density: -15`); } } } else if (textContentSample?.length > 100) { score+=10; log(`${xpath} Text bonus: +10`); } const links=descendantCounts.a||0; if(totalDescendantElements>5&&links>1) { const linkDens=links/totalDescendantElements; const linkPF=Math.min(1,linkDens*10); const linkPen=linkPF*SCORE_WEIGHTS.linkDensityPenalty; score+=linkPen; log(`${xpath} Link Density(${linkDens.toFixed(3)}): ${linkPen.toFixed(1)}`); if(linkDens>0.5&&links>5) { score-=50; log(`${xpath} High Links: -50`); } } const media=(descendantCounts.img||0)+(descendantCounts.video||0)+(descendantCounts.audio||0)+(descendantCounts.picture||0); if(media>0&&p>0) { const mediaBonus=Math.min(SCORE_WEIGHTS.mediaPresence, media*5); score+=mediaBonus; log(`${xpath} Media(${media}): +${mediaBonus.toFixed(1)}`); } const depth=xpath.split("/").length-1; const preds=(xpath.match(/\[.*?\]/g)||[]).length; const complex=depth+preds*2; const complexPen=Math.min(20,complex*Math.abs(SCORE_WEIGHTS.xpathComplexityPenalty)); score-=complexPen; log(`${xpath} Complexity(${complex}): -${complexPen.toFixed(1)}`); const single=count===1; if(single) { score+=SCORE_WEIGHTS.isSingleElement; log(`${xpath} Single bonus: +${SCORE_WEIGHTS.isSingleElement}`); } else if(count>1) { const multiPen=Math.min(30,(count-1)*5); score-=multiPen; log(`${xpath} Found ${count}: -${multiPen.toFixed(1)}`); } log(`${xpath} Final Score: ${score.toFixed(2)}`); return Math.max(0,score);
+};
+const getLlmCandidateXPaths = async (html, snippets, feedback=[]) => {
+    logInfo("[LLM API] Requesting XPaths..."); const MAX_HTML = 120000; const truncated = html.length > MAX_HTML ? html.substring(0, MAX_HTML)+"..." : html; const sysPrompt = `You are an expert HTML analyzer identifying the main content container XPath. Exclude headers, footers, navs, sidebars, comments, ads. Prioritize <article>, <main>, descriptive IDs/classes. Aim for precision. Respond ONLY with a JSON array of valid XPath selector strings. No extra text.`; let userPrompt = `Analyze HTML. Identify 3-5 candidate XPaths for main content.`; if (snippets?.length > 0) userPrompt += `\n\nHints:\n${JSON.stringify(snippets)}`; else userPrompt += `\n\nNo snippets; use structure/attributes.`; if (feedback?.length > 0) { userPrompt += `\n\nFeedback (higher score=better):\n`; feedback.forEach(item => { userPrompt += `- "${item.xpath}": ${item.result.replace(/"/g,"'").substring(0,150)}\n`; }); userPrompt += `\nGenerate *new* candidates. Avoid failed patterns (score 0). Improve specificity. Avoid "//div".`; } else userPrompt += `\n\nGenerate initial list.`; userPrompt += `\n\nRespond ONLY JSON array. Example: ["//article", "//div[@class='content']"]`; userPrompt += "\n\nHTML:\n"+truncated; try { logDebug("[LLM API] Sending..."); if (ENABLE_DEBUG_LOGGING && feedback.length > 0) logDebug("[LLM API] Feedback:", JSON.stringify(feedback.slice(0,3),null,1)); const resp = await axios.post(LLM_CHAT_COMPLETIONS_ENDPOINT, { model: LLM_MODEL, messages: [{role:"system", content:sysPrompt}, {role:"user", content:userPrompt}], response_format:{type:"json_object"}, temperature:0.3, max_tokens:500 }, { headers:{Authorization:`Bearer ${OPENROUTER_API_KEY}`, "Content-Type":"application/json", "X-Title":"smartScraper", "HTTP-Referer":"https://github.com/bogorad/smartScraper"}, timeout:75000 }); if (!resp.data?.choices?.length > 0) { logWarn("[LLM API] No choices."); logDebug("[LLM API] Resp:", resp.data); return []; } const content = resp.data.choices[0].message?.content; if (!content) { logWarn("[LLM API] Empty content."); return []; } logDebug("[LLM API] Raw Resp:", content); let candidates = null; try { candidates = JSON.parse(content); if (Array.isArray(candidates)) logDebug("[LLM API] Parsed array."); else if (typeof candidates==='object'&&candidates!==null) { const key = Object.keys(candidates).find(k => Array.isArray(candidates[k]) && candidates[k].every(i => typeof i === 'string')); if (key) { logDebug(`[LLM API] Found array key: ${key}`); candidates = candidates[key]; } else { logWarn("[LLM API] JSON object has no array key."); candidates = null; } } else { logWarn("[LLM API] Parsed non-object/array."); candidates = null; } } catch (e) { logWarn(`[LLM API] Direct JSON parse failed: ${e.message}. Fallback...`); let txt = content.trim(); const rgx = /```(?:json)?\s*([\s\S]*?)\s*```/; const m = txt.match(rgx); if (m?.[1]) { logDebug("[LLM API] Regex: Code block."); txt = m[1].trim(); } else { const fb = txt.indexOf("["); const lb = txt.lastIndexOf("]"); if (fb!==-1 && lb>fb) { logDebug("[LLM API] Regex: Brackets."); txt = txt.substring(fb, lb+1); } else { logWarn("[LLM API] Regex: No JSON found."); txt = null; } } if(txt) { try { candidates = JSON.parse(txt); } catch (fe) { logError(`[LLM API] Fallback parse failed: ${fe.message}`); return []; } } else return []; } if (Array.isArray(candidates) && candidates.every(i => typeof i === "string")) { const valid = candidates.filter(x => x?.trim()?.length > 2 && (x.trim().startsWith("/") || x.trim().startsWith("."))); if (valid.length !== candidates.length) logWarn(`[LLM API] Filtered ${candidates.length - valid.length} invalid XPaths.`); logInfo(`[LLM API] Parsed ${valid.length} candidates.`); return valid; } else { logError("[LLM API] Parsed not array of strings:", candidates); return []; } }
+    catch (err) { logError(`[LLM API] Call error: ${err.message}`); if (err.response) { logError("[LLM API] Status:", err.response.status); logError("[LLM API] Data:", JSON.stringify(err.response.data,null,2)); } return []; }
 };
 
-const scoreElement = (elementDetails, totalElementsFoundByXPath, xpath) => {
-  const scoreLog = (...args) => {
-    if (ENABLE_DEBUG_LOGGING) console.log("[SCORE]", ...args);
-  };
-
-  if (
-    !elementDetails ||
-    !elementDetails.descendantCounts ||
-    typeof elementDetails.totalDescendantElements !== "number"
-  ) {
-    scoreLog(
-      `Incomplete or missing element details for scoring ${xpath}. Score: 0`,
-    );
-    return 0;
-  }
-
-  let score = 0;
-  const {
-    tagName,
-    id,
-    className,
-    descendantCounts,
-    textContentSample, // Use the sample from queryXPathWithDetails
-    innerHTMLSample, // Use the sample from queryXPathWithDetails
-    totalDescendantElements,
-  } = elementDetails;
-
-  const pCount = descendantCounts["p"] || 0;
-  if (pCount < MIN_PARAGRAPH_THRESHOLD) {
-    scoreLog(
-      `${xpath} failed min paragraph threshold (${pCount} < ${MIN_PARAGRAPH_THRESHOLD}). Score: 0`,
-    );
-    return 0; // Hard fail if not enough paragraphs
-  }
-
-  // Base score from paragraphs
-  score += pCount * SCORE_WEIGHTS.paragraphCount;
-  scoreLog(
-    `${xpath} - Paragraphs (${pCount}): +${(pCount * SCORE_WEIGHTS.paragraphCount).toFixed(2)}`,
-  );
-
-  // Penalty for unwanted structural tags (nav, footer etc.) relative to total elements
-  const unwantedCount = UNWANTED_TAGS.reduce(
-    (sum, tag) => sum + (descendantCounts[tag] || 0),
-    0,
-  );
-  if (totalDescendantElements > 5 && unwantedCount > 0) {
-    // Avoid division by zero or tiny denominators
-    const unwantedRatio = unwantedCount / totalDescendantElements;
-    // Apply penalty more gently if ratio is very low
-    const penaltyFactor = Math.min(1, unwantedRatio * 5); // Scale penalty up to a max factor of 1
-    const penalty = penaltyFactor * SCORE_WEIGHTS.unwantedPenaltyRatio;
-    score += penalty;
-    scoreLog(
-      `${xpath} - Unwanted ratio (${unwantedRatio.toFixed(3)}, factor ${penaltyFactor.toFixed(2)}): ${penalty.toFixed(2)}`,
-    );
-  } else if (unwantedCount > 1) {
-    // Add small penalty if multiple unwanted exist even with few total elements
-    score += SCORE_WEIGHTS.unwantedPenaltyRatio * 0.2; // Smaller fixed penalty
-    scoreLog(
-      `${xpath} - Unwanted tags (${unwantedCount}, low total elements): ${(SCORE_WEIGHTS.unwantedPenaltyRatio * 0.2).toFixed(2)}`,
-    );
-  }
-
-  // Bonus for semantic tags
-  if (tagName === "ARTICLE" || tagName === "MAIN") {
-    score += SCORE_WEIGHTS.isSemanticTag;
-    scoreLog(
-      `${xpath} - Semantic tag (${tagName}): +${SCORE_WEIGHTS.isSemanticTag}`,
-    );
-  } else if (tagName === "SECTION" || tagName === "DIV") {
-    // Smaller bonus/penalty based on attributes for common containers
-    const descriptiveRegex =
-      /article|content|body|story|main|post|entry|text|copy|primary|container/i; // Added container
-    if (
-      (id && descriptiveRegex.test(id)) ||
-      (className && descriptiveRegex.test(className))
-    ) {
-      score += SCORE_WEIGHTS.hasDescriptiveIdOrClass; // Full bonus for descriptive div/section
-      scoreLog(
-        `${xpath} - Descriptive ID/Class on ${tagName}: +${SCORE_WEIGHTS.hasDescriptiveIdOrClass}`,
-      );
-    } else if (tagName === "DIV") {
-      score -= 5; // Small penalty for generic div without description
-      scoreLog(`${xpath} - Generic DIV penalty: -5`);
-    }
-  }
-
-  // Text Density Calculation (using samples)
-  if (innerHTMLSample && innerHTMLSample.length > 50) {
-    // Need enough HTML to be meaningful
-    const plainTextLength = textContentSample ? textContentSample.length : 0;
-    const htmlLength = innerHTMLSample.length;
-
-    if (htmlLength > 0) {
-      const textDensity = plainTextLength / htmlLength;
-      // Apply bonus more strongly for higher densities
-      const densityBonus =
-        Math.pow(textDensity, 0.5) * SCORE_WEIGHTS.textDensity; // Use sqrt for non-linear bonus
-      score += densityBonus;
-      scoreLog(
-        `${xpath} - Text Density (${textDensity.toFixed(3)}): +${densityBonus.toFixed(2)}`,
-      );
-
-      // Penalize extremely low text density (lots of tags, little text)
-      if (textDensity < 0.1 && plainTextLength > 100) {
-        score -= 15;
-        scoreLog(`${xpath} - Low Text Density penalty: -15`);
-      }
-    }
-  } else if (textContentSample && textContentSample.length > 100) {
-    // If no innerHTML sample but decent text, give a small bonus
-    score += 10;
-    scoreLog(`${xpath} - Text content present bonus: +10`);
-  }
-
-  // Link Density Penalty
-  const linkCount = descendantCounts["a"] || 0;
-  if (totalDescendantElements > 5 && linkCount > 1) {
-    // Avoid penalty for very few links/elements
-    const linkDensity = linkCount / totalDescendantElements;
-    // Apply penalty more strongly if density is high
-    const linkPenaltyFactor = Math.min(1, linkDensity * 10); // Scale penalty up to factor 1 for density >= 0.1
-    const linkPenalty = linkPenaltyFactor * SCORE_WEIGHTS.linkDensityPenalty;
-    score += linkPenalty;
-    scoreLog(
-      `${xpath} - Link Density (${linkDensity.toFixed(3)}, factor ${linkPenaltyFactor.toFixed(2)}): ${linkPenalty.toFixed(2)}`,
-    );
-    // Heavy penalty if it looks like *mostly* links (e.g., navigation menu)
-    if (linkDensity > 0.5 && linkCount > 5) {
-      score -= 50;
-      scoreLog(`${xpath} - High Link Density penalty: -50`);
-    }
-  }
-
-  // Media Presence Bonus
-  const mediaCount =
-    (descendantCounts["img"] || 0) +
-    (descendantCounts["video"] || 0) +
-    (descendantCounts["audio"] || 0) +
-    (descendantCounts["picture"] || 0);
-  if (mediaCount > 0 && pCount > 0) {
-    // Only give bonus if text is also present
-    const mediaBonus = Math.min(SCORE_WEIGHTS.mediaPresence, mediaCount * 5); // Cap bonus based on count
-    score += mediaBonus;
-    scoreLog(
-      `${xpath} - Media Presence (${mediaCount}): +${mediaBonus.toFixed(2)}`,
-    );
-  }
-
-  // XPath Complexity Penalty
-  const xpathDepth = xpath.split("/").length - 1;
-  const xpathPredicates = (xpath.match(/\[.*?\]/g) || []).length;
-  const xpathComplexity = xpathDepth + xpathPredicates * 2; // Weight predicates more
-  const complexityPenalty = Math.min(
-    20,
-    xpathComplexity * Math.abs(SCORE_WEIGHTS.xpathComplexityPenalty),
-  ); // Cap penalty
-  score -= complexityPenalty;
-  scoreLog(
-    `${xpath} - XPath Complexity (${xpathComplexity}): -${complexityPenalty.toFixed(2)}`,
-  );
-
-  // Single Element Bonus
-  const isSingleElement = totalElementsFoundByXPath === 1;
-  if (isSingleElement) {
-    score += SCORE_WEIGHTS.isSingleElement;
-    scoreLog(
-      `${xpath} - Single element bonus: +${SCORE_WEIGHTS.isSingleElement}`,
-    );
-  } else if (totalElementsFoundByXPath > 1) {
-    // Apply penalty if XPath is not specific enough
-    const multiplePenalty = Math.min(30, (totalElementsFoundByXPath - 1) * 5); // Capped penalty
-    score -= multiplePenalty;
-    scoreLog(
-      `${xpath} - Found ${totalElementsFoundByXPath} elements (penalty): -${multiplePenalty.toFixed(2)}`,
-    );
-  }
-
-  // Final score adjustment: ensure positive score if basic criteria met
-  scoreLog(`${xpath} - Pre-floor Score: ${score.toFixed(2)}`);
-  return Math.max(0, score); // Ensure score is not negative
-};
-
-const getLlmCandidateXPaths = async (
-  htmlContent,
-  anchorSnippets,
-  feedback = [],
-) => {
-  logInfo("[LLM API] Requesting candidate XPaths from OpenRouter...");
-  const MAX_HTML_LENGTH = 120000; // Slightly increased length
-  const truncatedHtml =
-    htmlContent.length > MAX_HTML_LENGTH
-      ? htmlContent.substring(0, MAX_HTML_LENGTH) + "\n... (HTML truncated)"
-      : htmlContent;
-
-  // System Prompt: Define the persona and task clearly
-  const systemPrompt = `You are an expert AI assistant specialized in analyzing HTML document structure to identify the primary content container. Your goal is to find the most precise and robust XPath selector that targets the main article body, blog post text, or central content block. You must exclude common non-content elements like headers, footers, navigation menus, sidebars, related links sections, comment forms, and advertisement blocks. Prioritize semantic tags (<article>, <main>) and elements with descriptive IDs or classes (e.g., "content", "article-body", "main-story", "post-content", "primary"). Aim for specificity to ensure the XPath uniquely identifies the target container. You MUST respond ONLY with a JSON array of strings, where each string is a valid XPath selector. Do not include any explanations, introductions, or markdown formatting outside the JSON array itself.`;
-
-  // User Prompt Construction
-  let userPrompt = `Analyze the provided HTML source code. Identify 3 to 5 candidate XPath selectors for the main content container based on the criteria outlined in the system prompt.`;
-
-  if (anchorSnippets && anchorSnippets.length > 0) {
-    userPrompt += `\n\nConsider these text snippets extracted from the page as strong indicators of the desired content area:\n${JSON.stringify(anchorSnippets)}`;
-  } else {
-    userPrompt += `\n\nNo specific text snippets are available. Rely primarily on HTML structure, semantic tags, and descriptive attributes (IDs/classes).`;
-  }
-
-  if (feedback && feedback.length > 0) {
-    userPrompt += `\n\nReview the feedback from previous attempts (higher score indicates better fit, score 0 means unsuitable):\n`;
-    feedback.forEach((item) => {
-      // Sanitize and shorten feedback result for clarity
-      const cleanResult = item.result.replace(/"/g, "'").substring(0, 150);
-      userPrompt += `- "${item.xpath}": ${cleanResult}\n`;
-    });
-    userPrompt += `\nBased on this feedback, generate *new and distinct* XPath candidates. Avoid repeating selectors that scored 0 or poorly. Focus on improving specificity, perhaps by using deeper paths, different attributes (like data-* attributes if relevant), or combining multiple conditions (e.g., //div[@class='content' and not(contains(@class,'sidebar'))]). Do not suggest overly generic selectors like "//div" or "//p".`;
-  } else {
-    userPrompt += `\n\nGenerate your initial list of the most promising XPath candidates.`;
-  }
-
-  userPrompt += `\n\nRespond ONLY with the JSON array of XPath strings. Example format: ["//article[@id='main-content']", "//div[contains(@class, 'post-body')]", "//main/div[@class='primary-content']"]`;
-  userPrompt += "\n\nHTML Source (potentially truncated):\n" + truncatedHtml;
-
-  try {
-    logDebug("[LLM API] Sending request to OpenRouter...");
-    logDebug(`[LLM API] Model: ${LLM_MODEL}`);
-    // If feedback is present, log it (partially) for debugging
-    if (ENABLE_DEBUG_LOGGING && feedback.length > 0) {
-      logDebug(
-        "[LLM API] Sending feedback to LLM:",
-        JSON.stringify(feedback.slice(0, 3), null, 1),
-      ); // Log first few feedback items
-    }
-
-    const response = await axios.post(
-      LLM_CHAT_COMPLETIONS_ENDPOINT,
-      {
-        model: LLM_MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: { type: "json_object" }, // Request JSON explicitly if model supports it
-        temperature: 0.3, // Lower temperature for more deterministic XPath generation
-        max_tokens: 500, // Limit token usage for the response
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          "X-Title": "smartScraper", // Keep custom headers if useful
-          "HTTP-Referer": "https://github.com/bogorad/smartScraper",
-        },
-        timeout: 75000, // Increased timeout for potentially complex analysis
-      },
-    );
-
-    if (
-      !response.data ||
-      !response.data.choices ||
-      response.data.choices.length === 0
-    ) {
-      logWarn("[LLM API] LLM response missing choices or invalid structure.");
-      logDebug("[LLM API] Response data:", response.data);
-      return [];
-    }
-
-    const llmResponseContent = response.data.choices[0].message?.content;
-    if (!llmResponseContent) {
-      logWarn("[LLM API] LLM response content is empty.");
-      return [];
-    }
-    logDebug("[LLM API] Raw LLM response content:", llmResponseContent);
-
-    let parsedCandidates = null;
+// --- Core Extraction Logic ---
+const fetchWithStoredData = async (url, xpath, cookieName, cookieValue, debug = false) => {
+    logDebug(`[Fetch Stored] fetchWithStoredData called for: ${url}`);
+    logDebug(`[Fetch Stored] Params - XPath: ${xpath || 'None'}, CookieName: ${cookieName || 'None'}, CookieValue: ${cookieValue ? 'Exists' : 'None'}`);
+    let browser = null, userDataDir = null, page = null, extractedHtml = null, htmlContentForSave = null;
     try {
-      // Attempt to parse directly, assuming model respected json_object format
-      parsedCandidates = JSON.parse(llmResponseContent);
+        logDebug("[Fetch Stored] Launching browser...");
+        const launchRes = await launchPuppeteerBrowser(debug); browser = launchRes.browser; userDataDir = launchRes.userDataDir; page = await browser.newPage();
+        logDebug("[Fetch Stored] Browser launched.");
 
-      // Check if the parsed result is directly the array (ideal)
-      // or if it's nested within a common key like "xpaths" or "selectors"
-      if (Array.isArray(parsedCandidates)) {
-        // It's already the array
-        logDebug("[LLM API] Parsed response directly as array.");
-      } else if (
-        typeof parsedCandidates === "object" &&
-        parsedCandidates !== null
-      ) {
-        // Look for a key containing an array of strings
-        const keyWithArray = Object.keys(parsedCandidates).find(
-          (key) =>
-            Array.isArray(parsedCandidates[key]) &&
-            parsedCandidates[key].every((item) => typeof item === "string"),
-        );
-        if (keyWithArray) {
-          logDebug(`[LLM API] Found XPath array under key: "${keyWithArray}"`);
-          parsedCandidates = parsedCandidates[keyWithArray];
-        } else {
-          logWarn(
-            "[LLM API] Parsed JSON object, but couldn't find expected array key.",
-          );
-          parsedCandidates = null; // Reset if format is wrong
-        }
-      } else {
-        logWarn(
-          "[LLM API] Parsed response is not an array or expected object structure.",
-        );
-        parsedCandidates = null; // Reset if format is wrong
-      }
-    } catch (parseError) {
-      logWarn(
-        `[LLM API] Failed to parse direct JSON response: ${parseError.message}. Trying regex fallback...`,
-      );
-      // Fallback: Try extracting JSON from markdown code block or between brackets
-      let contentToParse = llmResponseContent.trim();
-      const jsonCodeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
-      const match = contentToParse.match(jsonCodeBlockRegex);
+        if (cookieName && cookieValue) {
+            logInfo(`[Fetch Stored] Attempting to set stored cookie '${cookieName}'...`);
+            const cookieToSet = { name: cookieName, value: cookieValue, url: url, path: '/', secure: url.startsWith('https://'), httpOnly: false, sameSite: 'Lax' };
+            logDebug("[Fetch Stored] Cookie object:", cookieToSet);
+            try { await page.setCookie(cookieToSet); logInfo(`[Fetch Stored] Set cookie OK.`); }
+            catch (cookieError) { logError(`[Fetch Stored] Failed set cookie '${cookieName}':`, cookieError); }
+        } else { logDebug("[Fetch Stored] No stored cookie to set."); }
 
-      if (match && match[1]) {
-        logDebug("[LLM API] Regex: Detected JSON in markdown code block.");
-        contentToParse = match[1].trim();
-      } else {
-        const firstBracket = contentToParse.indexOf("[");
-        const lastBracket = contentToParse.lastIndexOf("]");
-        if (firstBracket !== -1 && lastBracket > firstBracket) {
-          logDebug(
-            "[LLM API] Regex: Extracting content between first [ and last ].",
-          );
-          contentToParse = contentToParse.substring(
-            firstBracket,
-            lastBracket + 1,
-          );
-        } else {
-          logWarn(
-            "[LLM API] Regex: Could not reliably find JSON array structure in response.",
-          );
-          contentToParse = null; // Indicate failure
-        }
-      }
+        logDebug("[Fetch Stored] Calling navigateAndPreparePage (DataDome Check: false)...");
+        // *** Pass false for performDataDomeCheck ***
+        const navigationSuccessful = await navigateAndPreparePage(page, url, debug, false);
+        logDebug(`[Fetch Stored] navigateAndPreparePage result: ${navigationSuccessful}`);
+        if (!navigationSuccessful) { logError(`[Fetch Stored] Navigation/prep failed (without explicit DD check).`); try { htmlContentForSave = await getHtmlContent(page); } catch {} await saveHtmlOnFailure(url, htmlContentForSave); await cleanupPuppeteer(page, browser, userDataDir, debug); return null; }
 
-      if (contentToParse) {
-        try {
-          parsedCandidates = JSON.parse(contentToParse);
-        } catch (fallbackParseError) {
-          logError(
-            `[LLM API] Failed to parse JSON even with regex fallback: ${fallbackParseError.message}`,
-          );
-          logError(
-            "[LLM API] Content that failed fallback parsing:",
-            contentToParse,
-          );
-          return []; // Give up if both fail
-        }
-      } else {
-        return []; // Give up if regex didn't find anything
-      }
-    }
+        // --- Save HTML just before extraction attempt ---
+        logDebug("[Fetch Stored] Attempting to get HTML for saving before extraction...");
+        htmlContentForSave = await getHtmlContent(page);
+        await saveFullHtmlPreExtract(url, htmlContentForSave, SUCCESSFUL_HTML_DIR);
+        // --- End Save HTML Step ---
 
-    // Validate the final parsed candidates
-    if (
-      Array.isArray(parsedCandidates) &&
-      parsedCandidates.every((item) => typeof item === "string")
-    ) {
-      const validLookingXPaths = parsedCandidates.filter(
-        (xpath) =>
-          xpath &&
-          xpath.trim().length > 2 && // Basic length check
-          (xpath.trim().startsWith("/") || xpath.trim().startsWith(".")), // Basic structural check
-      );
-      if (validLookingXPaths.length !== parsedCandidates.length) {
-        logWarn(
-          `[LLM API] Filtered out ${parsedCandidates.length - validLookingXPaths.length} invalid/empty XPath strings from LLM response.`,
-        );
-      }
-      logInfo(
-        `[LLM API] Successfully parsed ${validLookingXPaths.length} candidate XPaths.`,
-      );
-      return validLookingXPaths;
-    } else {
-      logError(
-        "[LLM API] Parsed content, after potential extraction, is not a valid JSON array of strings:",
-        parsedCandidates, // Log what was parsed
-      );
-      return [];
-    }
-  } catch (error) {
-    logError(`[LLM API] Error calling OpenRouter API: ${error.message}`);
-    if (error.response) {
-      logError("[LLM API] Response Status:", error.response.status);
-      logError("[LLM API] Response Headers:", error.response.headers);
-      logError(
-        "[LLM API] Response Data:",
-        JSON.stringify(error.response.data, null, 2),
-      );
-      // Provide more specific advice based on status codes
-      if (error.response.status === 401) {
-        logError(
-          "[LLM API] Authentication Error (401): Check your OPENROUTER_API_KEY.",
-        );
-      } else if (error.response.status === 402) {
-        logError(
-          "[LLM API] Payment Required (402): Check your OpenRouter account balance/limits.",
-        );
-      } else if (error.response.status === 429) {
-        logError(
-          "[LLM API] Rate Limit Exceeded (429): Slow down requests or check OpenRouter limits.",
-        );
-      } else if (error.response.status >= 500) {
-        logError(
-          "[LLM API] Server Error (5xx): OpenRouter might be having temporary issues. Retry later.",
-        );
-      }
-    } else if (error.request) {
-      logError(
-        "[LLM API] No response received from OpenRouter. Check network connectivity and API endpoint.",
-      );
-    } else {
-      logError("[LLM API] Error setting up the request:", error.message);
-    }
-    return []; // Return empty on error
-  }
+        if (xpath) {
+            logInfo(`[Fetch Stored] Evaluating stored XPath: ${xpath}`);
+            extractedHtml = await page.evaluate(xp => { try { const el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; return el?.innerHTML?.trim() || null; } catch (e) { console.error(`[Eval] Stored XPath error: ${e.message}`); return null; } }, xpath);
+            logDebug(`[Fetch Stored] XPath evaluation result: ${extractedHtml ? `Content Length ${extractedHtml.length}` : 'No Content/Error'}`);
+            if (extractedHtml?.length > 0) { logInfo(`[Fetch Stored] Extracted OK.`); await cleanupPuppeteer(page, browser, userDataDir, debug); return extractedHtml; }
+            else { logWarn(`[Fetch Stored] Stored XPath "${xpath}" failed extraction.`); await cleanupPuppeteer(page, browser, userDataDir, debug); return null; }
+        } else { logInfo("[Fetch Stored] Nav OK, but no stored XPath."); await cleanupPuppeteer(page, browser, userDataDir, debug); return null; }
+    } catch (error) { logError(`[Fetch Stored] Unhandled error:`, error); await saveHtmlOnFailure(url, htmlContentForSave); await cleanupPuppeteer(page, browser, userDataDir, debug); return null; }
 };
 
-const saveHtmlOnFailure = async (url, htmlContent) => {
-  if (!SAVE_HTML_ON_FAILURE) return;
-  if (
-    !htmlContent ||
-    typeof htmlContent !== "string" ||
-    htmlContent.trim().length === 0
-  ) {
-    logWarn("[Save HTML] No valid HTML content provided to save.");
-    return;
-  }
-  try {
-    // Ensure the directory exists
-    await fs.promises.mkdir(FAILED_HTML_DIR, { recursive: true });
-
-    // Create a somewhat unique filename
-    const urlHash = crypto
-      .createHash("md5")
-      .update(url)
-      .digest("hex")
-      .substring(0, 8);
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const safeDomain =
-      getDomainFromUrl(url)?.replace(/[^a-z0-9\-.]/gi, "_") || "unknown_domain"; // Allow hyphens and dots
-    const filename = `failed_${safeDomain}_${timestamp}_${urlHash}.html`;
-    const filePath = path.join(FAILED_HTML_DIR, filename);
-
-    await fs.promises.writeFile(filePath, htmlContent, "utf8");
-    logInfo(
-      `[Save HTML] Successfully saved failed HTML for ${url} to ${filePath}`,
-    );
-  } catch (error) {
-    logError(`[Save HTML] Failed to save HTML for ${url}: ${error.message}`);
-  }
-};
-
-/**
- * Attempts to find the best XPath and extract its content using the LLM approach.
- * Uses the direct HTTP proxy and handles authentication.
- * @param {string} url - The URL of the page.
- * @param {boolean} debug - Enable debug logging.
- * @returns {Promise<{foundXPath: string, extractedHtml: string} | null>} - The best XPath and its HTML content, or null if failed.
- */
 const findArticleXPathAndExtract = async (url, debug = false) => {
-  logInfo(`--- Starting XPath discovery and extraction for: ${url} ---`);
-  let browser = null;
-  let userDataDir = null;
-  let page = null;
-  let htmlContent = null; // Store HTML fetched after successful navigation
-  let bestCandidateXPath = null;
-  let extractedHtml = null;
-
-  try {
-    // Launch browser (handles proxy setup internally)
-    const launchResult = await launchPuppeteerBrowser(debug);
-    browser = launchResult.browser;
-    userDataDir = launchResult.userDataDir;
-    page = await browser.newPage(); // Create page *after* browser is launched
-
-    // Navigate and prepare (handles auth, CAPTCHA, interaction)
-    const navigationSuccessful = await navigateAndPreparePage(page, url, debug);
-    if (!navigationSuccessful) {
-      // navigateAndPreparePage should log the specific reason for failure
-      logError(
-        "[Discovery] Page navigation or preparation failed. Cannot proceed with discovery.",
-      );
-      // Attempt to get content anyway for saving, but expect it might fail
-      try {
-        htmlContent = await getHtmlContent(page);
-      } catch {}
-      await saveHtmlOnFailure(url, htmlContent); // Save what we have, if anything
-      await cleanupPuppeteer(page, browser, userDataDir, debug); // Ensure cleanup
-      return null; // Return null as discovery couldn't start properly
-    }
-
-    // Get HTML *after* successful navigation and preparation
-    htmlContent = await getHtmlContent(page);
-    if (!htmlContent) {
-      logWarn(
-        "[Discovery] Failed to get HTML content after successful navigation. Trying again...",
-      );
-      await new Promise((resolve) => setTimeout(resolve, 1500)); // Short wait
-      htmlContent = await getHtmlContent(page);
-      if (!htmlContent) {
-        logError(
-          "[Discovery] Still failed to get HTML content. Aborting discovery.",
-        );
-        await cleanupPuppeteer(page, browser, userDataDir, debug);
-        return null;
-      }
-    }
-    logInfo("[Discovery] Successfully retrieved HTML content for analysis.");
-
-    // Extract snippets for LLM context
-    const anchorSnippets = await extractArticleSnippets(page);
-    if (anchorSnippets.length === 0) {
-      logWarn(
-        "[Discovery] Could not extract text snippets for LLM context. Proceeding without them.",
-      );
-    } else {
-      logDebug(
-        `[Discovery] Using ${anchorSnippets.length} snippets for LLM context.`,
-      );
-    }
-
-    let allTriedXPaths = new Set();
-    let feedbackForLLM = [];
-    let scoredCandidates = []; // Store { xpath, score, elementDetails }
-
-    // LLM Interaction Loop
-    for (let retry = 0; retry <= MAX_LLM_RETRIES; retry++) {
-      logInfo(
-        `--- LLM Interaction Attempt ${retry + 1}/${MAX_LLM_RETRIES + 1} ---`,
-      );
-
-      // Get candidates from LLM, providing feedback from previous rounds
-      const llmCandidateXPaths = await getLlmCandidateXPaths(
-        htmlContent,
-        anchorSnippets,
-        retry > 0 ? feedbackForLLM : [], // Pass feedback after first attempt
-      );
-
-      if (!llmCandidateXPaths || llmCandidateXPaths.length === 0) {
-        logWarn(
-          `[Discovery] LLM returned no candidates on attempt ${retry + 1}.`,
-        );
-        if (retry < MAX_LLM_RETRIES) {
-          logInfo("[Discovery] Waiting before next LLM attempt...");
-          await new Promise((resolve) => setTimeout(resolve, 3000)); // Wait longer if LLM fails
-          continue; // Try next retry
-        } else {
-          logError(
-            "[Discovery] LLM failed to provide candidates after all retries.",
-          );
-          break; // Exit loop if final attempt failed
-        }
-      }
-
-      // Filter out XPaths already tried in previous rounds
-      const newCandidateXPaths = llmCandidateXPaths.filter(
-        (xpath) => !allTriedXPaths.has(xpath?.trim()), // Trim whitespace
-      );
-
-      if (newCandidateXPaths.length === 0) {
-        logWarn(
-          `[Discovery] LLM returned only previously tried XPaths on attempt ${retry + 1}.`,
-        );
-        if (retry < MAX_LLM_RETRIES) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          continue; // Try next retry if not the last one
-        } else {
-          break; // Exit loop if only old XPaths returned on last attempt
-        }
-      }
-
-      logInfo(
-        `[Discovery] Validating ${newCandidateXPaths.length} new candidate XPaths from LLM...`,
-      );
-      feedbackForLLM = []; // Reset feedback for this round
-      let currentAttemptBestScore = -1;
-
-      // Validate new candidates in parallel
-      const validationPromises = newCandidateXPaths.map(async (xpath) => {
-        const trimmedXPath = xpath.trim();
-        if (!trimmedXPath) return null; // Skip empty strings
-
-        allTriedXPaths.add(trimmedXPath); // Add to tried set
-        const result = await queryXPathWithDetails(
-          page,
-          trimmedXPath,
-          TAGS_TO_COUNT,
-        );
-        // Return null if query failed badly (count -1)
-        return result.count >= 0 ? { xpath: trimmedXPath, ...result } : null;
-      });
-
-      const validationResults = (await Promise.all(validationPromises)).filter(
-        (r) => r !== null,
-      ); // Filter out nulls/errors
-
-      // Score valid results and prepare feedback
-      for (const result of validationResults) {
-        const { xpath, count, firstElementDetails } = result;
-
-        if (count <= 0 || !firstElementDetails) {
-          logDebug(
-            `[Validation] XPath "${xpath}" found ${count <= 0 ? "0 or errored" : count} elements or no details. Skipping scoring.`,
-          );
-          feedbackForLLM.push({
-            xpath: xpath,
-            result: `Score 0 (Found ${count}, No details)`, // Clear feedback
-          });
-          continue; // Skip scoring if no elements or details
-        }
-
-        // Score the element based on details
-        const score = scoreElement(firstElementDetails, count, xpath);
-
-        const feedbackEntry = {
-          xpath: xpath,
-          result: `Score ${score.toFixed(1)} (Found ${count}, P:${firstElementDetails.descendantCounts?.p ?? "N/A"})`,
-        };
-        feedbackForLLM.push(feedbackEntry);
-
-        if (score > 0) {
-          // Store candidate if it has a positive score
-          scoredCandidates.push({
-            xpath,
-            score,
-            elementDetails: firstElementDetails, // Store details for potential later use
-          });
-          logInfo(
-            `[Validation] XPath "${xpath}" scored: ${score.toFixed(2)} (Found ${count})`,
-          );
-          currentAttemptBestScore = Math.max(currentAttemptBestScore, score);
-        } else {
-          logDebug(
-            `[Validation] XPath "${xpath}" scored 0 (Found ${count}). Discarding.`,
-          );
-          // Feedback already added above
-        }
-      } // End loop through validation results
-
-      logInfo(
-        `[Discovery] Attempt ${retry + 1} finished. Best score this attempt: ${currentAttemptBestScore > -1 ? currentAttemptBestScore.toFixed(2) : "N/A"}. Total valid candidates so far: ${scoredCandidates.length}`,
-      );
-
-      // Optional: Add a small delay between LLM retries
-      if (retry < MAX_LLM_RETRIES) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      }
-    } // End LLM retry loop
-
-    // --- Selection and Final Extraction ---
-    if (scoredCandidates.length > 0) {
-      // Sort all collected candidates by score (descending)
-      scoredCandidates.sort((a, b) => b.score - a.score);
-      bestCandidateXPath = scoredCandidates[0].xpath; // Select the highest scoring one
-
-      logInfo(`--- Selected Best Overall XPath ---`);
-      logInfo(`XPath: ${bestCandidateXPath}`);
-      logInfo(`Score: ${scoredCandidates[0].score.toFixed(2)}`);
-      if (ENABLE_DEBUG_LOGGING && scoredCandidates.length > 1) {
-        logDebug("Top 3 candidates:");
-        scoredCandidates
-          .slice(0, 3)
-          .forEach((c, i) =>
-            logDebug(`${i + 1}. ${c.xpath} (Score: ${c.score.toFixed(2)})`),
-          );
-      }
-
-      // Final extraction using the chosen XPath
-      logInfo(
-        `[Extraction] Attempting to extract content using final XPath: ${bestCandidateXPath}`,
-      );
-      try {
-        if (page.isClosed()) {
-          throw new Error("Page closed before final extraction.");
-        }
-        extractedHtml = await page.evaluate((xpath) => {
-          try {
-            const result = document.evaluate(
-              xpath,
-              document,
-              null,
-              XPathResult.FIRST_ORDERED_NODE_TYPE, // Get only the first match
-              null,
-            );
-            const element = result.singleNodeValue;
-            // Return innerHTML only if element exists and has content
-            return element?.innerHTML?.trim() || null;
-          } catch (evalError) {
-            console.error(
-              `[Puppeteer Eval] Error evaluating XPath "${xpath}" for final extraction: ${evalError.message}`,
-            );
-            return null; // Return null on evaluation error
-          }
-        }, bestCandidateXPath); // Pass the best XPath
-
-        if (extractedHtml) {
-          logInfo(
-            "[Extraction] Successfully extracted HTML content using the discovered XPath.",
-          );
-        } else {
-          // This can happen if the element exists but has no innerHTML, or if the XPath failed this time
-          logWarn(
-            `[Extraction] Final XPath "${bestCandidateXPath}" returned no content during extraction (element missing, empty, or eval error).`,
-          );
-          bestCandidateXPath = null; // Invalidate XPath if extraction failed
-        }
-      } catch (extractError) {
-        if (
-          extractError.message.includes("Target closed") ||
-          extractError.message.includes("Session closed")
-        ) {
-          logWarn(
-            "[Extraction] Page closed during final extraction:",
-            extractError.message,
-          );
-        } else {
-          logError(
-            `[Extraction] Critical error during final content extraction with XPath "${bestCandidateXPath}":`,
-            extractError,
-          );
-        }
-        bestCandidateXPath = null; // Invalidate XPath on critical error
-        extractedHtml = null;
-      }
-    } else {
-      logError(
-        "[Discovery] No suitable XPath candidates found after all LLM retries and validation.",
-      );
-      // No XPath found, proceed to failure case
-    }
-
-    // --- Return Result or Handle Failure ---
-    if (bestCandidateXPath && extractedHtml !== null) {
-      // Success case
-      await cleanupPuppeteer(page, browser, userDataDir, debug);
-      return { foundXPath: bestCandidateXPath, extractedHtml: extractedHtml };
-    } else {
-      // Failure case (no XPath found, or extraction failed)
-      logWarn(
-        "[Discovery] Process finished but failed to find a working XPath or extract content.",
-      );
-      if (htmlContent) {
-        // Save the original HTML if discovery failed
-        await saveHtmlOnFailure(url, htmlContent);
-      } else {
-        logWarn(
-          "[Discovery] No HTML content was obtained during the process, cannot save on failure.",
-        );
-      }
-      await cleanupPuppeteer(page, browser, userDataDir, debug);
-      return null; // Indicate failure
-    }
-  } catch (error) {
-    logError(
-      "[Discovery] An unhandled error occurred during the XPath discovery process:",
-      error,
-    );
-    // Check for common critical errors
-    if (
-      error.message &&
-      (error.message.includes("Target closed") ||
-        error.message.includes("Session closed"))
-    ) {
-      logError(
-        "[Discovery] Browser or page closed unexpectedly. Potential crash or resource issue.",
-      );
-    } else if (error.message && error.message.includes("Protocol error")) {
-      logError(
-        "[Discovery] Protocol error communicating with the browser. Check browser/driver compatibility or resource constraints.",
-      );
-    }
-
-    // Attempt to save HTML if available, even on unexpected errors
-    if (htmlContent) {
-      logWarn("[Discovery] Saving full HTML due to unhandled error...");
-      await saveHtmlOnFailure(url, htmlContent);
-    } else if (page && !page.isClosed()) {
-      try {
-        htmlContent = await getHtmlContent(page); // Try one last time
-        await saveHtmlOnFailure(url, htmlContent);
-      } catch {}
-    } else {
-      logWarn(
-        "[Discovery] Process failed early or page closed, no HTML content available to save.",
-      );
-    }
-
-    await cleanupPuppeteer(page, browser, userDataDir, debug); // Ensure cleanup on error
-    return null; // Indicate failure
-  }
-  // No finally needed as cleanup happens in success/fail paths and catch block
-};
-
-/**
- * Fetches content using a known XPath.
- * Uses the direct HTTP proxy and handles authentication.
- * @param {string} url - The URL to fetch.
- * @param {string} xpath - The known XPath to use.
- * @param {boolean} debug - Enable debug logging.
- * @returns {Promise<string|null>} - The extracted HTML content or null if XPath fails or navigation/preparation fails.
- */
-const fetchWithKnownXpath = async (url, xpath, debug = false) => {
-  logInfo(`--- Fetching content for ${url} using known XPath: ${xpath} ---`);
-  let browser = null;
-  let userDataDir = null;
-  let page = null;
-  let extractedHtml = null;
-  let htmlContentForSave = null; // To store HTML for saving on failure
-
-  try {
-    // Launch browser (handles proxy setup internally)
-    const launchResult = await launchPuppeteerBrowser(debug);
-    browser = launchResult.browser;
-    userDataDir = launchResult.userDataDir;
-    page = await browser.newPage();
-
-    // Navigate and prepare (handles auth, CAPTCHA, interaction)
-    const navigationSuccessful = await navigateAndPreparePage(page, url, debug);
-    if (!navigationSuccessful) {
-      // navigateAndPreparePage logs the failure reason
-      logError(
-        `[Fetch Known] Navigation/preparation failed for ${url}. Cannot use known XPath.`,
-      );
-      // Try to get HTML for saving before exiting
-      try {
-        htmlContentForSave = await getHtmlContent(page);
-      } catch {}
-      await saveHtmlOnFailure(url, htmlContentForSave);
-      await cleanupPuppeteer(page, browser, userDataDir, debug);
-      return null; // Return null as we couldn't navigate/prepare
-    }
-
-    // Get HTML content after successful navigation (primarily for saving if XPath fails)
+    logDebug(`[Discovery] findArticleXPathAndExtract called for: ${url}`);
+    let browser = null, userDataDir = null, page = null, htmlContent = null, bestXPath = null, extractedHtml = null;
     try {
-      htmlContentForSave = await getHtmlContent(page);
-    } catch {
-      logWarn(
-        "[Fetch Known] Could not get full HTML content after navigation, continuing with XPath attempt.",
-      );
-    }
+        logDebug("[Discovery] Launching browser...");
+        const launchRes = await launchPuppeteerBrowser(debug); browser = launchRes.browser; userDataDir = launchRes.userDataDir; page = await browser.newPage();
+        logDebug("[Discovery] Browser launched.");
 
-    // Evaluate the known XPath
-    logInfo(`[Fetch Known] Evaluating known XPath: ${xpath}`);
-    extractedHtml = await page.evaluate((xpathSelector) => {
-      try {
-        const result = document.evaluate(
-          xpathSelector,
-          document,
-          null,
-          XPathResult.FIRST_ORDERED_NODE_TYPE, // Target the first match
-          null,
-        );
-        const element = result.singleNodeValue;
-        // Return innerHTML only if element found and has content
-        return element?.innerHTML?.trim() || null;
-      } catch (e) {
-        // Log error within evaluate context for easier debugging
-        console.error(
-          `[Fetch Known Eval] Error during XPath evaluation in browser for "${xpathSelector}": ${e.message}`,
-        );
-        return null; // Return null on evaluation error
-      }
-    }, xpath); // Pass the known XPath
+        logDebug("[Discovery] Calling navigateAndPreparePage (DataDome Check: true)...");
+        // *** Pass true (or rely on default) for performDataDomeCheck ***
+        const navOK = await navigateAndPreparePage(page, url, debug, true);
+        logDebug(`[Discovery] navigateAndPreparePage result: ${navOK}`);
+        if (!navOK) { logError("[Discovery] Nav/prep failed (with explicit DD check). Abort."); try { htmlContent = await getHtmlContent(page); } catch {} await saveHtmlOnFailure(url, htmlContent); await cleanupPuppeteer(page, browser, userDataDir, debug); return null; }
 
-    // Check the result
-    if (extractedHtml !== null && extractedHtml.length > 0) {
-      // Check length too
-      logInfo(
-        `[Fetch Known] Successfully extracted content using known XPath. Length: ${extractedHtml.length}`,
-      );
-      await cleanupPuppeteer(page, browser, userDataDir, debug);
-      return extractedHtml; // Success
-    } else {
-      logWarn(
-        `[Fetch Known] Known XPath "${xpath}" failed to return content for ${url} (element missing, empty, or evaluation error).`,
-      );
-      await saveHtmlOnFailure(url, htmlContentForSave); // Save the full HTML since the XPath failed
-      await cleanupPuppeteer(page, browser, userDataDir, debug);
-      return null; // Indicate known XPath failure
-    }
-  } catch (error) {
-    logError(
-      `[Fetch Known] An unhandled error occurred during fetchWithKnownXpath for ${url}:`,
-      error,
-    );
-    if (
-      error.message &&
-      (error.message.includes("Target closed") ||
-        error.message.includes("Session closed"))
-    ) {
-      logError("[Fetch Known] Browser or page closed unexpectedly.");
-    }
-    // Attempt to save HTML if available
-    if (htmlContentForSave) {
-      await saveHtmlOnFailure(url, htmlContentForSave);
-    } else if (page && !page.isClosed()) {
-      try {
-        htmlContentForSave = await getHtmlContent(page);
-        await saveHtmlOnFailure(url, htmlContentForSave);
-      } catch {}
-    } else {
-      logWarn(
-        "[Fetch Known] Error occurred, and no HTML content was available to save.",
-      );
-    }
-    await cleanupPuppeteer(page, browser, userDataDir, debug); // Ensure cleanup
-    return null; // Indicate failure due to error
-  }
+        logDebug("[Discovery] Getting HTML content for LLM/Snippets...");
+        htmlContent = await getHtmlContent(page); if (!htmlContent) { logError("[Discovery] Get HTML failed after nav. Abort."); await cleanupPuppeteer(page, browser, userDataDir, debug); return null; }
+        logInfo("[Discovery] HTML OK for analysis.");
+
+        logDebug("[Discovery] Extracting snippets...");
+        const snippets = await extractArticleSnippets(page); logDebug(`[Discovery] ${snippets.length} snippets found.`);
+
+        let tried = new Set(); let feedback = []; let candidates = [];
+        logDebug("[Discovery] Starting LLM interaction loop...");
+        for (let retry = 0; retry <= MAX_LLM_RETRIES; retry++) {
+            logInfo(`[Discovery] LLM Attempt ${retry+1}/${MAX_LLM_RETRIES+1}`);
+            const llmPaths = await getLlmCandidateXPaths(htmlContent, snippets, retry > 0 ? feedback : []);
+            if (!llmPaths?.length) { logWarn(`[Discovery] LLM no candidates attempt ${retry+1}.`); if (retry < MAX_LLM_RETRIES) { await new Promise(r=>setTimeout(r,3000)); continue; } else break; }
+            const newPaths = llmPaths.filter(x => !tried.has(x?.trim()));
+            if (newPaths.length === 0) { logWarn(`[Discovery] LLM only old paths attempt ${retry+1}.`); if (retry < MAX_LLM_RETRIES) { await new Promise(r=>setTimeout(r,2000)); continue; } else break; }
+            logInfo(`[Discovery] Validating ${newPaths.length} new paths...`); feedback = []; let bestScoreThis = -1;
+            const promises = newPaths.map(async x => { const tx = x?.trim(); if (!tx) return null; tried.add(tx); const res = await queryXPathWithDetails(page, tx, TAGS_TO_COUNT); return res.count >= 0 ? { xpath: tx, ...res } : null; });
+            const results = (await Promise.all(promises)).filter(r => r !== null);
+            logDebug(`[Discovery] Validation results count: ${results.length}`);
+            for (const res of results) { const { xpath, count, firstElementDetails } = res; if (count <= 0 || !firstElementDetails) { logDebug(`[Validation] "${xpath}" bad count/details.`); feedback.push({ xpath, result: `Score 0 (Found ${count}, No details)` }); continue; } const score = scoreElement(firstElementDetails, count, xpath); feedback.push({ xpath, result: `Score ${score.toFixed(1)} (Found ${count}, P:${firstElementDetails.descendantCounts?.p??"N/A"})` }); if (score > 0) { candidates.push({ xpath, score, elementDetails: firstElementDetails }); logInfo(`[Validation] "${xpath}" Score: ${score.toFixed(2)} (${count})`); bestScoreThis = Math.max(bestScoreThis, score); } else logDebug(`[Validation] "${xpath}" Score 0.`); }
+            logInfo(`[Discovery] Attempt ${retry+1} done. Best=${bestScoreThis > -1 ? bestScoreThis.toFixed(2) : "N/A"}. Total=${candidates.length}`);
+            if (retry < MAX_LLM_RETRIES) await new Promise(r => setTimeout(r, 1500));
+        }
+        logDebug("[Discovery] LLM loop finished.");
+
+        if (candidates.length > 0) {
+            candidates.sort((a, b) => b.score - a.score); bestXPath = candidates[0].xpath;
+            logInfo(`[Discovery] Best XPath selected: ${bestXPath} (Score: ${candidates[0].score.toFixed(2)})`);
+
+            // --- Save HTML just before final extraction attempt ---
+            logDebug("[Discovery] Attempting to get HTML for saving before final extraction...");
+            const htmlForSave = await getHtmlContent(page);
+            await saveFullHtmlPreExtract(url, htmlForSave, SUCCESSFUL_HTML_DIR);
+            // --- End Save HTML Step ---
+
+            logInfo(`[Discovery] Attempting final extraction with: ${bestXPath}`);
+            try {
+                if (page.isClosed()) throw new Error("Page closed.");
+                extractedHtml = await page.evaluate(xp => { try { const el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; return el?.innerHTML?.trim() || null; } catch (e) { console.error(`[Eval] Extract error: ${e.message}`); return null; } }, bestXPath);
+                if (extractedHtml) {
+                    logInfo("[Discovery] Extraction OK.");
+                    logInfo(`[Discovery] Storing discovered XPath for ${getDomainFromUrl(url)}.`);
+                    try { const storageData = loadStorage(); const domain = getDomainFromUrl(url); if (domain) { let domainEntry = storageData[domain] || {}; domainEntry.xpath = bestXPath; storageData[domain] = domainEntry; saveStorage(storageData); logDebug(`[Discovery] XPath saved.`); } else logWarn("[Discovery] No domain to save XPath."); }
+                    catch (storageError) { logError("[Discovery] Failed save XPath:", storageError); }
+                } else { logWarn(`[Discovery] XPath "${bestXPath}" no content on final extraction.`); bestXPath = null; }
+            } catch (e) { logError(`[Discovery] Final extraction error:`, e); bestXPath = null; extractedHtml = null; }
+        } else { logError("[Discovery] No candidates found after validation."); }
+
+        if (bestXPath && extractedHtml !== null) { logDebug("[Discovery] Returning success."); await cleanupPuppeteer(page, browser, userDataDir, debug); return { foundXPath: bestXPath, extractedHtml }; }
+        else { logWarn("[Discovery] Failed find/extract. Returning failure."); await saveHtmlOnFailure(url, htmlContent); await cleanupPuppeteer(page, browser, userDataDir, debug); return null; } // Save original analysis HTML on failure
+    } catch (error) { logError("[Discovery] Unhandled error:", error); await saveHtmlOnFailure(url, htmlContent); await cleanupPuppeteer(page, browser, userDataDir, debug); return null; }
 };
 
 // --- Main Application Logic ---
-
-/**
- * Main function to get content for a URL.
- * Handles storage lookup, fetch with known XPath, fallback to discovery, and storage updates.
- * Uses the configured HTTP proxy via Puppeteer launch.
- * @param {string} url - The target URL.
- * @returns {Promise<{success: boolean, content?: string, error?: string}>}
- */
 const getContent = async (url) => {
-  logInfo(`Processing URL: ${url}`);
-  const domain = getDomainFromUrl(url);
-  if (!domain) {
-    return { success: false, error: `Invalid URL format: ${url}` };
-  }
-  logInfo(`Normalized Domain: ${domain}`);
-
-  const storageData = loadStorage();
-  const knownXpath = storageData[domain];
+  logInfo(`--- Starting getContent for: ${url} ---`);
+  const domain = getDomainFromUrl(url); if (!domain) return { success: false, error: `Invalid URL: ${url}` }; logInfo(`Domain: ${domain}`);
+  const storageData = loadStorage(); const siteData = storageData[domain];
+  const knownXpath = siteData?.xpath; const knownCookieName = siteData?.cookie_name; const knownCookieValue = siteData?.cookie_value;
+  logDebug(`[Main] Stored data for ${domain}: XPath=${!!knownXpath}, CookieName=${knownCookieName || 'None'}`);
   let extractedHtml = null;
-  let finalXpathUsed = null; // Track which XPath was ultimately used
+  let attemptedStoredFetch = false;
 
-  // 1. Try with known XPath if available
-  if (knownXpath) {
-    logInfo(
-      `Found known XPath for ${domain}: ${knownXpath}. Attempting fetch...`,
-    );
-    extractedHtml = await fetchWithKnownXpath(
-      url,
-      knownXpath,
-      ENABLE_DEBUG_LOGGING,
-    );
+  // --- Stage 1: Attempt with stored cookie (skip explicit DD check) ---
+  if (knownCookieName && knownCookieValue) {
+      logInfo(`[Main] Stored cookie found for ${domain}. Attempting fetch without explicit DD check...`);
+      attemptedStoredFetch = true;
+      extractedHtml = await fetchWithStoredData(url, knownXpath, knownCookieName, knownCookieValue, ENABLE_DEBUG_LOGGING);
+      logDebug(`[Main] Stage 1 fetchWithStoredData (using cookie) result: ${extractedHtml !== null ? 'Success' : 'Failure'}`);
+      if (extractedHtml !== null) {
+          logInfo(`[Main] Success with stored cookie.`);
+          return { success: true, content: extractedHtml };
+      } else {
+          logWarn(`[Main] Fetch stored failed (using cookie). Fallback needed...`);
+      }
+  }
+  // --- Stage 2: Attempt with stored XPath only (if no cookie or stage 1 failed) ---
+  else if (knownXpath && !attemptedStoredFetch) { // Only try this if cookie wasn't present
+       logInfo(`[Main] No stored cookie, but XPath found. Attempting fetch without explicit DD check...`);
+       attemptedStoredFetch = true; // Mark as attempted
+       extractedHtml = await fetchWithStoredData(url, knownXpath, null, null, ENABLE_DEBUG_LOGGING); // No cookie passed
+       logDebug(`[Main] Stage 2 fetchWithStoredData (XPath only) result: ${extractedHtml !== null ? 'Success' : 'Failure'}`);
+       if (extractedHtml !== null) {
+           logInfo(`[Main] Success with stored XPath only.`);
+           return { success: true, content: extractedHtml };
+       } else {
+           logWarn(`[Main] Fetch stored failed (XPath only). Fallback needed...`);
+       }
+  }
+  // --- Stage 3: Fallback to Discovery (if no stored data or previous stages failed) ---
+  else if (!attemptedStoredFetch) {
+       logInfo(`[Main] No stored data found. Starting discovery...`);
+  }
 
-    if (extractedHtml !== null) {
-      logInfo(`Extraction successful using stored XPath for ${domain}.`);
-      finalXpathUsed = knownXpath;
-      return { success: true, content: extractedHtml }; // Early exit on success
-    } else {
-      // Known XPath failed, log it and prepare for discovery
-      logWarn(
-        `Stored XPath "${knownXpath}" for ${domain} failed. Attempting discovery...`,
-      );
-      // Don't remove from storage yet, discovery might fail too.
-    }
+  logInfo("[Main] Calling findArticleXPathAndExtract (will perform DD check if needed)...");
+  const discoveryResult = await findArticleXPathAndExtract(url, ENABLE_DEBUG_LOGGING);
+  logDebug(`[Main] findArticleXPathAndExtract result: ${discoveryResult ? 'Object received' : 'null'}`);
+
+  if (discoveryResult?.extractedHtml !== null) {
+    logInfo(`[Main] Discovery successful.`);
+    return { success: true, content: discoveryResult.extractedHtml };
   } else {
-    logInfo(`No stored XPath found for ${domain}. Starting discovery...`);
-  }
-
-  // 2. Fallback to Discovery if known XPath failed or didn't exist
-  if (extractedHtml === null) {
-    // Only run discovery if fetchWithKnownXpath failed or wasn't tried
-    const discoveryResult = await findArticleXPathAndExtract(
-      url,
-      ENABLE_DEBUG_LOGGING,
-    );
-
-    if (discoveryResult && discoveryResult.extractedHtml !== null) {
-      // Discovery succeeded
-      logInfo(
-        `XPath discovery successful for ${domain}. New XPath: ${discoveryResult.foundXPath}`,
-      );
-      finalXpathUsed = discoveryResult.foundXPath;
-      extractedHtml = discoveryResult.extractedHtml;
-
-      // Update storage only if the discovered XPath is different from the (failed) known one, or if none was known
-      if (storageData[domain] !== finalXpathUsed) {
-        if (storageData[domain]) {
-          logInfo(
-            `Updating storage for ${domain}: Replacing failed "${storageData[domain]}" with new "${finalXpathUsed}"`,
-          );
-        } else {
-          logInfo(
-            `Saving newly discovered XPath for ${domain}: ${finalXpathUsed}`,
-          );
-        }
-        storageData[domain] = finalXpathUsed;
-        saveStorage(storageData);
-      } else if (knownXpath) {
-        // This case means discovery found the *same* XPath that just failed in fetchWithKnownXpath.
-        // This is odd, but we trust the content extracted during *discovery* more in this instance.
-        logWarn(
-          `Discovery found the same XPath (${finalXpathUsed}) that failed during the initial fetch attempt. Using content from discovery. Storage not changed.`,
-        );
-      }
-      return { success: true, content: extractedHtml }; // Return discovered content
-    } else {
-      // Discovery failed
-      logError(`Failed to discover a working XPath for ${domain} (${url}).`);
-
-      // If a known XPath existed but failed, AND discovery also failed, remove the bad known XPath
-      if (knownXpath && storageData[domain] === knownXpath) {
-        logWarn(
-          `Removing failed known XPath "${knownXpath}" from storage for ${domain} because discovery also failed.`,
-        );
-        delete storageData[domain];
-        saveStorage(storageData);
-      }
-      return {
-        success: false,
-        error: `Failed to find or extract content for ${domain} after discovery attempt.`,
-      };
+    logError(`[Main] Discovery failed or aborted for ${domain}.`);
+    // Clear stored XPath if fetch was attempted with it and discovery also failed
+    if (attemptedStoredFetch && knownXpath) {
+       logWarn(`[Main] Both stored fetch (XPath: ${knownXpath}) and discovery failed. Clearing stored XPath.`);
+       try { const currentStorage = loadStorage(); if (currentStorage[domain]) { delete currentStorage[domain].xpath; saveStorage(currentStorage); } }
+       catch (storageError) { logError(`[Main Cleanup] Failed clear XPath:`, storageError); }
     }
+    return { success: false, error: `Failed extraction for ${domain}. Fetch/Discovery failed.` };
   }
-
-  // Should not be reached if logic is correct, but provides a fallback error.
-  logError(`[FATAL] Unexpected state reached for ${url}. No content obtained.`);
-  return {
-    success: false,
-    error: `Unexpected processing state for ${domain}.`,
-  };
 };
 
 // --- Command Line Execution ---
 (async () => {
-  const targetUrl = process.argv[2];
-
-  if (!targetUrl) {
-    console.error("Usage: node smartScraper2.js <url>"); // Updated script name
-    process.exit(1);
-  }
-
-  // Validate URL format roughly before starting
-  try {
-    new URL(targetUrl);
-  } catch (e) {
-    console.error(`Invalid URL provided: ${targetUrl}`);
-    process.exit(1);
-  }
-
-  // Initialize storage if needed
-  if (!fs.existsSync(STORAGE_FILE_PATH)) {
-    logInfo("Creating empty storage file.");
-    try {
-      saveStorage({});
-    } catch (initSaveError) {
-      console.error(
-        "FATAL: Could not create initial storage file.",
-        initSaveError,
-      );
-      process.exit(1);
-    }
-  } else {
-    // Attempt to load storage early to catch parsing errors before launching browser
-    try {
-      loadStorage();
-      logDebug("Storage file loaded successfully.");
-    } catch (initLoadError) {
-      console.error(
-        "FATAL: Could not load or parse existing storage file.",
-        initLoadError,
-      );
-      process.exit(1);
-    }
-  }
-
-  // Removed: Starting the Local Proxy Server (no longer needed)
-
-  // --- Run the Main Content Fetching Logic ---
-  let exitCode = 1; // Default to failure exit code
-  try {
-    const result = await getContent(targetUrl); // Uses direct proxy setup within
-
-    if (result.success && result.content) {
-      logInfo("\n--- Extraction Successful ---");
-      // Output ONLY the extracted HTML content to stdout for piping/further processing
-      console.log(result.content);
-      exitCode = 0; // Set success exit code
-    } else {
-      logError("\n--- Extraction Failed ---");
-      // Output error message to stderr
-      console.error(`Error: ${result.error || "Unknown extraction failure."}`);
-      exitCode = 1; // Ensure failure exit code
-    }
-  } catch (err) {
-    logError(
-      "\n--- An Unhandled Top-Level Error Occurred During Processing ---",
-    );
-    console.error(err); // Log the full error to stderr
-    exitCode = 1; // Ensure failure exit code
-  } finally {
-    // Removed: Stopping the Local Proxy Server
-    logInfo(
-      "Processing finished. Initiating final cleanup check (if any browser lingered)...",
-    );
-    // Minimal cleanup needed here as it's handled within functions, but log completion.
-    logInfo("Exiting.");
-    process.exit(exitCode); // Exit with the determined code
-  }
+  const targetUrl = process.argv[2]; if (!targetUrl) { console.error("Usage: node smartScraper2.js <url>"); process.exit(1); }
+  logInfo(`--- Script Start --- Target URL: ${targetUrl}`);
+  try { new URL(targetUrl); } catch { console.error(`Invalid URL: ${targetUrl}`); process.exit(1); }
+  try { logDebug("Initializing storage check..."); if (!fs.existsSync(STORAGE_FILE_PATH)) { logInfo("Creating new storage file."); saveStorage({}); } else { logInfo("Loading existing storage."); loadStorage(); } logDebug("Storage check OK."); }
+  catch (e) { console.error("FATAL Storage init/load error.", e); process.exit(1); }
+  let exitCode = 1; try { const result = await getContent(targetUrl); if (result.success && result.content) { console.log(result.content); exitCode = 0; } else { console.error(`Error: ${result.error || "Unknown failure."}`); exitCode = 1; } } catch (err) { logError("\n--- Unhandled Top-Level Error ---"); console.error(err); exitCode = 1; } finally { logInfo(`--- Script End --- Exit Code: ${exitCode}`); process.exit(exitCode); }
 })();
