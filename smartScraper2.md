@@ -4,7 +4,7 @@ This document outlines the architecture and execution flow of the `smartScraper2
 
 ## Overview
 
-`smartScraper2.js` is a Node.js script using Puppeteer to scrape article content from a given URL. It prioritizes using a stored XPath and cookie for known domains to speed up extraction. If no stored data exists or the stored data fails, it falls back to a discovery process that uses an LLM (via OpenRouter) to suggest potential XPaths based on the page's HTML structure and content snippets. It also includes logic to handle DataDome CAPTCHAs using 2Captcha.
+`smartScraper2.js` is a Node.js script using Puppeteer to scrape article content from a given URL. It prioritizes using a stored XPath and cookie for known domains to speed up extraction. If no stored data exists or the stored data fails, it falls back to a discovery process that uses an LLM (via OpenRouter) to suggest potential XPaths based on the page's HTML structure and content snippets. It also includes logic to handle DataDome CAPTCHA's using 2Captcha.
 
 ## Configuration
 
@@ -31,5 +31,5 @@ The structure is a JSON object where keys are normalized domain names (e.g., `ws
 
 ## Execution Flow
 
-The core logic resides in the `getContent(url)` function. The process follows these steps:
+The core logic resides in the `getContent(url)` function. The process follows the steps outlined in the Graphviz diagram (`smartScraper2.dot`) and described below by node number:
 
