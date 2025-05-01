@@ -1,39 +1,132 @@
 digraph execution_logic {
-    node[shape=box, style=filled];
+    node[shape=box, style=filled, fillcolor=lightblue];
+    edge[color=gray];
 
-    start[label="getContent(url)"];
-    error_no_url[label="Error: No URL provided"];
-    config_check[label="Check if normalized URL in config"];
-    fetch_with_stored_data[label="Fetch with stored data (XPath and cookie)"];
-    use_cookie[label="Use stored cookie"];
-    fetch_failed[label="Fetch failed"];
-    captcha_detected[label="CAPTCHA detected"];
-    solve_captcha[label="Solve CAPTCHA with 2Captcha"];
-    update_cookie[label="Update cookie with new CAPTCHA solution"];
-    extract_xpath[label="Extract XPath"];
-    xpath_failed[label="XPath extraction failed"];
-    find_better_xpath[label="Find better XPath"];
-    update_config_xpath[label="Update config with new XPath"];
-    return_error[label="Return error"];
+    start[label="getContent(url)", fillcolor=lightgreen];
+    no_url_error[label="Error: No URL provided", shape=octagon, fillcolor=salmon];
+    get_domain[label="Get Domain from URL"];
+    load_storage[label="Load site_storage.json"];
+    check_stored_data[label="Check for stored XPath/Cookie"];
 
-    start -> config_check;
-    config_check -> fetch_with_stored_data[label="yes"];
-    config_check -> error_no_url[label="no"];
+    // Stage 1: Attempt with Stored Data
+    subgraph cluster_stage1 {
+        label = "Stage 1: Attempt Stored Data";
+        style=dashed;
+        color=blue;
 
-    fetch_with_stored_data -> use_cookie;
-    use_cookie -> extract_xpath[label="success"];
-    use_cookie -> fetch_failed[label="failure"];
+        fetch_stored[label="fetchWithStoredData(url, storedXPath, storedCookie)", fillcolor=yellow];
+        nav_prep_stored[label="navigateAndPreparePage (no explicit DD check)"];
+        set_cookie[label="Set Stored Cookie (if present)"];
+        get_html_stored[label="Get HTML Content"];
+        save_html_pre_extract_stored[label="Save HTML (Pre-Extract)"];
+        extract_with_stored_xpath[label="Extract HTML with Stored XPath"];
+        stored_fetch_success[label="Extraction Successful", fillcolor=lightgreen];
+        stored_fetch_fail[label="Extraction Failed", fillcolor=salmon];
+        save_html_on_fail_stored[label="Save HTML (On Failure)"];
+    }
 
-    fetch_failed -> captcha_detected[label="CAPTCHA"];
-    captcha_detected -> solve_captcha;
-    solve_captcha -> update_cookie;
-    update_cookie -> extract_xpath;
+    // Stage 2: Fallback to Discovery
+    subgraph cluster_stage2 {
+        label = "Stage 2: Discovery";
+        style=dashed;
+        color=red;
 
-    extract_xpath -> return_error[label="failure"];
-    extract_xpath -> find_better_xpath[label="failure"];
+        find_xpath_extract[label="findArticleXPathAndExtract(url)", fillcolor=yellow];
+        nav_prep_discovery[label="navigateAndPreparePage (with explicit DD check)"];
+        handle_datadome[label="Handle DataDome (if needed/configured)"];
+        solve_captcha[label="Solve CAPTCHA (2Captcha)"];
+        update_stored_cookie[label="Update Stored Cookie"];
+        get_html_discovery[label="Get HTML Content"];
+        extract_snippets[label="Extract Snippets"];
+        get_llm_candidates[label="Get LLM Candidate XPaths"];
+        validate_score_xpaths[label="Validate & Score XPaths"];
+        select_best_xpath[label="Select Best XPath"];
+        update_stored_xpath[label="Update Stored XPath"];
+        save_html_pre_extract_discovery[label="Save HTML (Pre-Extract)"];
+        extract_with_discovered_xpath[label="Extract HTML with Discovered XPath"];
+        discovery_success[label="Extraction Successful", fillcolor=lightgreen];
+        discovery_fail[label="Discovery/Extraction Failed", fillcolor=salmon];
+        save_html_on_fail_discovery[label="Save HTML (On Failure)"];
+    }
 
-    find_better_xpath -> update_config_xpath[label="success"];
-    find_better_xpath -> return_error[label="failure"];
+    return_success[label="Return Success (Content)", shape=doubleoctagon, fillcolor=lightgreen];
+    return_error[label="Return Error", shape=doubleoctagon, fillcolor=salmon];
 
-    update_config_xpath -> return_error;
+    // Connections
+    start -> get_domain;
+    get_domain -> no_url_error[label="Invalid URL"];
+    get_domain -> load_storage[label="Valid URL"];
+    load_storage -> check_stored_data;
+
+    // Logic based on stored data
+    check_stored_data -> fetch_stored[label="Stored XPath/Cookie found"];
+    check_stored_data -> find_xpath_extract[label="No Stored Data"]; // Direct to discovery if nothing stored
+
+    // Stage 1 Flow
+    fetch_stored -> nav_prep_stored;
+    nav_prep_stored -> set_cookie[label="Success"];
+    nav_prep_stored -> stored_fetch_fail[label="Nav Failed"];
+    set_cookie -> get_html_stored;
+    get_html_stored -> save_html_pre_extract_stored[label="HTML OK"];
+    get_html_stored -> stored_fetch_fail[label="No HTML"];
+    save_html_pre_extract_stored -> extract_with_stored_xpath;
+    extract_with_stored_xpath -> stored_fetch_success[label="Extraction OK"];
+    extract_with_stored_xpath -> stored_fetch_fail[label="Extraction Failed"];
+
+    stored_fetch_success -> return_success;
+    stored_fetch_fail -> save_html_on_fail_stored;
+    save_html_on_fail_stored -> find_xpath_extract[label="Fallback to Discovery"]; // If Stage 1 fails, try Stage 2
+
+    // Stage 2 Flow (Discovery)
+    find_xpath_extract -> nav_prep_discovery;
+    nav_prep_discovery -> handle_datadome[label="Success"];
+    nav_prep_discovery -> discovery_fail[label="Nav Failed"];
+
+    handle_datadome -> solve_captcha[label="CAPTCHA Detected"];
+    handle_datadome -> get_html_discovery[label="No CAPTCHA / Handled"];
+    handle_datadome -> discovery_fail[label="CAPTCHA Handling Failed"];
+
+    solve_captcha -> update_stored_cookie[label="Solved"];
+    solve_captcha -> discovery_fail[label="Solve Failed"];
+    update_stored_cookie -> get_html_discovery;
+
+    get_html_discovery -> extract_snippets[label="HTML OK"];
+    get_html_discovery -> discovery_fail[label="No HTML"];
+
+    extract_snippets -> get_llm_candidates;
+    get_llm_candidates -> validate_score_xpaths[label="Candidates"];
+    get_llm_candidates -> discovery_fail[label="No Candidates"];
+
+    validate_score_xpaths -> select_best_xpath[label="Valid Candidates"];
+    validate_score_xpaths -> discovery_fail[label="No Valid Candidates"];
+
+    select_best_xpath -> update_stored_xpath;
+    update_stored_xpath -> save_html_pre_extract_discovery;
+    save_html_pre_extract_discovery -> extract_with_discovered_xpath;
+    extract_with_discovered_xpath -> discovery_success[label="Extraction OK"];
+    extract_with_discovered_xpath -> discovery_fail[label="Extraction Failed"];
+
+    discovery_success -> return_success;
+    discovery_fail -> save_html_on_fail_discovery;
+    save_html_on_fail_discovery -> return_error; // If Stage 2 fails, return error
+
+    // Final returns
+    return_success -> end[label="End", shape=circle, fillcolor=lightgreen];
+    return_error -> end[label="End", shape=circle, fillcolor=salmon];
+
+    // Add edges for the case where Stage 1 fails and triggers Stage 2
+    stored_fetch_fail -> find_xpath_extract; // Explicitly show fallback
+
+    // Add edges for the case where Stage 1 succeeds and we skip Stage 2
+    stored_fetch_success -> return_success; // Already there, but reinforces the skip
+
+    // Add edge for the case where Stage 1 has XPath but no cookie, still attempts fetch_stored
+    check_stored_data -> fetch_stored[label="Stored XPath (no cookie)"];
+
+    // Add edge for the case where Stage 1 has cookie but no XPath, still attempts fetch_stored
+    check_stored_data -> fetch_stored[label="Stored Cookie (no XPath)"];
+
+    // Add edge for the case where Stage 1 has both cookie and XPath
+    check_stored_data -> fetch_stored[label="Stored XPath & Cookie"];
+
 }
