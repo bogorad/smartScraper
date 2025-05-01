@@ -218,8 +218,8 @@ const handleDataDomeIfNeeded = async (page, url, userAgent, debug = false) => {
     const requiresCheck = DADADOME_DOMAINS.includes(domain);
     logDebug(`[DataDome] Domain: ${domain}, Requires Check: ${requiresCheck}, API Key Set: ${!!TWOCAPTCHA_API_KEY}`);
 
-    if (requiresCheck && !TWOCAPTCHA_API_KEY) { logWarn(`[DataDome] ${domain} needs check, but no API key. Skipping.`); return true; }
     if (!requiresCheck) { logDebug(`[DataDome] ${domain} not in list. Skipping.`); return true; }
+    if (!TWOCAPTCHA_API_KEY) { logWarn(`[DataDome] ${domain} needs check, but no API key. Skipping.`); return true; } // Allow skipping if config is missing
 
     logInfo(`[DataDome] Checking ${domain} for URL: ${url}`);
     try {
@@ -314,14 +314,13 @@ const navigateAndPreparePage = async (page, url, debug = false, performDataDomeC
         initialNavOk = true;
     } catch (navError) {
         logError(`[NAVIGATE] Initial page.goto error for ${url}:`, navError);
-        // Don't immediately return false, let DataDome check run if requested,
-        // as sometimes the error page itself contains the CAPTCHA iframe.
-        // However, if it's a critical proxy error, we should fail.
-        if (navError.message?.includes("net::ERR_PROXY_") || navError.message?.includes("net::ERR_NAME_NOT_RESOLVED")) {
-            logError("[NAVIGATE] Critical network/proxy error during initial goto. Failing.");
-            return false;
+        // If DataDome check is requested, we might still proceed to check the error page
+        // for the CAPTCHA iframe. Otherwise, this is a failure.
+        if (!performDataDomeCheck || navError.message?.includes("net::ERR_PROXY_") || navError.message?.includes("net::ERR_NAME_NOT_RESOLVED")) {
+             logError("[NAVIGATE] Critical network/proxy error or DataDome check skipped. Failing.");
+             return false;
         }
-        logWarn("[NAVIGATE] Initial goto failed, but proceeding to DataDome check just in case.");
+        logWarn("[NAVIGATE] Initial goto failed, but proceeding to DataDome check as requested.");
     }
 
     // --- Conditional DataDome Check ---
@@ -351,7 +350,9 @@ const navigateAndPreparePage = async (page, url, debug = false, performDataDomeC
     // Basic check if we are on *some* page related to the domain, not about:blank
     const targetDomain = getDomainFromUrl(url);
     const finalDomain = getDomainFromUrl(finalUrl);
-    if (!finalUrl || finalUrl === 'about:blank' || (targetDomain && finalDomain !== targetDomain && !finalUrl.includes('captcha'))) { // Allow captcha URLs
+    // Allow captcha URLs if DataDome check was performed and successful
+    const isCaptchaUrl = finalUrl.includes('captcha-delivery.com') || finalUrl.includes('geo.captcha-delivery.com');
+    if (!finalUrl || finalUrl === 'about:blank' || (targetDomain && finalDomain !== targetDomain && !isCaptchaUrl)) {
         logError(`[NAVIGATE] Ended up on unexpected URL: ${finalUrl}. Expected something like ${url}`);
         // Check common block pages again just in case
         const pageTitle = (await page.title())?.toLowerCase() || "";
@@ -445,7 +446,7 @@ const findArticleXPathAndExtract = async (url, debug = false) => {
     logDebug(`[Discovery] findArticleXPathAndExtract called for: ${url}`);
     let browser = null, userDataDir = null, page = null, htmlContent = null, bestXPath = null, extractedHtml = null;
     try {
-        logDebug("[Discovery] Launching browser...");
+        logDebug("[Discovery] Launching browser for discovery...");
         const launchRes = await launchPuppeteerBrowser(debug); browser = launchRes.browser; userDataDir = launchRes.userDataDir; page = await browser.newPage();
         logDebug("[Discovery] Browser launched.");
 
@@ -510,67 +511,111 @@ const findArticleXPathAndExtract = async (url, debug = false) => {
 // --- Main Application Logic ---
 const getContent = async (url) => {
   logInfo(`--- Starting getContent for: ${url} ---`);
-  const domain = getDomainFromUrl(url); if (!domain) return { success: false, error: `Invalid URL: ${url}` }; logInfo(`Domain: ${domain}`);
-  const storageData = loadStorage(); const siteData = storageData[domain];
-  const knownXpath = siteData?.xpath; const knownCookieName = siteData?.cookie_name; const knownCookieValue = siteData?.cookie_value;
+  // 1. if no url - error, fail
+  if (!url) {
+      logError("[Main] No URL provided.");
+      return { success: false, error: "No URL provided." };
+  }
+
+  const domain = getDomainFromUrl(url);
+  if (!domain) {
+      logError(`[Main] Invalid URL format: ${url}`);
+      return { success: false, error: `Invalid URL format: ${url}` };
+  }
+  logInfo(`Domain: ${domain}`);
+
+  const storageData = loadStorage();
+  const siteData = storageData[domain];
+  const knownXpath = siteData?.xpath;
+  const knownCookieName = siteData?.cookie_name;
+  const knownCookieValue = siteData?.cookie_value;
+
   logDebug(`[Main] Stored data for ${domain}: XPath=${!!knownXpath}, CookieName=${knownCookieName || 'None'}`);
+
   let extractedHtml = null;
   let attemptedStoredFetch = false;
 
-  // --- Stage 1: Attempt with stored cookie (skip explicit DD check) ---
-  if (knownCookieName && knownCookieValue) {
-      logInfo(`[Main] Stored cookie found for ${domain}. Attempting fetch without explicit DD check...`);
+  // 2. if normalized url in config - try to fetch.
+  if (siteData) {
+      logInfo(`[Main] Stored config found for ${domain}. Attempting fetch...`);
       attemptedStoredFetch = true;
-      extractedHtml = await fetchWithStoredData(url, knownXpath, knownCookieName, knownCookieValue, ENABLE_DEBUG_LOGGING);
-      logDebug(`[Main] Stage 1 fetchWithStoredData (using cookie) result: ${extractedHtml !== null ? 'Success' : 'Failure'}`);
-      if (extractedHtml !== null) {
-          logInfo(`[Main] Success with stored cookie.`);
-          return { success: true, content: extractedHtml };
+
+      // 2.1. if cookie present - use it.
+      if (knownCookieName && knownCookieValue) {
+          logInfo(`[Main] Stored cookie found. Attempting fetch with cookie and XPath (if present)...`);
+          extractedHtml = await fetchWithStoredData(url, knownXpath, knownCookieName, knownCookieValue, ENABLE_DEBUG_LOGGING);
+          logDebug(`[Main] Fetch with stored cookie result: ${extractedHtml !== null ? 'Success' : 'Failure'}`);
+
+          // 2.1.1. if fail - error, return (This is handled within fetchWithStoredData returning null)
+          if (extractedHtml !== null) {
+              logInfo(`[Main] Success with stored cookie.`);
+              return { success: true, content: extractedHtml };
+          } else {
+              logWarn(`[Main] Fetch with stored cookie failed.`);
+              // If fetch with cookie failed, it might be because the cookie is stale or CAPTCHA appeared.
+              // We proceed to discovery, which includes a fresh CAPTCHA check.
+          }
+      } else if (knownXpath) { // Attempt with XPath only if no cookie was present
+           logInfo(`[Main] No stored cookie, but XPath found. Attempting fetch with XPath only...`);
+           extractedHtml = await fetchWithStoredData(url, knownXpath, null, null, ENABLE_DEBUG_LOGGING);
+           logDebug(`[Main] Fetch with stored XPath only result: ${extractedHtml !== null ? 'Success' : 'Failure'}`);
+           if (extractedHtml !== null) {
+               logInfo(`[Main] Success with stored XPath only.`);
+               return { success: true, content: extractedHtml };
+           } else {
+               logWarn(`[Main] Fetch with stored XPath only failed.`);
+           }
       } else {
-          logWarn(`[Main] Fetch stored failed (using cookie). Fallback needed...`);
+          logInfo(`[Main] Stored config found, but no XPath or Cookie. Proceeding to discovery.`);
       }
-  }
-  // --- Stage 2: Attempt with stored XPath only (if no cookie or stage 1 failed) ---
-  else if (knownXpath && !attemptedStoredFetch) { // Only try this if cookie wasn't present
-       logInfo(`[Main] No stored cookie, but XPath found. Attempting fetch without explicit DD check...`);
-       attemptedStoredFetch = true; // Mark as attempted
-       extractedHtml = await fetchWithStoredData(url, knownXpath, null, null, ENABLE_DEBUG_LOGGING); // No cookie passed
-       logDebug(`[Main] Stage 2 fetchWithStoredData (XPath only) result: ${extractedHtml !== null ? 'Success' : 'Failure'}`);
-       if (extractedHtml !== null) {
-           logInfo(`[Main] Success with stored XPath only.`);
-           return { success: true, content: extractedHtml };
-       } else {
-           logWarn(`[Main] Fetch stored failed (XPath only). Fallback needed...`);
-       }
-  }
-  // --- Stage 3: Fallback to Discovery (if no stored data or previous stages failed) ---
-  else if (!attemptedStoredFetch) {
-       logInfo(`[Main] No stored data found. Starting discovery...`);
+  } else {
+      logInfo(`[Main] No stored config found for ${domain}. Starting discovery.`);
   }
 
-  logInfo("[Main] Calling findArticleXPathAndExtract (will perform DD check if needed)...");
+  // 3. if ok - extract xpath (This is the discovery phase if stored fetch failed or wasn't attempted)
+  logInfo("[Main] Proceeding to findArticleXPathAndExtract (will perform DD check if needed)...");
   const discoveryResult = await findArticleXPathAndExtract(url, ENABLE_DEBUG_LOGGING);
   logDebug(`[Main] findArticleXPathAndExtract result: ${discoveryResult ? 'Object received' : 'null'}`);
 
   if (discoveryResult?.extractedHtml !== null) {
     logInfo(`[Main] Discovery successful.`);
+    // 3.2. if success - replace xpath in config (Handled inside findArticleXPathAndExtract)
     return { success: true, content: discoveryResult.extractedHtml };
   } else {
+    // 3.3.. if fail - error, return, don't touch config. (Config not touched if discovery fails)
     logError(`[Main] Discovery failed or aborted for ${domain}.`);
-    // Clear stored XPath if fetch was attempted with it and discovery also failed
-    if (attemptedStoredFetch && knownXpath) {
-       logWarn(`[Main] Both stored fetch (XPath: ${knownXpath}) and discovery failed.`);
-    }
-    return { success: false, error: `Failed extraction for ${domain}. Fetch/Discovery failed.` };
+    return { success: false, error: `Failed extraction for ${domain}. Discovery failed.` };
   }
 };
 
 // --- Command Line Execution ---
 (async () => {
-  const targetUrl = process.argv[2]; if (!targetUrl) { console.error("Usage: node smartScraper2.js <url>"); process.exit(1); }
+  const targetUrl = process.argv[2];
+  // 1. if no url - error, fail
+  if (!targetUrl) {
+    console.error("Usage: node smartScraper2.js <url>");
+    process.exit(1);
+  }
   logInfo(`--- Script Start --- Target URL: ${targetUrl}`);
   try { new URL(targetUrl); } catch { console.error(`Invalid URL: ${targetUrl}`); process.exit(1); }
   try { logDebug("Initializing storage check..."); if (!fs.existsSync(STORAGE_FILE_PATH)) { logInfo("Creating new storage file."); saveStorage({}); } else { logInfo("Loading existing storage."); loadStorage(); } logDebug("Storage check OK."); }
   catch (e) { console.error("FATAL Storage init/load error.", e); process.exit(1); }
-  let exitCode = 1; try { const result = await getContent(targetUrl); if (result.success && result.content) { console.log(result.content); exitCode = 0; } else { console.error(`Error: ${result.error || "Unknown failure."}`); exitCode = 1; } } catch (err) { logError("\n--- Unhandled Top-Level Error ---"); console.error(err); exitCode = 1; } finally { logInfo(`--- Script End --- Exit Code: ${exitCode}`); process.exit(exitCode); }
+  let exitCode = 1;
+  try {
+    const result = await getContent(targetUrl);
+    if (result.success && result.content) {
+      console.log(result.content);
+      exitCode = 0;
+    } else {
+      console.error(`Error: ${result.error || "Unknown failure."}`);
+      exitCode = 1;
+    }
+  } catch (err) {
+    logError("\n--- Unhandled Top-Level Error ---");
+    console.error(err);
+    exitCode = 1;
+  } finally {
+    logInfo(`--- Script End --- Exit Code: ${exitCode}`);
+    process.exit(exitCode);
+  }
 })();
