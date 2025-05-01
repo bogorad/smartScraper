@@ -2,11 +2,11 @@ digraph execution_logic {
     node[shape=box, style=filled, fillcolor=lightblue];
     edge[color=gray];
 
-    start[label="getContent(url)", fillcolor=lightgreen];
-    no_url_error[label="Error: No URL provided", shape=octagon, fillcolor=salmon];
-    get_domain[label="Get Domain from URL"];
-    load_storage[label="Load site_storage.json"];
-    check_stored_data[label="Check for stored XPath/Cookie"];
+    node0[label="getContent(url)", fillcolor=lightgreen];
+    node1[label="Error: No URL provided", shape=octagon, fillcolor=salmon];
+    node2[label="Get Domain from URL"];
+    node3[label="Load site_storage.json"];
+    node4[label="Check for stored XPath/Cookie"];
 
     // Stage 1: Attempt with Stored Data
     subgraph cluster_stage1 {
@@ -14,17 +14,17 @@ digraph execution_logic {
         style=dashed;
         color=blue;
 
-        attempt_with_cookie_xpath[label="fetchWithStoredData(url, storedXPath, storedCookie)", fillcolor=yellow];
-        attempt_with_xpath_only[label="fetchWithStoredData(url, storedXPath, null, null)", fillcolor=yellow];
+        node5[label="fetchWithStoredData(url, storedXPath, storedCookie)", fillcolor=yellow];
+        node6[label="fetchWithStoredData(url, storedXPath, null, null)", fillcolor=yellow];
 
-        nav_prep_stored[label="navigateAndPreparePage (no explicit DD check)"];
-        set_cookie[label="Set Stored Cookie"];
-        get_html_stored[label="Get HTML Content"];
-        save_html_pre_extract_stored[label="Save HTML (Pre-Extract)"];
-        extract_with_stored_xpath[label="Extract HTML with Stored XPath"];
-        stored_fetch_success[label="Extraction Successful", fillcolor=lightgreen];
-        stored_fetch_fail[label="Extraction Failed", fillcolor=salmon];
-        save_html_on_fail_stored[label="Save HTML (On Failure)"];
+        node7[label="navigateAndPreparePage (no explicit DD check)"];
+        node8[label="Set Stored Cookie"];
+        node9[label="Get HTML Content"];
+        node10[label="Save HTML (Pre-Extract)"];
+        node11[label="Extract HTML with Stored XPath"];
+        node12[label="Extraction Successful", fillcolor=lightgreen];
+        node13[label="Extraction Failed", fillcolor=salmon];
+        node14[label="Save HTML (On Failure)"];
     }
 
     // Stage 2: Fallback to Discovery
@@ -33,97 +33,101 @@ digraph execution_logic {
         style=dashed;
         color=red;
 
-        find_xpath_extract[label="findArticleXPathAndExtract(url)", fillcolor=yellow];
-        nav_prep_discovery[label="navigateAndPreparePage (with explicit DD check)"];
-        handle_datadome[label="Handle DataDome (if needed/configured)"];
-        solve_captcha[label="Solve CAPTCHA (2Captcha)"];
-        update_stored_cookie_discovery[label="Update Stored Cookie"];
-        get_html_discovery[label="Get HTML Content"];
-        extract_snippets[label="Extract Snippets"];
-        get_llm_candidates[label="Get LLM Candidate XPaths"];
-        validate_score_xpaths[label="Validate & Score XPaths"];
-        select_best_xpath[label="Select Best XPath"];
-        update_stored_xpath[label="Update Stored XPath"];
-        save_html_pre_extract_discovery[label="Save HTML (Pre-Extract)"];
-        extract_with_discovered_xpath[label="Extract HTML with Discovered XPath"];
-        discovery_success[label="Extraction Successful", fillcolor=lightgreen];
-        discovery_fail[label="Discovery/Extraction Failed", fillcolor=salmon];
-        save_html_on_fail_discovery[label="Save HTML (On Failure)"];
+        node15[label="findArticleXPathAndExtract(url)", fillcolor=yellow];
+        node16[label="navigateAndPreparePage (with explicit DD check)"];
+        node17[label="Handle DataDome (if needed/configured)"];
+        node18[label="Solve CAPTCHA (2Captcha)"];
+        node19[label="Update Stored Cookie"];
+        node20[label="Get HTML Content"];
+        node21[label="Extract Snippets"];
+        node22[label="Get LLM Candidate XPaths"];
+        node23[label="Validate & Score XPaths"];
+        node24[label="Select Best XPath"];
+        node25[label="Update Stored XPath"];
+        node26[label="Save HTML (Pre-Extract)"];
+        node27[label="Extract HTML with Discovered XPath"];
+        node28[label="Extraction Successful", fillcolor=lightgreen];
+        node29[label="Discovery/Extraction Failed", fillcolor=salmon];
+        node30[label="Save HTML (On Failure)"];
     }
 
-    return_success[label="Return Success (Content)", shape=doubleoctagon, fillcolor=lightgreen];
-    return_error[label="Return Error", shape=doubleoctagon, fillcolor=salmon];
+    node31[label="Return Success (Content)", shape=doubleoctagon, fillcolor=lightgreen];
+    node32[label="Return Error", shape=doubleoctagon, fillcolor=salmon];
+
+    node33[label="End", shape=circle, fillcolor=lightgreen];
+    node34[label="End", shape=circle, fillcolor=salmon];
+
 
     // Connections
-    start -> get_domain;
-    get_domain -> no_url_error[label="Invalid URL"];
-    get_domain -> load_storage[label="Valid URL"];
-    load_storage -> check_stored_data;
+    node0 -> node2;
+    node2 -> node1[label="Invalid URL"];
+    node2 -> node3[label="Valid URL"];
+    node3 -> node4;
 
     // Logic based on stored data
-    check_stored_data -> attempt_with_cookie_xpath[label="Stored Cookie & XPath"];
-    check_stored_data -> attempt_with_xpath_only[label="Stored XPath Only"];
-    check_stored_data -> find_xpath_extract[label="No Stored Data"]; // Direct to discovery if nothing stored
+    node4 -> node5[label="Stored Cookie & XPath"];
+    node4 -> node6[label="Stored XPath Only"];
+    node4 -> node15[label="No Stored Data"]; // Direct to discovery if nothing stored
 
     // Stage 1 Flow (Attempt with Cookie & XPath)
-    attempt_with_cookie_xpath -> nav_prep_stored;
-    nav_prep_stored -> set_cookie[label="Success"];
-    nav_prep_stored -> stored_fetch_fail[label="Nav Failed"];
-    set_cookie -> get_html_stored;
-    get_html_stored -> save_html_pre_extract_stored[label="HTML OK"];
-    get_html_stored -> stored_fetch_fail[label="No HTML"];
-    save_html_pre_extract_stored -> extract_with_stored_xpath;
-    extract_with_stored_xpath -> stored_fetch_success[label="Extraction OK"];
-    extract_with_stored_xpath -> stored_fetch_fail[label="Extraction Failed"];
+    node5 -> node7;
+    node7 -> node8[label="Success"];
+    node7 -> node13[label="Nav Failed"];
+    node8 -> node9;
+    node9 -> node10[label="HTML OK"];
+    node9 -> node13[label="No HTML"];
+    node10 -> node11;
+    node11 -> node12[label="Extraction OK"];
+    node11 -> node13[label="Extraction Failed"];
 
     // Stage 1 Flow (Attempt with XPath Only)
-    attempt_with_xpath_only -> nav_prep_stored; // Reuses same nav_prep logic
-    // nav_prep_stored -> stored_fetch_fail[label="Nav Failed"]; // Already linked above
-    // get_html_stored -> save_html_pre_extract_stored[label="HTML OK"]; // Already linked above
-    // get_html_stored -> stored_fetch_fail[label="No HTML"]; // Already linked above
-    // save_html_pre_extract_stored -> extract_with_stored_xpath; // Already linked above
-    // extract_with_stored_xpath -> stored_fetch_success[label="Extraction OK"]; // Already linked above
-    // extract_with_stored_xpath -> stored_fetch_fail[label="Extraction Failed"]; // Already linked above
+    node6 -> node7; // Reuses same nav_prep logic
+    // node7 -> node13[label="Nav Failed"]; // Already linked above
+    // node9 -> node10[label="HTML OK"]; // Already linked above
+    // node9 -> node13[label="No HTML"]; // Already linked above
+    // node10 -> node11; // Already linked above
+    // node11 -> node12[label="Extraction OK"]; // Already linked above
+    // node11 -> node13[label="Extraction Failed"]; // Already linked above
 
-    stored_fetch_success -> return_success;
-    stored_fetch_fail -> save_html_on_fail_stored;
-    save_html_on_fail_stored -> find_xpath_extract[label="Fallback to Discovery"]; // If Stage 1 fails, try Stage 2
+    node12 -> node31;
+    node13 -> node14;
+    node14 -> node15[label="Fallback to Discovery"]; // If Stage 1 fails, try Stage 2
 
     // Stage 2 Flow (Discovery)
-    find_xpath_extract -> nav_prep_discovery;
-    nav_prep_discovery -> handle_datadome[label="Success"];
-    nav_prep_discovery -> discovery_fail[label="Nav Failed"];
+    node15 -> node16;
+    node16 -> node17[label="Success"];
+    node16 -> node29[label="Nav Failed"];
 
-    handle_datadome -> solve_captcha[label="CAPTCHA Detected"];
-    handle_datadome -> get_html_discovery[label="No CAPTCHA / Handled"];
-    handle_datadome -> discovery_fail[label="CAPTCHA Handling Failed"];
+    node17 -> node18[label="CAPTCHA Detected"];
+    node17 -> node20[label="No CAPTCHA / Handled"];
+    node17 -> node29[label="CAPTCHA Handling Failed"];
 
-    solve_captcha -> update_stored_cookie_discovery[label="Solved"];
-    solve_captcha -> discovery_fail[label="Solve Failed"];
-    update_stored_cookie_discovery -> get_html_discovery;
+    node18 -> node19[label="Solved"];
+    node18 -> node29[label="Solve Failed"];
+    node19 -> node20;
 
-    get_html_discovery -> extract_snippets[label="HTML OK"];
-    get_html_discovery -> discovery_fail[label="No HTML"];
+    node20 -> node21[label="HTML OK"];
+    node20 -> node29[label="No HTML"];
 
-    extract_snippets -> get_llm_candidates;
-    get_llm_candidates -> validate_score_xpaths[label="Candidates"];
-    get_llm_candidates -> discovery_fail[label="No Candidates"];
+    node21 -> node22;
+    node22 -> node23[label="Candidates"];
+    node22 -> node29[label="No Candidates"];
 
-    validate_score_xpaths -> select_best_xpath[label="Valid Candidates"];
-    validate_score_xpaths -> discovery_fail[label="No Valid Candidates"];
+    node23 -> node24[label="Valid Candidates"];
+    node23 -> node29[label="No Valid Candidates"];
 
-    select_best_xpath -> update_stored_xpath;
-    update_stored_xpath -> save_html_pre_extract_discovery;
-    save_html_pre_extract_discovery -> extract_with_discovered_xpath;
-    extract_with_discovered_xpath -> discovery_success[label="Extraction OK"];
-    extract_with_discovered_xpath -> discovery_fail[label="Extraction Failed"];
+    node24 -> node25;
+    node25 -> node26;
+    node26 -> node27;
+    node27 -> node28[label="Extraction OK"];
+    node27 -> node29[label="Extraction Failed"];
 
-    discovery_success -> return_success;
-    discovery_fail -> save_html_on_fail_discovery;
-    save_html_on_fail_discovery -> return_error; // If Stage 2 fails, return error
+    node28 -> node31;
+    node29 -> node30;
+    node30 -> node32; // If Stage 2 fails, return error
 
     // Final returns
-    return_success -> end[label="End", shape=circle, fillcolor=lightgreen];
-    return_error -> end[label="End", shape=circle, fillcolor=salmon];
+    node31 -> node33;
+    node32 -> node34;
 
 }
