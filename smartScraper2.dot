@@ -1,0 +1,24 @@
+digraph execution_logic {
+    node[shape=box, style=filled];
+
+    start[label="getContent(url)"];
+    load_storage[label="Load storage data for domain from site_storage.json"];
+    check_stored_data[label="Check if stored XPath and cookie exist for domain"];
+    fetch_with_stored_data[label="Fetch page with stored XPath and cookie"];
+    solve_captcha[label="Solve CAPTCHA with 2Captcha"];
+    xpath_eval[label="Evaluate XPath"];
+    return_content[label="Return extracted HTML content"];
+    failure[label="Return failure"];
+
+    start -> load_storage;
+    load_storage -> check_stored_data;
+    check_stored_data -> fetch_with_stored_data[label="yes"];
+    check_stored_data -> failure[label="no"];
+
+    fetch_with_stored_data -> xpath_eval[label="success"];
+    fetch_with_stored_data -> solve_captcha[label="CAPTCHA"];
+
+    solve_captcha -> xpath_eval[label="solved"];
+    xpath_eval -> return_content[label="success"];
+    xpath_eval -> failure[label="failure"];
+}
