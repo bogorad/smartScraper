@@ -7,60 +7,49 @@ digraph execution_logic {
     node2[label="2: Get Domain from URL"];
     node3[label="3: Load site_storage.json"];
     node4[label="4: Check for stored XPath/Cookie"];
+    node5[label="5: Check if Domain needs DataDome"];
 
-    // Stage 1: Attempt with Stored Data
-    subgraph cluster_stage1 {
-        label = "Stage 1: Attempt Stored Data";
+    // Shared Puppeteer Instance
+    subgraph cluster_puppeteer {
+        label = "Puppeteer Instance";
         style=dashed;
-        color=blue;
+        color=purple;
 
-        node5[label="5: Attempt fetchWithStoredData (with Cookie & XPath)", fillcolor=yellow];
-        node6[label="6: Attempt fetchWithStoredData (with XPath Only)", fillcolor=yellow];
-
-        node7[label="7: launchPuppeteerBrowser"];
+        node6[label="6: launchPuppeteerBrowser"];
+        node7[label="7: Create New Page"];
         node8[label="8: Set Stored Cookie (if available)"];
         node9[label="9: navigateAndPreparePage (Skip Explicit DD Check)"];
         node10[label="10: Get HTML Content (Pre-Extract)"];
         node11[label="11: Save HTML (Pre-Extract)", fillcolor=lightyellow];
         node12[label="12: Extract HTML with Stored XPath"];
-        node13[label="13: Extraction Successful", fillcolor=lightgreen];
-        node14[label="14: Extraction Failed", fillcolor=salmon];
-        node15[label="15: Save HTML (On Failure)", fillcolor=salmon];
-        node16[label="16: cleanupPuppeteer"];
+        node13[label="13: Extraction Successful (Stored)", fillcolor=lightgreen];
+        node14[label="14: Extraction Failed (Stored)", fillcolor=salmon];
+
+        node15[label="15: navigateAndPreparePage (Perform Explicit DD Check)"];
+        node16[label="16: Handle DataDome (if needed/configured)"];
+        node17[label="17: Solve CAPTCHA (2Captcha)"];
+        node18[label="18: Update Stored Cookie"];
+        node19[label="19: Get HTML Content (for LLM/Snippets)"];
+        node20[label="20: Extract Snippets"];
+        node21[label="21: Get LLM Candidate XPaths"];
+        node22[label="22: Validate & Score XPaths"];
+        node23[label="23: Select Best XPath"];
+        node24[label="24: Update Stored XPath"];
+        node25[label="25: Get HTML Content (Pre-Extract)"];
+        node26[label="26: Save HTML (Pre-Extract)", fillcolor=lightyellow];
+        node27[label="27: Extract HTML with Discovered XPath"];
+        node28[label="28: Extraction Successful (Discovery)", fillcolor=lightgreen];
+        node29[label="29: Discovery/Extraction Failed", fillcolor=salmon];
+
+        node30[label="30: Save HTML (On Failure)", fillcolor=salmon];
+        node31[label="31: cleanupPuppeteer"];
     }
 
-    // Stage 2: Fallback to Discovery
-    subgraph cluster_stage2 {
-        label = "Stage 2: Discovery";
-        style=dashed;
-        color=red;
+    node32[label="32: Return Success (Content)", shape=doubleoctagon, fillcolor=lightgreen];
+    node33[label="33: Return Error", shape=doubleoctagon, fillcolor=salmon];
 
-        node17[label="17: findArticleXPathAndExtract(url)", fillcolor=yellow];
-        node18[label="18: launchPuppeteerBrowser"];
-        node19[label="19: navigateAndPreparePage (Perform Explicit DD Check)"];
-        node20[label="20: Handle DataDome (if needed/configured)"];
-        node21[label="21: Solve CAPTCHA (2Captcha)"];
-        node22[label="22: Update Stored Cookie"];
-        node23[label="23: Get HTML Content (for LLM/Snippets)"];
-        node24[label="24: Extract Snippets"];
-        node25[label="25: Get LLM Candidate XPaths"];
-        node26[label="26: Validate & Score XPaths"];
-        node27[label="27: Select Best XPath"];
-        node28[label="28: Update Stored XPath"];
-        node29[label="29: Get HTML Content (Pre-Extract)"];
-        node30[label="30: Save HTML (Pre-Extract)", fillcolor=lightyellow];
-        node31[label="31: Extract HTML with Discovered XPath"];
-        node32[label="32: Extraction Successful", fillcolor=lightgreen];
-        node33[label="33: Discovery/Extraction Failed", fillcolor=salmon];
-        node34[label="34: Save HTML (On Failure)", fillcolor=salmon];
-        node35[label="35: cleanupPuppeteer"];
-    }
-
-    node36[label="36: Return Success (Content)", shape=doubleoctagon, fillcolor=lightgreen];
-    node37[label="37: Return Error", shape=doubleoctagon, fillcolor=salmon];
-
-    node38[label="38: End", shape=circle, fillcolor=lightgreen];
-    node39[label="39: End", shape=circle, fillcolor=salmon];
+    node34[label="34: End", shape=circle, fillcolor=lightgreen];
+    node35[label="35: End", shape=circle, fillcolor=salmon];
 
 
     // Connections
@@ -68,89 +57,80 @@ digraph execution_logic {
     node2 -> node1[label="Invalid URL"];
     node2 -> node3[label="Valid URL"];
     node3 -> node4;
+    node4 -> node5;
 
-    // Logic based on stored data
-    node4 -> node5[label="Stored Cookie & XPath"];
-    node4 -> node6[label="Stored XPath Only"];
-    node4 -> node17[label="No Stored Data"]; // Direct to discovery if nothing stored
+    // Launch Browser (Shared)
+    node5 -> node6;
+    node6 -> node7[label="Launch OK"];
+    node6 -> node30[label="Launch Failed"]; // Save HTML on launch failure? No HTML yet. Maybe just fail?
+    node30 -> node31; // Cleanup after save
+    node31 -> node33; // Return error
 
-    // Stage 1 Flow (Attempt with Cookie & XPath)
-    node5 -> node7;
-    node7 -> node8[label="Launch OK"];
-    node7 -> node15[label="Launch Failed"]; // Save HTML on launch failure? Maybe not, no page yet.
-    node8 -> node9;
+    node7 -> node8[label="Page OK"];
+
+    // Decision based on stored data and DD need
+    node8 -> node9[label="Stored Cookie & XPath"];
+    node8 -> node9[label="Stored XPath Only\nAND No DD Needed"];
+    node8 -> node15[label="No Stored Data"]; // Direct to discovery nav
+    node8 -> node15[label="Stored XPath Only\nBUT DD Needed"]; // Direct to discovery nav
+
+    // Stage 1 Flow (Attempt with Stored Data)
     node9 -> node10[label="Nav OK"];
     node9 -> node14[label="Nav Failed"]; // Nav failed in Stage 1 -> Extraction Failed
+
     node10 -> node11[label="HTML OK"];
     node10 -> node14[label="No HTML"]; // No HTML in Stage 1 -> Extraction Failed
+
     node11 -> node12;
     node12 -> node13[label="Extraction OK"];
     node12 -> node14[label="Extraction Failed"];
 
-    node13 -> node16; // Cleanup after success
-    node16 -> node36; // Return success
+    node13 -> node31; // Cleanup after success
+    node31 -> node32; // Return success
 
-    node14 -> node15; // Extraction failed -> Save HTML
-    node15 -> node16; // Save HTML -> Cleanup
-    node16 -> node17[label="Fallback to Discovery"]; // Cleanup -> Try Stage 2
-
-    // Stage 1 Flow (Attempt with XPath Only)
-    node6 -> node7; // Reuses launch
-    // node7 -> node8[label="Launch OK"]; // Already linked
-    // node7 -> node15[label="Launch Failed"]; // Already linked
-    // node8 -> node9; // Reuses nav_prep logic (but skips cookie set)
-    // node9 -> node10[label="Nav OK"]; // Already linked above
-    // node9 -> node14[label="Nav Failed"]; // Already linked above
-    // node10 -> node11[label="HTML OK"]; // Already linked above
-    // node10 -> node14[label="No HTML"]; // Already linked above
-    // node11 -> node12; // Already linked above
-    // node12 -> node13[label="Extraction OK"]; // Already linked above
-    // node12 -> node14[label="Extraction Failed"]; // Already linked above
+    node14 -> node30; // Extraction failed -> Save HTML
+    node30 -> node15[label="Fallback to Discovery Nav"]; // Save HTML -> Try Stage 2 Nav
 
     // Stage 2 Flow (Discovery)
-    node17 -> node18;
-    node18 -> node19[label="Launch OK"];
-    node18 -> node34[label="Launch Failed"]; // Save HTML on launch failure? Maybe not, no page yet.
+    node15 -> node16[label="Nav OK"];
+    node15 -> node29[label="Nav Failed"]; // Nav failed in Stage 2 -> Discovery Failed
 
-    node19 -> node20[label="Nav OK"];
-    node19 -> node33[label="Nav Failed"]; // Nav failed in Stage 2 -> Discovery Failed
+    node16 -> node17[label="CAPTCHA Detected"];
+    node16 -> node19[label="No CAPTCHA / Handled"];
+    node16 -> node29[label="CAPTCHA Handling Failed"];
 
-    node20 -> node21[label="CAPTCHA Detected"];
-    node20 -> node23[label="No CAPTCHA / Handled"];
-    node20 -> node33[label="CAPTCHA Handling Failed"];
+    node17 -> node18[label="Solved"];
+    node17 -> node29[label="Solve Failed"];
+    node18 -> node19;
 
-    node21 -> node22[label="Solved"];
-    node21 -> node33[label="Solve Failed"];
-    node22 -> node23;
+    node19 -> node20[label="HTML OK"];
+    node19 -> node29[label="No HTML"]; // No HTML in Stage 2 -> Discovery Failed
 
-    node23 -> node24[label="HTML OK"];
-    node23 -> node33[label="No HTML"]; // No HTML in Stage 2 -> Discovery Failed
+    node20 -> node21;
+    node21 -> node22[label="Candidates"];
+    node21 -> node29[label="No Candidates"];
 
+    node22 -> node23[label="Valid Candidates"];
+    node22 -> node29[label="No Valid Candidates"];
+
+    node23 -> node24;
     node24 -> node25;
-    node25 -> node26[label="Candidates"];
-    node25 -> node33[label="No Candidates"];
+    node25 -> node26[label="HTML OK"];
+    node25 -> node29[label="No HTML"]; // No HTML before final extract -> Discovery Failed
+    node26 -> node27;
+    node27 -> node28[label="Extraction OK"];
+    node27 -> node29[label="Extraction Failed"];
 
-    node26 -> node27[label="Valid Candidates"];
-    node26 -> node33[label="No Valid Candidates"];
+    node28 -> node31; // Cleanup after success
+    node31 -> node32; // Return success
 
-    node27 -> node28;
-    node28 -> node29;
-    node29 -> node30[label="HTML OK"];
-    node29 -> node33[label="No HTML"]; // No HTML before final extract -> Discovery Failed
-    node30 -> node31;
-    node31 -> node32[label="Extraction OK"];
-    node31 -> node33[label="Extraction Failed"];
-
-    node32 -> node35; // Cleanup after success
-    node35 -> node36; // Return success
-
-    node33 -> node34; // Discovery failed -> Save HTML
-    node34 -> node35; // Save HTML -> Cleanup
-    node35 -> node37; // Cleanup -> Return error
+    node29 -> node30; // Discovery failed -> Save HTML
+    node30 -> node31; // Save HTML -> Cleanup
+    node31 -> node33; // Cleanup -> Return error
 
     // Final returns
-    node1 -> node39;
-    node36 -> node38;
-    node37 -> node39;
+    node1 -> node35;
+    node32 -> node34;
+    node33 -> node35;
 
 }
