@@ -23,9 +23,9 @@ class LLMInterface {
             headers: {
                 'Authorization': `Bearer ${this.apiKey}`,
                 'Content-Type': 'application/json',
-                // OpenRouter specific headers (optional, but good practice)
-                // 'HTTP-Referer': 'YOUR_APP_URL_OR_NAME', // Replace with your app's URL or name
-                // 'X-Title': 'UniversalScraperLLM', // Replace with your app's name
+                // OpenRouter specific headers (good practice)
+                'HTTP-Referer': 'https://github.com/bogorad/smartScraper',
+                'X-Title': 'SmartScraper'
             }
         });
         logger.info(`LLMInterface initialized for model: ${this.model}`);
