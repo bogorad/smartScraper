@@ -4,12 +4,12 @@ import { KnownSitesManager } from '../storage/known-sites-manager.js';
 import { PuppeteerController } from '../browser/puppeteer-controller.js';
 import { PluginManager } from '../browser/plugin-manager.js'; // Assuming you have this
 import { fetchWithCurl } from '../network/curl-handler.js';
-import { HtmlAnalyser } from '../analysis/html-analyser.js';
+import { HtmlAnalyserFixed as HtmlAnalyser } from '../analysis/html-analyser-fixed.js';
 import { DomComparator } from '../analysis/dom-comparator.js';
 import { ContentScoringEngine } from '../analysis/content-scoring-engine.js';
 import { LLMInterface } from '../services/llm-interface.js';
 import { CaptchaSolver } from '../services/captcha-solver.js';
-import logger from '../utils/logger.js'; // Assuming a logger utility
+import { logger } from '../utils/logger.js'; // Assuming a logger utility
 import { normalizeDomain } from '../utils/url-helpers.js';
 import {
     ScraperError,
@@ -212,30 +212,66 @@ class CoreScraperEngine {
         let page = null;
 
         try {
-            // C.1. Initial Probing
+            // C.1. Initial Probing - Try curl first (faster, less resource-intensive)
             const curlResponse = await fetchWithCurl(url, proxyDetails, null, userAgent);
             if (curlResponse.success) {
                 curlHtml = curlResponse.html;
                 if (this.htmlAnalyser.detectCaptchaMarkers(curlHtml)) {
                     discoveredNeedsCaptcha = true;
                     logger.info('CAPTCHA detected in cURL response.');
+
+                    // Check for DataDome CAPTCHA specifically
+                    if (curlHtml.includes('captcha-delivery.com') || curlHtml.includes('geo.captcha-delivery.com')) {
+                        logger.info('DataDome CAPTCHA detected in cURL response.');
+
+                        // Skip puppeteer-stealth and go directly to puppeteer-captcha
+                        logger.info('Skipping puppeteer-stealth and going directly to puppeteer-captcha for DataDome CAPTCHA.');
+
+                        // Launch puppeteer with CAPTCHA handling
+                        try {
+                            ({ browser, page } = await this.puppeteerController.launchAndNavigate(url, proxyDetails, userAgent));
+
+                            // Solve the CAPTCHA
+                            const captchaSolved = await this.captchaSolver.solveIfPresent(page, url);
+                            if (!captchaSolved) {
+                                logger.error('DataDome CAPTCHA solving failed.');
+                                throw new CaptchaError('DataDome CAPTCHA solving failed', {
+                                    url: url
+                                });
+                            }
+
+                            // Get the page content after solving CAPTCHA
+                            puppeteerHtml = await this.puppeteerController.getPageContent(page);
+                            htmlForAnalysis = puppeteerHtml;
+                            tentativeMethodIsCurl = false;
+
+                            // Skip the rest of the probing
+                            logger.info('DataDome CAPTCHA solved. Skipping further probing.');
+                        } catch (captchaError) {
+                            logger.error(`Error solving DataDome CAPTCHA: ${captchaError.message}`);
+                            if (!curlHtml) throw new Error('Both cURL and CAPTCHA solving failed.'); // Critical failure
+                            // Proceed with cURL HTML if available, but note that it might not be useful
+                        }
+                    }
                 }
             } else {
                 logger.warn(`cURL fetch failed for ${url}: ${curlResponse.error}`);
             }
 
-            // Always try Puppeteer for comparison and as fallback
-            try {
-                ({ browser, page } = await this.puppeteerController.launchAndNavigate(url, proxyDetails, userAgent, null, true /*isInitialProbe*/));
-                puppeteerHtml = await this.puppeteerController.getPageContent(page);
-                if (this.htmlAnalyser.detectCaptchaMarkers(puppeteerHtml)) {
-                    discoveredNeedsCaptcha = true;
-                    logger.info('CAPTCHA detected in Puppeteer probe response.');
+            // If we haven't already handled a DataDome CAPTCHA, try Puppeteer for comparison and as fallback
+            if (!page) {
+                try {
+                    ({ browser, page } = await this.puppeteerController.launchAndNavigate(url, proxyDetails, userAgent, null, true /*isInitialProbe*/));
+                    puppeteerHtml = await this.puppeteerController.getPageContent(page);
+                    if (this.htmlAnalyser.detectCaptchaMarkers(puppeteerHtml)) {
+                        discoveredNeedsCaptcha = true;
+                        logger.info('CAPTCHA detected in Puppeteer probe response.');
+                    }
+                } catch (probeError) {
+                     logger.error(`Initial Puppeteer probe failed for ${url}: ${probeError.message}`);
+                     if (!curlHtml) throw new Error('Both cURL and initial Puppeteer probe failed.'); // Critical failure
+                     // Proceed with cURL HTML if available
                 }
-            } catch (probeError) {
-                 logger.error(`Initial Puppeteer probe failed for ${url}: ${probeError.message}`);
-                 if (!curlHtml) throw new Error('Both cURL and initial Puppeteer probe failed.'); // Critical failure
-                 // Proceed with cURL HTML if available
             }
 
 

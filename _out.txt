@@ -1,0 +1,311 @@
+ node test-optimal-flow.js
+Using 2captcha with API key: Provided
+Starting optimal flow for: https://www.nytimes.com/2025/05/15/health/gene-editing-personalized-rare-disorders.html
+Trying curl for: https://www.nytimes.com/2025/05/15/health/gene-editing-personalized-rare-disorders.html
+CAPTCHA detected in curl response
+Saved CAPTCHA response to curl-captcha-response.html
+CAPTCHA detected in curl response, skipping puppeteer-stealth and trying puppeteer-captcha...
+Trying puppeteer-captcha for: https://www.nytimes.com/2025/05/15/health/gene-editing-personalized-rare-disorders.html
+Using Chromium executable path: /usr/lib/chromium/chromium
+Using proxy: http://otnlqxce-rotate:pgg7cco5d94z@p.webshare.io:80
+Proxy server: p.webshare.io:80
+Parsing proxy string for 2Captcha: http://otnlqxce-rotate:pgg7cco5d94z@p.webshare.io:80
+Successfully parsed proxy: {"type":"HTTP","address":"p.webshare.io","port":80,"login":"otnlqxce-rotate","password":"***"}
+Navigating to https://www.nytimes.com/2025/05/15/health/gene-editing-personalized-rare-disorders.html...
+Waiting for content to load...
+DataDome CAPTCHA detected: true
+CAPTCHA URL: https://geo.captcha-delivery.com/captcha/?initialCid=AHrlqAAAAAMA9aqV8eGSy5YALcCYIg%3D%3D&hash=499AE34129FA4E4FABC31582C3075D&cid=kk4LKmHGdtbS4Ok4bj~affdljeGon63oChdwUo7nSnDM9nspY2cSNLPsJzM4o6dJ5kbpAsSJQ58ODQxY86i3W2F00Si4~jWdMwnPqoia3iKB52iiUDIFKDjNz5qv_twC&t=fe&referer=https%3A%2F%2Fwww.nytimes.com%2F2025%2F05%2F15%2Fhealth%2Fgene-editing-personalized-rare-disorders.html&s=17439&e=bb4321247b9eadd60ffb82a7be03c529293e3e8315882e998295ead9bdcbf361&dm=cd
+Solving DataDome CAPTCHA with 2Captcha...
+Solving CAPTCHA for https://www.nytimes.com/2025/05/15/health/gene-editing-personalized-rare-disorders.html
+Sending task to 2Captcha API: {
+  "clientKey": "2d7b6b6a56a7f1a0c6a888c9b8037481",
+  "task": {
+    "type": "DataDomeSliderTask",
+    "websiteURL": "https://www.nytimes.com/2025/05/15/health/gene-editing-personalized-rare-disorders.html",
+    "captchaUrl": "https://geo.captcha-delivery.com/captcha/?initialCid=AHrlqAAAAAMA9aqV8eGSy5YALcCYIg%3D%3D&hash=499AE34129FA4E4FABC31582C3075D&cid=kk4LKmHGdtbS4Ok4bj~affdljeGon63oChdwUo7nSnDM9nspY2cSNLPsJzM4o6dJ5kbpAsSJQ58ODQxY86i3W2F00Si4~jWdMwnPqoia3iKB52iiUDIFKDjNz5qv_twC&t=fe&referer=https%3A%2F%2Fwww.nytimes.com%2F2025%2F05%2F15%2Fhealth%2Fgene-editing-personalized-rare-disorders.html&s=17439&e=bb4321247b9eadd60ffb82a7be03c529293e3e8315882e998295ead9bdcbf361&dm=cd",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "proxyType": "HTTP",
+    "proxyAddress": "p.webshare.io",
+    "proxyPort": 80,
+    "proxyLogin": "otnlqxce-rotate",
+    "proxyPassword": "***"
+  }
+}
+2Captcha create task response: {"errorId":0,"taskId":79644167100}
+2Captcha task ID: 79644167100
+Polling 2Captcha for task ID: 79644167100...
+2Captcha get result response: {"errorId":0,"status":"processing"}
+2Captcha still processing...
+Polling 2Captcha for task ID: 79644167100...
+2Captcha get result response: {"errorId":0,"status":"processing"}
+2Captcha still processing...
+Polling 2Captcha for task ID: 79644167100...
+2Captcha get result response: {"errorId":0,"status":"processing"}
+2Captcha still processing...
+Polling 2Captcha for task ID: 79644167100...
+2Captcha get result response: {"errorId":0,"status":"ready","solution":{"cookie":"datadome=kk4LKmHGdtbS4Ok4bj~afic34rrpw9o_CJWh3c~LvhjnJuzJc6aQWjsvpcfOrCsk4ysNDSVzJvOUD98Uiz1ipKE1mJLG2XujhRzV2drUaUXmdK6Wt1BZpNZ5kWaY58G4; Max-Age=31536000; Domain=www.nytimes.com; Path=/; Secure; SameSite=Lax"},"cost":"0.00145","ip":"144.24.193.148","createTime":1747434262,"endTime":1747434279,"solveCount":1}
+2Captcha solved task ID: 79644167100
+2Captcha cookie: datadome=kk4LKmHGdtbS4Ok4bj~afic34rrpw9o_CJWh3c~Lv...
+CAPTCHA solved successfully!
+Formatting cookie: datadome=kk4LKmHGdtbS4Ok4bj~afic34rrpw9o_CJWh3c~Lv...
+Formatted cookie: {"name":"datadome","value":"kk4LKmHGdtbS4Ok4bj~afic34rrpw9o_CJWh3c~LvhjnJuzJc6aQWjsvpcfOrCsk4ysNDSVzJvOUD98Uiz1ipKE1mJLG2XujhRzV2drUaUXmdK6Wt1BZpNZ5kWaY58G4","path":"/","secure":true,"httpOnly":false,"sameSite":"Lax","expires":1778970282,"domain":"www.nytimes.com"}
+Setting cookie...
+Cookie object to be set: {
+  "name": "datadome",
+  "value": "kk4LKmHGdtbS4Ok4bj~afic34rrpw9o_CJWh3c~LvhjnJuzJc6aQWjsvpcfOrCsk4ysNDSVzJvOUD98Uiz1ipKE1mJLG2XujhRzV2drUaUXmdK6Wt1BZpNZ5kWaY58G4",
+  "path": "/",
+  "secure": true,
+  "httpOnly": false,
+  "sameSite": "Lax",
+  "expires": 1778970282,
+  "domain": "www.nytimes.com"
+}
+All cookies after setting: [
+  {
+    "name": "nyt.et.dd",
+    "value": "iv=364BB96C103D4520A938461BCFE05704&val=32g4Nwnp6M2NSDSV4Qr3Hu7WL04Xo1iACyc6vq7DPCPLdA8RR7CEhWsVzXBcN4MPVdyWDn8YmM/U+1ySLcBLZ13N0HUv3yPz44fxcLFDsdup1anQ90SbcAY2iHJ20onLATak3X+CKMu6RJ1CxOItGAyqt89ryhUFheSCEnifQIt3CfkKthZJf34j5TZlN3BF4A1+RKfpxvntkMR83e0mS4EtJPuYPhnnRpSeUGiIdetEnEUb0PXQJNGeDHaDBBnQTH4CTXU5yech6DN3JWxcTHDYiqA+TKmBZiRis0cA5VZO0DhnHf6M80si5ie3hdkB6czeyt0k+YQDi84/FneQBg==",
+    "domain": ".nytimes.com",
+    "path": "/",
+    "expires": 1747434315.833219,
+    "size": 393,
+    "httpOnly": false,
+    "secure": true,
+    "session": false,
+    "sameSite": "None",
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "nyt-us",
+    "value": "0",
+    "domain": ".nytimes.com",
+    "path": "/",
+    "expires": 1747455855.833141,
+    "size": 7,
+    "httpOnly": false,
+    "secure": false,
+    "session": false,
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "datadome",
+    "value": "kk4LKmHGdtbS4Ok4bj~afic34rrpw9o_CJWh3c~LvhjnJuzJc6aQWjsvpcfOrCsk4ysNDSVzJvOUD98Uiz1ipKE1mJLG2XujhRzV2drUaUXmdK6Wt1BZpNZ5kWaY58G4",
+    "domain": "www.nytimes.com",
+    "path": "/",
+    "expires": 1778970282,
+    "size": 136,
+    "httpOnly": false,
+    "secure": true,
+    "session": false,
+    "sameSite": "Lax",
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "nyt-purr",
+    "value": "cfhhcfhhhckfhcfshgas2fdnd",
+    "domain": ".nytimes.com",
+    "path": "/",
+    "expires": 1778970255.833106,
+    "size": 33,
+    "httpOnly": false,
+    "secure": true,
+    "session": false,
+    "sameSite": "Lax",
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "nyt-traceid",
+    "value": "00000000000000005b409bd49f54644c",
+    "domain": ".nytimes.com",
+    "path": "/",
+    "expires": -1,
+    "size": 43,
+    "httpOnly": false,
+    "secure": true,
+    "session": true,
+    "sameSite": "None",
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "nyt-geo",
+    "value": "HK",
+    "domain": ".nytimes.com",
+    "path": "/",
+    "expires": 1747455855.833179,
+    "size": 9,
+    "httpOnly": false,
+    "secure": false,
+    "session": false,
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "nyt-gdpr",
+    "value": "0",
+    "domain": ".nytimes.com",
+    "path": "/",
+    "expires": 1747455859.777555,
+    "size": 9,
+    "httpOnly": false,
+    "secure": false,
+    "session": false,
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "nyt-a",
+    "value": "DGi1Ds1TxQ6r7Hf1E7phv9",
+    "domain": ".nytimes.com",
+    "path": "/",
+    "expires": 1778970255.832952,
+    "size": 27,
+    "httpOnly": false,
+    "secure": true,
+    "session": false,
+    "sameSite": "None",
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "datadome",
+    "value": "kk4LKmHGdtbS4Ok4bj~affdljeGon63oChdwUo7nSnDM9nspY2cSNLPsJzM4o6dJ5kbpAsSJQ58ODQxY86i3W2F00Si4~jWdMwnPqoia3iKB52iiUDIFKDjNz5qv_twC",
+    "domain": ".www.nytimes.com",
+    "path": "/",
+    "expires": 1778970255.832637,
+    "size": 136,
+    "httpOnly": false,
+    "secure": true,
+    "session": false,
+    "sameSite": "Lax",
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  }
+]
+Reloading page...
+Request URL: https://www.nytimes.com/2025/05/15/health/gene-editing-personalized-rare-disorders.html
+Request headers: {
+  "referer": "https://www.google.com/",
+  "upgrade-insecure-requests": "1",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+  "accept-language": "en-US,en;q=0.9",
+  "sec-ch-device-memory": "8",
+  "cookie": "datadome=kk4LKmHGdtbS4Ok4bj~affdljeGon63oChdwUo7nSnDM9nspY2cSNLPsJzM4o6dJ5kbpAsSJQ58ODQxY86i3W2F00Si4~jWdMwnPqoia3iKB52iiUDIFKDjNz5qv_twC; nyt-a=DGi1Ds1TxQ6r7Hf1E7phv9; nyt-gdpr=0; nyt-purr=cfhhcfhhhckfhcfshgas2fdnd; nyt-us=0; nyt-geo=HK; nyt.et.dd=iv=364BB96C103D4520A938461BCFE05704&val=32g4Nwnp6M2NSDSV4Qr3Hu7WL04Xo1iACyc6vq7DPCPLdA8RR7CEhWsVzXBcN4MPVdyWDn8YmM/U+1ySLcBLZ13N0HUv3yPz44fxcLFDsdup1anQ90SbcAY2iHJ20onLATak3X+CKMu6RJ1CxOItGAyqt89ryhUFheSCEnifQIt3CfkKthZJf34j5TZlN3BF4A1+RKfpxvntkMR83e0mS4EtJPuYPhnnRpSeUGiIdetEnEUb0PXQJNGeDHaDBBnQTH4CTXU5yech6DN3JWxcTHDYiqA+TKmBZiRis0cA5VZO0DhnHf6M80si5ie3hdkB6czeyt0k+YQDi84/FneQBg==; nyt-traceid=00000000000000005b409bd49f54644c; datadome=kk4LKmHGdtbS4Ok4bj~afic34rrpw9o_CJWh3c~LvhjnJuzJc6aQWjsvpcfOrCsk4ysNDSVzJvOUD98Uiz1ipKE1mJLG2XujhRzV2drUaUXmdK6Wt1BZpNZ5kWaY58G4"
+}
+Request URL: https://geo.captcha-delivery.com/captcha/?initialCid=AHrlqAAAAAMA9aqV8eGSy5YALcCYIg%3D%3D&hash=499AE34129FA4E4FABC31582C3075D&cid=dMRhNlsnOLE4DNbXNdPKULFxHjffJqtRlXPPapZtjunhrT714_2q4Hx_6Lgtl4NaQFjjoVuw2BnqfnCuy12RNk_CMbN1yxDUqFEnY8CDLTx7sYiUyvgFXoWVYdR8Us4F&t=fe&referer=https%3A%2F%2Fwww.nytimes.com%2F2025%2F05%2F15%2Fhealth%2Fgene-editing-personalized-rare-disorders.html&s=17439&e=bb4321247b9eadd60ffb82a7be03c5299ea8bc64a8a072cc2848e7f1e114911e&dm=cd
+Request headers: {
+  "referer": "https://www.google.com/",
+  "upgrade-insecure-requests": "1",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: https://dd.prod.captcha-delivery.com/image/2025-05-16/d04c6f272524762bb4429e15e7082d3f.jpg
+Request headers: {
+  "origin": "https://geo.captcha-delivery.com",
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: https://dd.prod.captcha-delivery.com/image/2025-05-16/d04c6f272524762bb4429e15e7082d3f.frag.png
+Request headers: {
+  "origin": "https://geo.captcha-delivery.com",
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: https://static.captcha-delivery.com/captcha/assets/tpl/6dc485c0c428c35b53577b146dc6f9179f55ef9ad41b327a2a179998839364bf/index.css
+Request headers: {
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/css,*/*;q=0.1",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: https://g1.nyt.com/fonts/css/web-fonts.5810def60210a2fa7d0848f37e3fa048bb6147b1.css
+Request headers: {
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/css,*/*;q=0.1",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: https://g1.nyt.com/fonts/family/cheltenham/cheltenham-normal-400.a3ed7afe3eaa0a873f3fbd379f8c491b.woff2
+Request headers: {
+  "origin": "https://geo.captcha-delivery.com",
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: https://g1.nyt.com/fonts/family/franklin/franklin-normal-600.abe1b34d5a429f8e034860c86c483446.woff2
+Request headers: {
+  "origin": "https://geo.captcha-delivery.com",
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: https://g1.nyt.com/fonts/family/franklin/franklin-normal-300.bc7be4c5d8cacb780f896c5cbe0c0d7f.woff2
+Request headers: {
+  "origin": "https://geo.captcha-delivery.com",
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMTQiIHZpZXdCb3g9IjAgMCAyMCAxNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTE0LjYwOSA4LjEyODc3QzE0LjI2NzcgNy43ODk0OSAxMy43MTY1IDcuNzg5NDkgMTMuMzc1MiA4LjEyODc3TDExLjM2MjcgMTAuMTQxM0w3LjYwODk2IDYuMzg3NTJDNy4yNjc2NiA2LjA0ODI0IDYuNzE2NTIgNi4wNDgyNCA2LjM3NTIxIDYuMzg3NTJMMC4yNTAyMTEgMTIuNTEyNUMtMC4wODgwODY0IDEyLjg1NzYgLTAuMDgyNjcyMyAxMy40MTE2IDAuMjYyNDA2IDEzLjc0OTlDMC40MjI5MTQgMTMuOTA3MyAwLjYzNzg5IDEzLjk5NjggMC44NjI3MSAxNEgxOC4zNjI3QzE4Ljg0NTkgMTQuMDAyOCAxOS4yNCAxMy42MTM0IDE5LjI0MjggMTMuMTMwMUMxOS4yNDQyIDEyLjg5NSAxOS4xNTA5IDEyLjY2OTMgMTguOTg0IDEyLjUwMzhMMTQuNjA5IDguMTI4NzdaIiBmaWxsPSIjNWE5MGRjIi8+CjxwYXRoIGQ9Ik0xMi4yMzc4IDUuMjVDMTMuNjg3NSA1LjI1IDE0Ljg2MjggNC4wNzQ3NSAxNC44NjI4IDIuNjI1QzE0Ljg2MjggMS4xNzUyNSAxMy42ODc1IDAgMTIuMjM3OCAwQzEwLjc4OCAwIDkuNjEyNzkgMS4xNzUyNSA5LjYxMjc5IDIuNjI1QzkuNjEyNzkgNC4wNzQ3NSAxMC43ODggNS4yNSAxMi4yMzc4IDUuMjVaIiBmaWxsPSIjNWE5MGRjIi8+Cjwvc3ZnPgo=
+Request headers: {
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTQiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxNCAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTcuMDA0MjEgMTAuMzY0MUM3LjAwNDIxIDEwLjYxMDcgNi44NjE3MSAxMC44MzQ4IDYuNjM4NzEgMTAuOTM5M0M2LjU1MjQ4IDEwLjk4MDEgNi40NjAwOSAxMC45OTk4IDYuMzY4MyAxMC45OTk4QzYuMjIyOTQgMTAuOTk5OCA2LjA3ODk0IDEwLjk0OTkgNS45NjI2MiAxMC44NTM0TDIuNDg2OTIgNy45NzMzSDAuNjM1NzYyQzAuMjg0NzAxIDcuOTczNiAwIDcuNjg4NzUgMCA3LjMzNzY4VjQuODA0NzJDMCA0LjQ1MzUxIDAuMjg0NzAxIDQuMTY4ODEgMC42MzU3NjIgNC4xNjg4MUgyLjQ4NzA3TDUuOTYyNzcgMS4yODg2OUM2LjE1MjY3IDEuMTMxMyA2LjQxNiAxLjA5Nzc0IDYuNjM4ODYgMS4yMDMwN0M2Ljg2MTcxIDEuMzA3NjUgNy4wMDQzNiAxLjUzMTg2IDcuMDA0MzYgMS43NzgzNEw3LjAwNDIxIDEwLjM2NDFaTTkuNDQ3NDkgOS4zNzA2MkM5LjQzMiA5LjM3MTY3IDkuNDE3MSA5LjM3MjI3IDkuNDAxNzUgOS4zNzIyN0M5LjIzMzgyIDkuMzcyMjcgOS4wNzE5MSA5LjMwNTkxIDguOTUyMjggOS4xODYxM0w4Ljg2NzI2IDkuMTAwODFDOC42NDQyNSA4Ljg3ODI2IDguNjE4MDcgOC41MjU2OSA4LjgwNTg2IDguMjcyNTlDOS4yODE5NyA3LjYzMDY2IDkuNTMzMjcgNi44Njk3IDkuNTMzMjcgNi4wNzE0M0M5LjUzMzI3IDUuMjEyODEgOS4yNDc5NiA0LjQwNzQ2IDguNzA4MDUgMy43NDIzNkM4LjUwMjUgMy40ODk1NiA4LjUyMTQ2IDMuMTIyNCA4Ljc1MTg0IDIuODkyMTdMOC44MzY3MSAyLjgwNzE1QzguOTYzNzEgMi42ODAxNSA5LjEzMzkgMi42MTA5MyA5LjMxODA4IDIuNjIxOTFDOS40OTc0NSAyLjYzMDk0IDkuNjY0OTMgMi43MTUzNiA5Ljc3ODY5IDIuODU0NEMxMC41Mjc2IDMuNzcwOCAxMC45MjMyIDQuODgzNDIgMTAuOTIzMiA2LjA3MTU4QzEwLjkyMzIgNy4xNzgxOCAxMC41NzM0IDguMjMxNTEgOS45MTEyNiA5LjExNzIyQzkuODAwNjYgOS4yNjQ4MyA5LjYzMTUzIDkuMzU3NTIgOS40NDc0OSA5LjM3MDYyWk0xMi4wNzYgMTEuMzM1NEMxMS45NjEgMTEuNDcxMyAxMS43OTQ4IDExLjU1MjggMTEuNjE2OCAxMS41NjAzQzExLjYwOCAxMS41NjA2IDExLjU5OTIgMTEuNTYwOSAxMS41OTAxIDExLjU2MDlDMTEuNDIxNyAxMS41NjA5IDExLjI2MDEgMTEuNDk0NCAxMS4xNDA1IDExLjM3NDhMMTEuMDU3IDExLjI5MTNDMTAuODIzNiAxMS4wNTgxIDEwLjgwNzggMTAuNjg1IDExLjAyIDEwLjQzMjVDMTIuMDQ1MyA5LjIxMzA3IDEyLjYxMDIgNy42NjQzNyAxMi42MTAyIDYuMDcxNDNDMTIuNjEwMiA0LjQxNDU0IDEyLjAwNTQgMi44MTk0OSAxMC45MDc3IDEuNTgwMTdDMTAuNjg1MiAxLjMyODU3IDEwLjY5NjQgMC45NDc3MTYgMTAuOTMzMyAwLjcwOTk2M0wxMS4wMTY3IDAuNjI2NDQ5QzExLjE0MDQgMC41MDIxNTYgMTEuMzAxMSAwLjQzMzY4OSAxMS40ODU0IDAuNDM5NTU4QzExLjY2MDQgMC40NDQ1MjMgMTEuODI1OSAwLjUyMTg2OCAxMS45NDIyIDAuNjUyNzgyQzEzLjI2OTEgMi4xNDY3MSAxNCA0LjA3MTMgMTQgNi4wNzE0M0MxNC4wMDAzIDcuOTk1ODcgMTMuMzE3IDkuODY1MzggMTIuMDc2IDExLjMzNTRaIiBmaWxsPSIjODY4Njg2Ii8+Cjwvc3ZnPgo=
+Request headers: {
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTkiIGhlaWdodD0iMTUiIHZpZXdCb3g9IjAgMCAxOSAxNSIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTE2Ljg3NSA3LjVDMTYuODc1IDMuMzY0NDkgMTMuNTEwNSAwIDkuMzc0OTkgMEM3LjM3MTc0IDAgNS40ODgxIDAuNzgwMzU5IDQuMDcxNzQgMi4xOTcxMkw1LjgzOTQ4IDMuOTY0ODZDNi43ODQxMiAzLjAyMDIxIDguMDM5NiAyLjUwMDEyIDkuMzc1MzYgMi41MDAxMkMxMi4xMzIgMi41MDAxMiAxNC4zNzUyIDQuNzQyOTggMTQuMzc1MiA3LjVIMTIuNDk5OUwxNS42MjUxIDEwLjYyNDlMMTguNzUgNy41SDE2Ljg3NVoiIGZpbGw9IiM4Njg2ODYiLz4KPHBhdGggZD0iTTkuMzc1IDEyLjUwMDJDNi42MTgwMiAxMi41MDAyIDQuMzc1MTIgMTAuMjU3IDQuMzc1MTIgNy40OTk5OUg2LjI1MDEyTDMuMTI0ODggNC4zNzUxMUwwIDcuNDk5OTlIMS44NzVDMS44NzUgMTEuNjM1NSA1LjIzOTQ5IDE1IDkuMzc1IDE1QzExLjM3ODYgMTUgMTMuMjYxOSAxNC4yMiAxNC42NzgyIDEyLjgwMzJMMTIuOTEwNSAxMS4wMzU1QzExLjk2NjIgMTEuOTc5NyAxMC43MTA0IDEyLjUwMDIgOS4zNzUgMTIuNTAwMloiIGZpbGw9IiM4Njg2ODYiLz4KPC9zdmc+Cg==
+Request headers: {
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTMiIGhlaWdodD0iMTAiIHZpZXdCb3g9IjAgMCAxMyAxMCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTcgMUwxMS41NzE0IDVMNyA5IiBzdHJva2U9IiM0NjQ5NEMiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CjxsaW5lIHgxPSI5IiB5MT0iNSIgeDI9IjEiIHkyPSI1IiBzdHJva2U9IiM0NjQ5NEMiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+Cjwvc3ZnPgo=
+Request headers: {
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9"
+}
+Request URL: https://www.nytimes.com/favicon.ico
+Request headers: {
+  "referer": "https://www.google.com/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9",
+  "sec-ch-device-memory": "8",
+  "cookie": "nyt-a=DGi1Ds1TxQ6r7Hf1E7phv9; nyt-gdpr=0; nyt-purr=cfhhcfhhhckfhcfshgas2fdnd; nyt-us=0; nyt-geo=HK; datadome=kk4LKmHGdtbS4Ok4bj~afic34rrpw9o_CJWh3c~LvhjnJuzJc6aQWjsvpcfOrCsk4ysNDSVzJvOUD98Uiz1ipKE1mJLG2XujhRzV2drUaUXmdK6Wt1BZpNZ5kWaY58G4; datadome=dMRhNlsnOLE4DNbXNdPKULFxHjffJqtRlXPPapZtjunhrT714_2q4Hx_6Lgtl4NaQFjjoVuw2BnqfnCuy12RNk_CMbN1yxDUqFEnY8CDLTx7sYiUyvgFXoWVYdR8Us4F; nyt.et.dd=iv=A80807020B7F4AC79C70212FD2462A51&val=UdRg+R2fZBsriylPT7+YlAfbcS2vnrh5svlpLx0raNBOxGNnVHe6JoBKujzhiXsBSK0mfaWwDUkunrD08TmubXfGKloeX5mXTw7UMOKQWBQbCDIpBTnPWeZIcez9vDBaEDTHRPGZaTxREjuZHCJhekVCh9ihwg/qvREuNkWFu0lrxod00Xw+aAUPzACBf+2f/Mr3ICHfnsQmtNXfTlA4DeiwhM2yij/QPNlA2SZ4zH7P9rW1ViSgdlQeCrwfj8WoZXBtUAEykLEx6zDa1clZB36f7fF0b/MyZofhZD+mZWg=; nyt-traceid=000000000000000066f465d4fb58c42c"
+}
+Waiting for content to load after CAPTCHA...
+CAPTCHA is still present after solving
+Browser closed
+Puppeteer-captcha failed
+

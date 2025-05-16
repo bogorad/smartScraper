@@ -1,292 +1,266 @@
-# SmartScraper: Intelligent Web Content Extractor
+# Universal Web Scraper: Detailed Specification (v5)
 
-## Overview
+## 1. Goal
 
-SmartScraper is a modular Node.js library designed to intelligently extract the main article content from any web page URL. It addresses the challenge of varying website structures through a robust, adaptive approach:
+To create a robust, **modular**, and adaptive web scraper capable of extracting relevant content from a wide variety of websites, including those with anti-scraping measures. The system should learn from successful scrapes to improve efficiency for known sites.
 
-1. **Tiered Extraction Strategy:** Prioritizes simpler, faster methods (like cURL) and escalates to more complex, resource-intensive methods (like Puppeteer with LLM-assisted XPath discovery) only when necessary.
+## 2. Core Principles
 
-2. **Learning & Adaptation:** Stores successful scraping configurations (method, XPath, CAPTCHA needs) for known domains to expedite future requests. Re-discovers configurations if they become stale.
+* **Modularity:** The system is designed as a collection of loosely coupled modules with well-defined responsibilities and interfaces, facilitating maintainability, testability, and extensibility.
+* **Tiered Approach:** Prioritize simpler, faster methods (like cURL) and escalate to more complex, resource-intensive methods (like Puppeteer with LLM-assisted XPath discovery) only when necessary.
+* **Learning & Adaptation:** Store successful scraping configurations (method, XPath, CAPTCHA needs) for known domains to expedite future requests. Re-discover configurations if they become stale.
+* **Proxy Usage:** Supports HTTP proxies to bypass website restrictions and improve scraping success rates. Handles proxy authentication and configuration automatically.
+* **Anti-Bot Evasion:** Puppeteer usage implies advanced stealth techniques by default, primarily through **`puppeteer-extra` and `puppeteer-extra-plugin-stealth`**. CAPTCHA solving is an additional layer.
+* **Efficient LLM Usage:** Extract only DOM structure with text size annotations instead of sending full HTML content to the LLM, reducing token usage while maintaining accuracy.
+* **Deterministic XPath Generation:** Set LLM temperature to zero for consistent and reliable XPath generation.
 
-3. **Anti-Bot Evasion:** Utilizes `puppeteer-extra` and `puppeteer-extra-plugin-stealth` for advanced stealth techniques, with optional CAPTCHA solving capabilities.
+## 3. Obstacles Addressed
 
-The goal is to provide a robust way to extract content from diverse web pages while maintaining efficiency and adaptability to website changes.
+* User-Agent checks (assumes UA is provided or a reasonable default is used).
+* Basic IP-based blocking (bypassed using HTTP proxies with authentication).
+* Advanced bot detection (mitigated by `puppeteer-extra-plugin-stealth`).
+* GDPR consent banners (via generic clickers, acknowledging limitations).
+* CAPTCHAs (via integration with external solvers, with specific support for DataDome CAPTCHA detection and handling).
+* Soft paywalls (basic attempts via plugins/interaction).
+* Dynamic content loading triggered by user interaction (mouse movements, scrolling).
+* Website structure changes breaking XPaths (via re-discovery).
+* Identifying relevant content on unknown pages.
+* Large HTML content exceeding LLM token limits (via DOM structure extraction).
 
-## Features
+## 4. Internal Data Structure: `KnownSitesTable`
 
-* **Modular Architecture:** Built with loosely coupled modules with well-defined responsibilities and interfaces, facilitating maintainability, testability, and extensibility.
-* **Automatic XPath Discovery:** Leverages LLMs to find the main content container XPath for unknown domains.
-* **Method Selection:** Intelligently chooses between cURL (for simple sites) and Puppeteer (for JavaScript-heavy sites or those requiring CAPTCHA solving).
-* **Configuration Storage:** Stores successful domain configurations in a local JSON file for efficient reuse.
-* **Self-Healing:** If a stored configuration fails during extraction, automatically triggers re-discovery to find updated selectors.
-* **Anti-Bot Measures:** Uses `puppeteer-extra-plugin-stealth` to bypass common bot detection techniques.
-* **CAPTCHA Handling:** Optional integration with external CAPTCHA solving services.
-* **Robust Error Handling:** Custom error classes with detailed context for better debugging.
-* **Configurable:** Uses environment variables (`.env` file) for API keys, LLM model selection, and other settings.
+This table (e.g., a JSON file or database), managed by the `KnownSitesTableManager` module, stores configurations for domains where scraping has been successful. Each entry could be keyed by a domain pattern.
 
-## Architecture & Workflow
+**Fields per entry:**
 
-The system is designed with a modular architecture to ensure separation of concerns, testability, and maintainability. A core "Scraper Engine" orchestrates the overall flow, delegating tasks to specialized modules:
+* `domain_pattern`: The URL pattern this configuration applies to.
+* `method`: The determined scraping method (`curl`, `puppeteer_stealth`, `puppeteer_captcha`).
+* `xpath_main_content`: The validated XPath to the main relevant content.
+* `last_successful_scrape_timestamp`: Timestamp of the last successful scrape using this config.
+* `failure_count_since_last_success`: Counter for consecutive failures, to trigger re-validation/re-discovery.
+* `site_specific_headers`: (Optional) Any custom HTTP headers required.
+* `user_agent_to_use`: (Optional) A specific User-Agent string if one proved particularly effective (can be overridden by request-specific UA).
+* `needs_captcha_solver`: (Boolean) True if a CAPTCHA was detected during discovery. If true, `method` will typically be `puppeteer_captcha`.
+* `puppeteer_wait_conditions`: (Optional) Specific conditions for Puppeteer to wait for.
+* `discovered_by_llm`: (Boolean) True if the XPath was found via the LLM discovery process.
 
-### Key Modules
+## 5. High-Level Algorithm Flow (Orchestrated by a Core Scraper Engine)
 
-* **`CoreScraperEngine`**: Orchestrates the main workflow, deciding whether to use known site logic or trigger discovery.
-* **`KnownSitesManager`**: Handles CRUD operations for the known sites storage.
-* **`PuppeteerController`**: Manages Puppeteer browser instances with `puppeteer-extra` and `puppeteer-extra-plugin-stealth` integration.
-* **`CurlHandler`**: Executes HTTP requests for non-JavaScript reliant fetching.
-* **`DomComparator`**: Compares HTML DOM structures to assess similarity.
-* **`LLMInterface`**: Interacts with the Large Language Model API for XPath discovery.
-* **`ContentScoringEngine`**: Implements heuristic scoring logic to evaluate content relevance.
-* **`CaptchaSolver`**: Interfaces with external CAPTCHA solving services.
-* **`HtmlAnalyser`**: Performs static analysis on HTML content.
-* **`PluginManager`**: Manages browser plugins/extensions within Puppeteer.
-
-### High-Level Workflow
-
-1. **Request Initiation:** Core engine receives URL, proxy info, User-Agent, etc.
-2. **Known Site Check:**
+1. **Request Initiation:** Core engine receives URL, proxy info, User-Agent (optional), etc.
+2. **Known Site Check (via `KnownSitesTableManager`):**
    * If **Known Site & Config Valid:** Use stored configuration.
    * If **Known Site & Config Stale/Fails:** Trigger re-discovery.
    * If **Unknown Site:** Proceed to discovery.
-3. **Discovery Process:**
-   * **Initial Probing:** Try both cURL and Puppeteer, compare results.
-   * **XPath Discovery:** Use LLM to generate candidate XPaths, validate and score them.
-   * **Method Selection:** Choose between cURL, Puppeteer, or Puppeteer with CAPTCHA solving.
-   * **Store Configuration:** Save successful configuration for future use.
-4. **Content Extraction:** Use determined method, XPath, and CAPTCHA solver if needed.
+3. **Unknown Site / Re-Discovery Process (Orchestrated by Discovery Sub-system):**
+   * Utilize `CurlHandler` and `PuppeteerController` (with `puppeteer-extra-plugin-stealth`) to fetch page content.
+   * `HtmlAnalyser` checks for CAPTCHAs and JS dependency.
+   * Extract DOM structure with text size annotations using `HtmlAnalyser.extractDomStructure()`.
+   * Employ "SmartScraper" logic (combining `LLMInterface`, `ContentScoringEngine`, `HtmlAnalyser`) to identify XPath and confirm CAPTCHA needs.
+   * If successful, `KnownSitesTableManager` stores new configuration.
+4. **Content Extraction (Orchestrated by Extraction Sub-system):** Use determined method, XPath, and `CaptchaSolverIntegration` if needed.
 5. **Return Data.**
 
-This modular approach allows for easy extension and maintenance of the system.
+## 6. Detailed Algorithm Steps
 
-## Technology Stack
+**A. Request Preparation (Handled by Core Scraper Engine)**
 
-* **Runtime:** Node.js
-* **Browser Automation:** `puppeteer-extra` with `puppeteer-extra-plugin-stealth`
-* **DOM Parsing:** `jsdom` for static HTML analysis
-* **HTTP Requests:** `axios` for API calls and cURL-like requests
-* **HTML Processing:** `turndown` for HTML-to-markdown conversion
-* **Configuration:** `dotenv` for environment variable management
-* **LLM API:** OpenRouter.ai (or any OpenAI-compatible API endpoint)
+1. Receive input: `target_url`, `proxy_details`, `user_agent_string` (optional).
+2. Delegate proxy and User-Agent configuration to `CurlHandler` and `PuppeteerController` for their respective operations.
 
-## Prerequisites
+**B. Known Site Processing (Core Scraper Engine interacting with `KnownSitesTableManager` and execution modules)**
 
-* **Node.js:** Version 16 or higher recommended.
-* **npm:** Node Package Manager (usually comes with Node.js).
-* **Chromium/Chrome:** A compatible version of Chromium or Google Chrome installed and accessible by Puppeteer.
-* **OpenRouter API Key:** An API key from [OpenRouter.ai](https://openrouter.ai/).
-* **LLM Model Access:** Ensure the selected LLM model in your `.env` file is available via your OpenRouter account.
-* **CAPTCHA Solver API Key (Optional):** If you need CAPTCHA solving capabilities.
+1. Normalize `target_url`, query `KnownSitesTableManager`.
+2. **If a matching entry is found:**
+   a. Retrieve config: `method`, `xpath_main_content`, `needs_captcha_solver`, etc.
+   b. If config stale/high failure, signal for re-discovery (proceed to **C**).
+   c. **Execute Stored Method:**
+      * If `method` is `curl`: Delegate to `CurlHandler`.
+      * If `method` is `puppeteer_stealth`: Delegate to `PuppeteerController` (which uses `puppeteer-extra-plugin-stealth`).
+      * If `method` is `puppeteer_captcha`: Delegate to `PuppeteerController` and `CaptchaSolverIntegration`.
+   d. **Validate Extraction:** Check XPath.
+   e. **If successful:** Update stats via `KnownSitesTableManager`, extract content, return data. **(END)**
+   f. **If fails:** Increment failure count via `KnownSitesTableManager`, signal for re-discovery (proceed to **C**).
 
-## Installation
+**C. Unknown Site Processing / XPath Re-Discovery (Discovery Sub-system)**
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/universal-scraper.git
-   cd universal-scraper
-   ```
+1. **C.1. Initial Probing:**
+   a. `discovered_needs_captcha_solver = false`.
+   b. **Attempt cURL (via `CurlHandler`):** Fetch page. If fails, note. `HtmlAnalyser` checks for CAPTCHA markers; if found, `discovered_needs_captcha_solver = true`.
+   c. **Attempt Puppeteer (via `PuppeteerController` using `puppeteer-extra-plugin-stealth`):**
+      * Launch, navigate, get `puppeteer_html`.
+      * `HtmlAnalyser` checks `puppeteer_html` for CAPTCHA markers; if found, `discovered_needs_captcha_solver = true`.
+   d. **Compare DOMs (via `DomComparator`, if cURL was successful):**
+      * If cURL HTML and `puppeteer_html` are highly similar and cURL response is valid, `tentative_method_is_curl = true`, `html_for_analysis = curl_html`.
+      * Else, `tentative_method_is_curl = false`, `html_for_analysis = puppeteer_html`.
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+2. **C.2. Page Preparation for XPath Discovery (if Puppeteer HTML is used, via `PuppeteerController`):**
+   a. If `html_for_analysis` is from Puppeteer:
+      * `PuppeteerController.navigateAndPreparePage()`: Full navigation, waits, interactions.
+      * `html_for_analysis = await page.content()`.
+      * `HtmlAnalyser` re-checks for CAPTCHA markers.
 
-3. Create a `.env` file with your configuration (see Configuration section).
+3. **C.3. DOM Structure Extraction and XPath Discovery via LLM & Heuristics:**
+   a. `llm_feedback = []`.
+   b. `article_snippets = HtmlAnalyser.extractArticleSnippets(html_for_analysis)`.
+   c. **Extract DOM Structure:**
+      * `dom_structure = HtmlAnalyser.extractDomStructure(html_for_analysis)` - This preserves tags and attributes but minimizes text content, adding annotations about original text sizes.
+   d. **Loop** up to `MAX_LLM_RETRIES`:
+      i. `llm_candidate_xpaths = LLMInterface.getLlmCandidateXPaths(dom_structure, article_snippets)`.
+      ii. If LLM call fails/malformed, log, add feedback, `continue` or break.
+      iii. `scored_candidates = []`.
+      iv. For each `candidate_xpath`:
+         1. `details = HtmlAnalyser.queryStaticXPathWithDetails(html_for_analysis, candidate_xpath)`.
+         2. If element not found, add feedback, continue.
+         3. `score = ContentScoringEngine.scoreElement(details, totalElementsFoundByXPath, candidate_xpath)`.
+         4. If `score > 0`, add to `scored_candidates`.
+         5. Else, add feedback.
+      v. If `scored_candidates` not empty, `best_candidate =` highest scoring, `found_xpath = best_candidate.xpath`, break loop.
+   e. `PuppeteerController.cleanupPuppeteer()` if instance was specific to discovery.
 
-## Configuration
+4. **C.4. Outcome of Discovery:**
+   a. **If `found_xpath` is identified:**
+      i. Determine `method_to_store`: `curl`, `puppeteer_stealth`, or `puppeteer_captcha` (based on `tentative_method_is_curl`, `found_xpath` validity on cURL HTML, and `discovered_needs_captcha_solver`).
+      ii. `KnownSitesTableManager.updateEntry()`: Store new config.
+      iii. Proceed to step **D (Content Extraction)**.
+   b. **If no `found_xpath`:** Log failure, save debug HTML, return error. **(END)**
 
-Create a file named `.env` in the root directory. Add the following variables:
+**D. Content Extraction (Extraction Sub-system)**
+
+1. Method (`current_method`), XPath (`current_xpath`), CAPTCHA need (`current_needs_captcha`) are known.
+2. **D.2. CAPTCHA Handling (if `current_method` is `puppeteer_captcha`, via `CaptchaSolverIntegration`):**
+   a. Integrate with external CAPTCHA solving service.
+   b. If solving fails, extraction attempt fails.
+3. Execute `current_method` (via `CurlHandler` or `PuppeteerController`).
+4. Once page loaded/rendered (and CAPTCHA solved): Extract content.
+5. **Basic Validation:** Check XPath and content.
+
+**E. Return Data (Handled by Core Scraper Engine)**
+
+1. Return extracted content, status, messages.
+
+## 7. Modular Architecture & Key Sub-Modules
+
+The system is designed with modularity in mind to ensure separation of concerns, testability, and maintainability. A core "Scraper Engine" orchestrates the overall flow, delegating tasks to specialized modules:
+
+* **`CoreScraperEngine`**: Orchestrates the main workflow, deciding whether to use known site logic or trigger discovery. Manages the overall state of a scraping request.
+* **`KnownSitesTableManager`**:
+  * **Responsibilities:** CRUD operations for the `KnownSitesTable` (e.g., `site_storage.json`). Handles loading, querying by domain, saving/updating entries.
+  * **Interface:** `getKnownSiteConfig(domain)`, `updateKnownSiteConfig(domain, config)`, `incrementFailureCount(domain)`.
+* **`PuppeteerController`**:
+  * **Responsibilities:** Manages all Puppeteer browser instances. Encapsulates Puppeteer setup, including the integration of **`puppeteer-extra` and `puppeteer-extra-plugin-stealth`** for enhanced anti-detection. Handles navigation, page interaction, XPath evaluation, and cleanup.
+  * **Interface:** `launchBrowser(proxyConfig)`, `newPage(browserInstance)`, `navigateAndPreparePage(page, url, waitConditions)`, `getPageContent(page)`, `cleanupPuppeteer(browserInstance)`.
+* **`CurlHandler`**:
+  * **Responsibilities:** Executes HTTP requests using a cURL-like library. Handles headers, proxies, and timeouts for non-JavaScript reliant fetching.
+  * **Interface:** `fetchPage(url, proxyConfig, headers, userAgent)`.
+* **`DomComparator`**:
+  * **Responsibilities:** Compares two HTML DOM structures (e.g., from cURL and Puppeteer) to assess similarity, often by converting to Markdown or using tree diffing algorithms.
+  * **Interface:** `compareDoms(htmlString1, htmlString2)`.
+* **`LLMInterface`**:
+  * **Responsibilities:** Interacts with the Large Language Model API (e.g., OpenRouter). Constructs prompts, sends requests with temperature=0 for deterministic and consistent XPath generation, parses responses for candidate XPaths, and handles LLM API errors.
+  * **Interface:** `getLlmCandidateXPaths(domStructure, snippets, feedbackContext)`.
+  * **Key Settings:** Uses temperature=0 to ensure consistent XPath generation across multiple runs.
+* **`ContentScoringEngine`**:
+  * **Responsibilities:** Implements the heuristic scoring logic (`scoreElement`) to evaluate the relevance of content found by candidate XPaths.
+  * **Interface:** `scoreElement(xpathDetails, totalElementsFoundByXPath, xpath)`.
+* **`CaptchaSolverIntegration`**:
+  * **Responsibilities:** Interfaces with external CAPTCHA solving services (e.g., 2Captcha, Anti-CAPTCHA). Manages API calls to submit CAPTCHAs and retrieve solutions.
+  * **Interface:** `solveCaptcha(page, captchaType, siteKeyDetails)`.
+* **`HtmlAnalyser`**:
+  * **Responsibilities:** Performs static analysis on HTML content. Extracts text snippets for LLM context, detects CAPTCHA markers, extracts DOM structure with text size annotations, and evaluates XPath expressions using document.evaluate.
+  * **Interface:** `extractArticleSnippets(htmlString)`, `detectCaptcha(htmlString)`, `extractDomStructure(htmlString, maxTextLength, minTextSizeToAnnotate)`, `queryStaticXPathWithDetails(htmlString, xpath)`, `extractByXpath(htmlString, xpath)`.
+* **`PluginManager` (Optional but Recommended):**
+  * **Responsibilities:** Manages the loading and execution of browser plugins/extensions within Puppeteer (e.g., adblockers, generic GDPR clickers).
+  * **Interface:** `loadPlugins(puppeteerLaunchOptions)`, `triggerPluginActions(page)`.
+
+## 8. Common Content Patterns
+
+The system uses a comprehensive list of common content-related class/ID names derived from `site_storage.json` to help identify article content across different websites:
+
+1. **Common element types:**
+   - `<article>` elements
+   - `<main>` elements
+   - `<div>` elements with descriptive classes/IDs
+   - `<section>` elements with content-related attributes
+
+2. **Common class names:**
+   - "article__content"
+   - "article-content"
+   - "article-body"
+   - "entry-content"
+   - "body-content"
+   - "post-body"
+   - "story-body"
+   - "content-body"
+   - "main-content"
+   - "article__text"
+   - "article__body"
+   - "story-text"
+   - "article-text"
+   - "article-dropcap"
+   - "paywall-content"
+   - "article__body"
+
+3. **Common ID patterns:**
+   - "article-content"
+   - "article-body"
+   - "content"
+   - "main-content"
+   - "article"
+   - "story-content"
+   - "post-content"
+
+## 9. Failure Handling & Re-validation
+
+(As previously listed: Stale config detection, proactive re-validation, debugging, LLM error handling – these would also be managed by relevant modules or the core engine).
+
+## 10. Configuration
+
+The system uses environment variables for configuration. Create a `.env` file in the root directory with the following variables:
 
 ```dotenv
 # --- LLM Configuration ---
 # Your OpenRouter API Key
 OPENROUTER_API_KEY=your_openrouter_api_key_here
-# The LLM model identifier to use
-LLM_MODEL=openai/gpt-3.5-turbo
+# The LLM model identifier to use (recommend a model with large context window)
+LLM_MODEL=meta-llama/llama-4-maverick:free
+# The temperature setting for the LLM (0 for deterministic output)
+LLM_TEMPERATURE=0
 
 # --- Puppeteer Configuration ---
 # Path to your Chrome/Chromium executable (optional)
 PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-# Default timeout for Puppeteer operations (in milliseconds)
-PUPPETEER_DEFAULT_TIMEOUT=30000
-# Navigation timeout (in milliseconds)
-PUPPETEER_NAVIGATION_TIMEOUT=60000
+# Whether to run Puppeteer in headless mode
+PUPPETEER_HEADLESS=true
+# Timeout for Puppeteer operations in milliseconds
+PUPPETEER_TIMEOUT=30000
+# HTTP proxy for web scraping (format: http://username:password@hostname:port)
+HTTP_PROXY=http://username:password@hostname:port
 
-# --- CAPTCHA Solver Configuration (Optional) ---
-CAPTCHA_SERVICE_NAME=2captcha
-CAPTCHA_API_KEY=your_captcha_api_key_here
+# --- CAPTCHA Solver Configuration ---
+# Your 2Captcha API key
+TWOCAPTCHA_API_KEY=your_2captcha_api_key_here
+# List of domains that need DataDome CAPTCHA handling (comma-separated)
+DATADOME_DOMAINS=wsj.com,nytimes.com
 
 # --- Logging Configuration ---
-# Set log level (DEBUG, INFO, WARN, ERROR)
-LOG_LEVEL=INFO
-# Save HTML to ./failed_html_dumps/ if extraction fails
-SAVE_HTML_ON_FAILURE=false
-
-# --- Plugin Configuration (Optional) ---
-# Paths to browser extensions (comma-separated)
-EXTENSION_PATHS=/path/to/extension1,/path/to/extension2
-```
-
-You can customize these settings based on your specific requirements.
-
-## Usage
-
-### As a Library
-
-```javascript
-import { UniversalScraper } from './src/index.js';
-
-// Create a scraper instance
-const scraper = new UniversalScraper();
-
-// Extract content from a URL
-async function extractContent() {
-  try {
-    const result = await scraper.getContent('https://example.com/article');
-    console.log('Extracted content:', result.content);
-    console.log('Method used:', result.method);
-    console.log('XPath used:', result.xpath);
-  } catch (error) {
-    console.error('Extraction failed:', error.message);
-  }
-}
-
-extractContent();
-```
-
-### Advanced Usage
-
-```javascript
-import { UniversalScraper } from './src/index.js';
-
-// Custom configuration
-const customConfig = {
-  llmConfig: {
-    model: 'anthropic/claude-3-haiku'
-  },
-  scraperSettings: {
-    puppeteerNavigationTimeout: 90000,
-    domComparisonThreshold: 0.85
-  }
-};
-
-// Create a scraper instance with custom configuration
-const scraper = new UniversalScraper(customConfig);
-
-// Extract content with proxy and user agent
-async function extractWithProxy() {
-  const options = {
-    proxyDetails: {
-      server: 'http://your-proxy-server:port',
-      auth: { username: 'user', password: 'pass' }
-    },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    outputType: 'markdown' // Get markdown instead of HTML
-  };
-
-  try {
-    const result = await scraper.getContent('https://example.com/article', options);
-    console.log('Extracted content:', result.content);
-  } catch (error) {
-    console.error('Extraction failed:', error.message);
-  }
-}
-
-extractWithProxy();
-```
-
-## Storage
-
-The system stores successful scraping configurations in a JSON file for efficient reuse:
-
-* **File:** `known_sites_storage.json` (configurable)
-* **Location:** `./data/` directory by default (configurable)
-* **Format:** A JSON object mapping normalized domain names to their corresponding configurations:
-
-```json
-{
-  "example.com": {
-    "domain_pattern": "example.com",
-    "method": "curl",
-    "xpath_main_content": "//article[@class='main-content']",
-    "last_successful_scrape_timestamp": "2023-07-15T14:32:45.123Z",
-    "failure_count_since_last_success": 0,
-    "needs_captcha_solver": false
-  },
-  "news-site.com": {
-    "domain_pattern": "news-site.com",
-    "method": "puppeteer_stealth",
-    "xpath_main_content": "//div[@id='article-body']",
-    "last_successful_scrape_timestamp": "2023-07-16T09:12:30.456Z",
-    "failure_count_since_last_success": 0,
-    "needs_captcha_solver": false
-  },
-  "paywall-site.com": {
-    "domain_pattern": "paywall-site.com",
-    "method": "puppeteer_captcha",
-    "xpath_main_content": "//main[@class='content']",
-    "last_successful_scrape_timestamp": "2023-07-17T18:45:22.789Z",
-    "failure_count_since_last_success": 0,
-    "needs_captcha_solver": true
-  }
-}
-```
-
-The `KnownSitesManager` module handles all CRUD operations for this storage, including:
-- Loading configurations at startup
-- Querying by domain
-- Saving/updating entries after successful scrapes
-- Tracking failure counts for stale configurations
-
-## Error Handling & Robustness
-
-The system implements a comprehensive error handling strategy with custom error classes:
-
-* **`ScraperError`**: Base error class for all scraper-related errors
-* **`LLMError`**: For issues with LLM API calls
-* **`CaptchaError`**: For CAPTCHA solving failures
-* **`NetworkError`**: For network-related issues (cURL, Puppeteer navigation)
-* **`ConfigurationError`**: For configuration problems
-* **`ExtractionError`**: For content extraction failures
-
-Each error class includes:
-- Detailed error message
-- Additional context in a `details` object
-- Original error (if applicable)
-- Timestamp
-
-This structured approach makes debugging easier and provides more useful information when things go wrong.
-
-## Logging
-
-The system uses a flexible logging system with configurable levels:
-
-```javascript
-// Example usage
-import { logger } from './src/utils/logger.js';
-
-logger.debug('Detailed debugging information');
-logger.info('General information about operation');
-logger.warn('Warning about potential issues');
-logger.error('Error information when something fails');
-```
-
-To set the log level, use the `LOG_LEVEL` environment variable:
-
-```dotenv
 # Set to DEBUG, INFO, WARN, ERROR, or NONE
 LOG_LEVEL=INFO
 ```
 
-## Future Enhancements
+## 11. Future Considerations / Advanced Features
 
-* **Database Integration**: Replace JSON storage with a database for better concurrency and scalability
-* **Visual Analysis**: Implement screenshot-based content detection for complex layouts
-* **Machine Learning**: Train models to identify main content without relying on XPaths
-* **API Server**: Create a REST API for remote content extraction
-* **Proxy Rotation**: Add support for rotating proxies to avoid IP blocking
-* **Content Cleaning**: Add more output formats and content cleaning options
-* **Performance Optimization**: Implement caching and parallel processing for faster extraction
+(As previously listed: advanced interactions, ML for direct extraction, visual analysis, diverse content types, granular XPaths).
 
-## License
+**Key Changes in this Version (v5):**
 
-MIT License
+* Added DOM structure extraction with text size annotations to reduce LLM token usage while maintaining accuracy
+* Updated XPath evaluation to use `document.evaluate` instead of `xpath.select` for better compatibility
+* Added a comprehensive list of common content-related class/ID names from `site_storage.json`
+* Enhanced scoring function to better differentiate between container elements and actual content elements
+* Added improved error handling and debugging for LLM responses
+* Set LLM temperature to zero for deterministic XPath generation
+* Added support for more content-specific classes including "article-dropcap" and "paywall-content"
+* Added bonus for content-related IDs in scoring function
+* Added HTTP proxy support for web scraping to bypass restrictions
+* Enhanced DataDome CAPTCHA detection and handling for sites with anti-bot protection
+* Updated module interfaces to reflect new functionality

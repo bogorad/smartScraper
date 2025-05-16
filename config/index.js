@@ -1,9 +1,9 @@
 // config/index.js
 
 // Import individual configuration modules
-import llmConfig from './llm-config.js';
-import scraperSettings from './scraper-settings.js';
-import captchaSolverConfig from './captcha-solver-config.js';
+import { llmConfig } from './llm-config.js';
+import { scraperSettings } from './scraper-settings.js';
+import { captchaSolverConfig } from './captcha-solver-config.js';
 // You can add more specific config imports here if needed
 
 // Combine all configurations into a single object or export them individually

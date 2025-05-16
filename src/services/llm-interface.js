@@ -91,6 +91,8 @@ Suggest up to 5 diverse and high-quality candidate XPaths.
         };
 
         logger.info(`Sending request to LLM. Prompt length (approx): ${prompt.length} chars.`);
+        logger.debug(`LLM request headers: ${JSON.stringify(this.axiosInstance.defaults.headers)}`);
+        logger.debug(`LLM request URL: ${this.endpoint}`);
         // logger.debug(`LLM Payload: ${JSON.stringify(payload, null, 2)}`); // Can be very verbose
 
         try {
