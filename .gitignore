@@ -5,3 +5,4 @@
 node_modules/
 chat_history/
 site_storage.json
+plugins/

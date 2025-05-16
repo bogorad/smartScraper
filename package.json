@@ -1,17 +1,54 @@
 {
   "name": "smartscraper",
-  "version": "1.0.0",
-  "description": "## Overview",
-  "main": "smartScraper2.js",
+  "version": "0.0.1",
+  "description": "An intelligent web scraper designed to extract main content from various web pages.",
+  "main": "src/index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/index.js",
+    "test": "jest",
+    "test:watch": "jest --watchAll"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "axios": "^1.9.0",
-    "dotenv": "^16.5.0",
-    "puppeteer-core": "^24.7.2",
-    "socks": "^2.8.4"
+    "axios": "^1.7.2",
+    "diff": "^5.2.0",
+    "dotenv": "^16.4.5",
+    "jsdom": "^24.1.1",
+    "puppeteer": "^22.13.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-adblocker": "^2.13.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "turndown": "^7.2.0",
+    "xpath.js": "^1.1.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.9",
+    "@babel/preset-env": "^7.25.0",
+    "babel-jest": "^29.7.0",
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "transform": {
+      "^.+\\.js$": "babel-jest"
+    },
+    "moduleFileExtensions": [
+      "js",
+      "json"
+    ],
+    "collectCoverage": true,
+    "coverageDirectory": "./coverage/",
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/config/",
+      "/src/utils/logger.js",
+      "/plugins/"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/examples/"
+    ]
   }
 }

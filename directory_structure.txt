@@ -1,0 +1,42 @@
+universal-scraper/
+├── data/
+│   └── known_sites_storage.json  # Or whatever you name your persistent storage
+├── failed_html_dumps/            # Directory for saving HTML of failed scrapes
+├── config/
+│   ├── index.js                  # Exports all configurations
+│   ├── llm-config.js             # LLM API keys, model choices, endpoints
+│   ├── scraper-settings.js       # Thresholds, timeouts, retry limits, SCORE_WEIGHTS
+│   └── captcha-solver-config.js  # API keys for CAPTCHA solving services
+├── src/
+│   ├── core/
+│   │   └── engine.js             # CoreScraperEngine: Orchestrates the main workflow
+│   ├── storage/
+│   │   └── known-sites-manager.js # KnownSitesTableManager: Handles CRUD for known sites
+│   ├── browser/
+│   │   ├── puppeteer-controller.js # PuppeteerController: Manages Puppeteer instances, stealth, interactions
+│   │   └── plugin-manager.js       # PluginManager: (Optional) Manages browser plugins for Puppeteer
+│   ├── network/
+│   │   └── curl-handler.js         # CurlHandler: Handles direct HTTP requests
+│   ├── analysis/
+│   │   ├── html-analyser.js        # HtmlAnalyser: Extracts snippets, detects CAPTCHAs from HTML
+│   │   ├── dom-comparator.js       # DomComparator: Compares DOM structures
+│   │   └── content-scoring-engine.js # ContentScoringEngine: Scores XPath candidates
+│   ├── services/
+│   │   ├── llm-interface.js        # LLMInterface: Interacts with LLM APIs
+│   │   └── captcha-solver.js     # CaptchaSolverIntegration: Interfaces with CAPTCHA services
+│   ├── utils/
+│   │   ├── logger.js               # Utility for logging
+│   │   ├── url-helpers.js          # Utility for URL normalization, domain extraction
+│   │   └── error-handler.js        # Centralized error handling/custom error classes
+│   ├── constants.js                # Global constants (e.g., method names, if not in config)
+│   └── index.js                    # Main entry point for the library/application
+├── tests/                          # Unit and integration tests
+│   ├── core/
+│   │   └── engine.test.js
+│   ├── storage/
+│   │   └── known-sites-manager.test.js
+│   └── ... (tests for other modules)
+├── .env                            # Environment variables (API keys, sensitive data - gitignored)
+├── .gitignore
+├── package.json
+└── README.md
