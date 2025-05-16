@@ -33,4 +33,4 @@ const scraperSettings = {
   descriptiveIdOrClassKeywords: ['article', 'content', 'main', 'body', 'story', 'post', 'entry', 'text', 'blog'],
 };
 
-export default scraperSettings;
+export { scraperSettings };

@@ -2,8 +2,9 @@
 
 import fs from 'fs/promises'; // Using promises API for async file operations
 import path from 'path';
-import logger from '../utils/logger.js'; // Assuming a logger utility
+import { logger } from '../utils/logger.js'; // Assuming a logger utility
 import { fileURLToPath } from 'url'; // To handle __dirname in ES modules
+import { ConfigurationError } from '../utils/error-handler.js';
 
 // ES Module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -16,6 +17,9 @@ class KnownSitesManager {
         this.storageData = {}; // In-memory cache of the storage data
         this.isInitialized = false;
         this._initPromise = this._initialize(); // Store the promise for initial load
+
+        // Add a lock mechanism to prevent race conditions
+        this._writeLock = Promise.resolve(); // Initially resolved promise (no lock)
     }
 
     async _initialize() {
@@ -47,14 +51,53 @@ class KnownSitesManager {
         }
     }
 
+    /**
+     * Acquires a write lock to prevent concurrent writes to the storage file.
+     * @returns {Promise<Function>} A release function that must be called to release the lock.
+     * @private
+     */
+    async _acquireWriteLock() {
+        // Create a new promise that will be resolved when the lock is released
+        let releaseLock;
+        const newLockPromise = new Promise(resolve => {
+            releaseLock = resolve;
+        });
+
+        // Wait for the current lock to be released
+        const previousLock = this._writeLock;
+        this._writeLock = newLockPromise;
+
+        // Wait for any previous operations to complete
+        await previousLock;
+
+        // Return the release function
+        return releaseLock;
+    }
+
+    /**
+     * Saves the in-memory storage data to the file system.
+     * Uses a write lock to prevent race conditions.
+     * @private
+     */
     async _saveStorage() {
         await this._ensureInitialized(); // Should already be initialized, but good practice
+
+        // Acquire a write lock
+        const releaseLock = await this._acquireWriteLock();
+
         try {
             const jsonData = JSON.stringify(this.storageData, null, 2); // Pretty print JSON
             await fs.writeFile(this.storageFilePath, jsonData, 'utf-8');
             logger.debug('Known sites storage saved successfully.');
         } catch (error) {
             logger.error(`Failed to save known sites storage: ${error.message}`);
+            throw new ConfigurationError('Failed to save known sites storage', {
+                path: this.storageFilePath,
+                error: error.message
+            }, error);
+        } finally {
+            // Always release the lock, even if an error occurred
+            releaseLock();
         }
     }
 

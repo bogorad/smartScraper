@@ -2,7 +2,8 @@
 
 import axios from 'axios';
 import https from 'https'; // To configure a custom agent for ignoring SSL errors if needed
-import logger from '../utils/logger.js';
+import { logger } from '../utils/logger.js';
+import { NetworkError } from '../utils/error-handler.js';
 // import { scraperSettings } from '../../config/index.js'; // If specific timeouts are needed from global config
 
 // Default User-Agent if none is provided.
@@ -71,7 +72,7 @@ async function fetchWithCurl(
                 }
             } catch (e) {
                 logger.error(`Invalid proxy server string format: ${proxyDetails.server}`);
-                return { success: false, html: null, status: null, error: `Invalid proxy server string: ${e.message}`, headers: null };
+                throw new NetworkError(`Invalid proxy server string format`, { proxyServer: proxyDetails.server }, e);
             }
         } else { // Structured proxy format
             axiosConfig.proxy = {
@@ -107,26 +108,53 @@ async function fetchWithCurl(
             headers: response.headers,
         };
     } catch (error) {
+        // If it's already a NetworkError, just re-throw it
+        if (error instanceof NetworkError) {
+            throw error;
+        }
+
         logger.error(`cURL request to ${url} failed. Error: ${error.message}`);
+
         if (error.response) {
             // The request was made and the server responded with a status code
             // that falls out of the range of 2xx
             logger.error(`Status: ${error.response.status}, Data: ${typeof error.response.data === 'string' ? error.response.data.substring(0, 200) : 'Non-string data'}`);
-            return {
+
+            // Create a NetworkError but also return data that might be useful
+            const responseData = {
                 success: false,
                 html: typeof error.response.data === 'string' ? error.response.data : null, // Return HTML even on error if available
                 status: error.response.status,
                 error: `HTTP Error ${error.response.status}: ${error.message}`,
                 headers: error.response.headers,
             };
+
+            // Throw a NetworkError with the response data
+            throw new NetworkError(
+                `HTTP Error ${error.response.status} for ${url}`,
+                {
+                    url,
+                    status: error.response.status,
+                    responseData: responseData
+                },
+                error
+            );
         } else if (error.request) {
             // The request was made but no response was received
             logger.error('No response received for cURL request.');
-            return { success: false, html: null, status: null, error: `No response: ${error.message}`, headers: null };
+            throw new NetworkError(
+                `No response received for cURL request to ${url}`,
+                { url },
+                error
+            );
         } else {
             // Something happened in setting up the request that triggered an Error
             logger.error(`Error setting up cURL request: ${error.message}`);
-            return { success: false, html: null, status: null, error: `Request setup error: ${error.message}`, headers: null };
+            throw new NetworkError(
+                `Error setting up cURL request to ${url}`,
+                { url },
+                error
+            );
         }
     }
 }

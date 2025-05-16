@@ -2,7 +2,8 @@
 
 import { JSDOM } from 'jsdom';
 import xpath from 'xpath';
-import logger from '../utils/logger.js';
+import { logger } from '../utils/logger.js';
+import { ExtractionError } from '../utils/error-handler.js';
 
 class HtmlAnalyser {
     constructor() {
@@ -31,7 +32,9 @@ class HtmlAnalyser {
     extractArticleSnippets(htmlString, maxSnippets = 10, snippetMaxLength = 150) {
         if (!htmlString || typeof htmlString !== 'string') {
             logger.warn('extractArticleSnippets: htmlString is invalid.');
-            return [];
+            throw new ExtractionError('Invalid HTML string for snippet extraction', {
+                htmlLength: htmlString ? htmlString.length : 0
+            });
         }
         const snippets = [];
         try {
@@ -58,7 +61,10 @@ class HtmlAnalyser {
             return snippets;
         } catch (error) {
             logger.error(`Error extracting snippets: ${error.message}`);
-            return [];
+            throw new ExtractionError('Failed to extract snippets from HTML', {
+                htmlLength: htmlString.length,
+                error: error.message
+            }, error);
         }
     }
 
@@ -134,7 +140,13 @@ class HtmlAnalyser {
      * @returns {string|null} The innerHTML of the matched element or null.
      */
     extractByXpath(htmlString, xpathExpression) {
-        if (!htmlString || !xpathExpression) return null;
+        if (!htmlString || !xpathExpression) {
+            throw new ExtractionError('Missing HTML or XPath for extraction', {
+                htmlProvided: !!htmlString,
+                xpathProvided: !!xpathExpression
+            });
+        }
+
         try {
             const dom = new JSDOM(htmlString);
             const document = dom.window.document;
@@ -148,10 +160,24 @@ class HtmlAnalyser {
                     return firstNode.innerHTML;
                 }
             }
-            return null;
+
+            // If we get here, no content was found with the XPath
+            throw new ExtractionError('XPath did not match any element with content', {
+                xpath: xpathExpression,
+                nodesFound: nodes ? nodes.length : 0
+            });
         } catch (error) {
+            // If it's already an ExtractionError, just re-throw it
+            if (error instanceof ExtractionError) {
+                throw error;
+            }
+
             logger.error(`Error extracting by XPath "${xpathExpression}" from static HTML: ${error.message}`);
-            return null;
+            throw new ExtractionError('Error applying XPath to HTML', {
+                xpath: xpathExpression,
+                htmlLength: htmlString.length,
+                error: error.message
+            }, error);
         }
     }
 
@@ -213,7 +239,22 @@ class HtmlAnalyser {
             }
         } catch (error) {
             logger.warn(`Error querying static XPath "${xpathExpression}": ${error.message}`);
-            // Return result with element_found_count potentially 0 or as is
+
+            // If it's already an ExtractionError, just re-throw it
+            if (error instanceof ExtractionError) {
+                throw error;
+            }
+
+            // Otherwise, wrap it in an ExtractionError but still return the partial result
+            // This allows callers to decide whether to use the partial result or handle the error
+            const extractionError = new ExtractionError(`Error querying static XPath "${xpathExpression}"`, {
+                xpath: xpathExpression,
+                partialResult: result
+            }, error);
+
+            // Attach the partial result to the error for callers that catch the error
+            extractionError.partialResult = result;
+            throw extractionError;
         }
         return result;
     }

@@ -61,8 +61,8 @@ class NetworkError extends ScraperError {
  * Error specific to configuration issues.
  */
 class ConfigurationError extends ScraperError {
-    constructor(message, configDetails = {}) {
-        super(message, { configuration: configDetails });
+    constructor(message, configDetails = {}, originalError = null) {
+        super(message, { configuration: configDetails, originalError: originalError ? originalError.message : null });
         this.name = 'ConfigurationError';
     }
 }
@@ -71,8 +71,8 @@ class ConfigurationError extends ScraperError {
  * Error when content extraction fails (e.g., XPath not found, content empty).
  */
 class ExtractionError extends ScraperError {
-    constructor(message, extractionDetails = {}) {
-        super(message, { extraction: extractionDetails });
+    constructor(message, extractionDetails = {}, originalError = null) {
+        super(message, { extraction: extractionDetails, originalError: originalError ? originalError.message : null });
         this.name = 'ExtractionError';
     }
 }

@@ -1,13 +1,16 @@
 // src/services/llm-interface.js
 
 import axios from 'axios';
-import logger from '../utils/logger.js';
+import { logger } from '../utils/logger.js';
+import { LLMError, ConfigurationError } from '../utils/error-handler.js';
 // No need to import llmConfig directly here if passed in constructor
 
 class LLMInterface {
     constructor(llmConfig) {
         if (!llmConfig || !llmConfig.apiKey || !llmConfig.chatCompletionsEndpoint || !llmConfig.model) {
-            throw new Error('LLMInterface: Missing required LLM configuration (apiKey, chatCompletionsEndpoint, model).');
+            throw new ConfigurationError('LLMInterface: Missing required LLM configuration', {
+                missing: ['apiKey', 'chatCompletionsEndpoint', 'model'].filter(key => !llmConfig || !llmConfig[key])
+            });
         }
         this.apiKey = llmConfig.apiKey;
         this.endpoint = llmConfig.chatCompletionsEndpoint;
@@ -111,10 +114,14 @@ Suggest up to 5 diverse and high-quality candidate XPaths.
                             return xpaths.filter((xpath, index, self) => self.indexOf(xpath) === index); // Ensure uniqueness
                         } else {
                             logger.warn('LLM response content was not a valid JSON array of strings:', cleanedContent);
-                            return null;
+                            throw new LLMError('LLM response content was not a valid JSON array of strings', {
+                                model: this.model,
+                                content: cleanedContent
+                            });
                         }
                     } catch (parseError) {
                         logger.error(`Failed to parse LLM response as JSON: ${parseError.message}. Raw content: ${messageContent}`);
+
                         // Fallback: try to extract XPaths using a regex if parsing fails (less reliable)
                         const xpathRegex = /\/\/[a-zA-Z0-9\[\]@='".:,()\s-]+/g;
                         const extracted = messageContent.match(xpathRegex);
@@ -122,25 +129,64 @@ Suggest up to 5 diverse and high-quality candidate XPaths.
                             logger.warn(`Fallback: Extracted ${extracted.length} XPaths using regex.`);
                             return extracted.filter((xpath, index, self) => self.indexOf(xpath) === index);
                         }
-                        return null;
+
+                        // If fallback fails, throw a proper LLMError
+                        throw new LLMError(
+                            'Failed to parse LLM response as JSON and regex fallback failed',
+                            {
+                                model: this.model,
+                                rawContent: messageContent.substring(0, 500) + (messageContent.length > 500 ? '...' : '')
+                            },
+                            parseError
+                        );
                     }
                 } else {
                     logger.warn('LLM response did not contain expected message content.');
-                    return null;
+                    throw new LLMError('LLM response did not contain expected message content', {
+                        model: this.model,
+                        responseData: response.data
+                    });
                 }
             } else {
                 logger.warn('LLM response was empty or malformed:', response.data);
-                return null;
+                throw new LLMError('LLM response was empty or malformed', {
+                    model: this.model,
+                    responseData: response.data
+                });
             }
         } catch (error) {
+            // If it's already a LLMError, just re-throw it
+            if (error instanceof LLMError) {
+                throw error;
+            }
+
+            // Otherwise, wrap it in an LLMError with appropriate details
             if (error.response) {
                 logger.error(`LLM API request failed with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+                throw new LLMError(
+                    `LLM API request failed with status ${error.response.status}`,
+                    {
+                        model: this.model,
+                        status: error.response.status,
+                        responseData: error.response.data
+                    },
+                    error
+                );
             } else if (error.request) {
                 logger.error(`LLM API request failed: No response received. ${error.message}`);
+                throw new LLMError(
+                    'LLM API request failed: No response received',
+                    { model: this.model },
+                    error
+                );
             } else {
                 logger.error(`Error setting up LLM API request: ${error.message}`);
+                throw new LLMError(
+                    'Error setting up LLM API request',
+                    { model: this.model },
+                    error
+                );
             }
-            return null;
         }
     }
 }

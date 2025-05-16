@@ -12,9 +12,13 @@ import {
     scraperSettings as defaultScraperSettings,
     captchaSolverConfig as defaultCaptchaSolverConfig
 } from '../config/index.js'; // Default configurations
-import logger from './utils/logger.js';
+import { logger } from './utils/logger.js';
 import { isValidUrl } from './utils/url-helpers.js';
 import { OUTPUT_TYPES } from './constants.js';
+import {
+    ScraperError,
+    ConfigurationError
+} from './utils/error-handler.js';
 
 // Store a single instance of the engine if desired, or allow creating multiple
 let defaultEngineInstance = null;
@@ -50,7 +54,7 @@ async function scrapeUrl(url, options = {}) {
     if (!isValidUrl(url)) {
         const errorMsg = `Invalid URL provided: ${url}`;
         logger.error(errorMsg);
-        return { success: false, data: null, error: errorMsg };
+        throw new ConfigurationError('Invalid URL format', { url });
     }
 
     const {
@@ -62,7 +66,10 @@ async function scrapeUrl(url, options = {}) {
     if (!Object.values(OUTPUT_TYPES).includes(outputType)) {
         const errorMsg = `Invalid outputType specified: ${outputType}. Valid types are: ${Object.values(OUTPUT_TYPES).join(', ')}`;
         logger.error(errorMsg);
-        return { success: false, data: null, error: errorMsg };
+        throw new ConfigurationError('Invalid output type', {
+            outputType,
+            validTypes: Object.values(OUTPUT_TYPES)
+        });
     }
 
     try {
@@ -70,8 +77,30 @@ async function scrapeUrl(url, options = {}) {
         const result = await engine.scrape(url, proxyDetails, userAgentString, outputType);
         return result;
     } catch (error) {
-        logger.error(`Unhandled error during scrapeUrl for ${url}: ${error.message}`, error.stack);
-        return { success: false, data: null, error: `Unhandled scraper error: ${error.message}` };
+        // Handle different types of errors
+        if (error instanceof ScraperError) {
+            logger.error(`${error.name} during scrapeUrl for ${url}: ${error.message}`, error.details);
+
+            // Create a structured error response with appropriate details
+            const errorResponse = {
+                success: false,
+                data: null,
+                error: error.message,
+                errorType: error.name.replace('Error', '').toLowerCase(),
+                errorDetails: error.details
+            };
+
+            return errorResponse;
+        } else {
+            // For unexpected errors
+            logger.error(`Unhandled error during scrapeUrl for ${url}: ${error.message}`, error.stack);
+            return {
+                success: false,
+                data: null,
+                error: `Unhandled scraper error: ${error.message}`,
+                errorType: 'unknown'
+            };
+        }
     }
 }
 

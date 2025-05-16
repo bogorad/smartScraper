@@ -11,6 +11,14 @@ import { LLMInterface } from '../services/llm-interface.js';
 import { CaptchaSolver } from '../services/captcha-solver.js';
 import logger from '../utils/logger.js'; // Assuming a logger utility
 import { normalizeDomain } from '../utils/url-helpers.js';
+import {
+    ScraperError,
+    LLMError,
+    CaptchaError,
+    NetworkError,
+    ConfigurationError,
+    ExtractionError
+} from '../utils/error-handler.js';
 import { scraperSettings, llmConfig, captchaSolverConfig } from '../../config/index.js'; // Import all configs
 
 const { METHODS } = await import('../constants.js'); // Assuming constants.js exports METHODS
@@ -153,8 +161,39 @@ class CoreScraperEngine {
             }
 
         } catch (error) {
-            logger.error(`Error scraping with known config for ${url}: ${error.message}`);
-            return { success: false, error: error.message, data: null };
+            // Log the error with appropriate detail based on type
+            if (error instanceof ScraperError) {
+                logger.error(`${error.name} while scraping with known config for ${url}: ${error.message}`, error.details);
+            } else {
+                logger.error(`Error scraping with known config for ${url}: ${error.message}`);
+            }
+
+            // Create a structured error response with appropriate details
+            const errorResponse = {
+                success: false,
+                data: null,
+                error: error.message
+            };
+
+            // Add more specific error details based on error type
+            if (error instanceof NetworkError) {
+                errorResponse.errorType = 'network';
+                errorResponse.errorDetails = error.details;
+            } else if (error instanceof CaptchaError) {
+                errorResponse.errorType = 'captcha';
+                errorResponse.errorDetails = error.details;
+            } else if (error instanceof ExtractionError) {
+                errorResponse.errorType = 'extraction';
+                errorResponse.errorDetails = error.details;
+            } else if (error instanceof LLMError) {
+                errorResponse.errorType = 'llm';
+                errorResponse.errorDetails = error.details;
+            } else if (error instanceof ConfigurationError) {
+                errorResponse.errorType = 'configuration';
+                errorResponse.errorDetails = error.details;
+            }
+
+            return errorResponse;
         } finally {
             if (browser) {
                 await this.puppeteerController.cleanupPuppeteer(browser);
@@ -365,8 +404,39 @@ class CoreScraperEngine {
             }
 
         } catch (error) {
-            logger.error(`Error during discovery/scrape for ${url}: ${error.message} ${error.stack}`);
-            return { success: false, error: error.message, data: null };
+            // Log the error with appropriate detail based on type
+            if (error instanceof ScraperError) {
+                logger.error(`${error.name} during discovery/scrape for ${url}: ${error.message}`, error.details);
+            } else {
+                logger.error(`Error during discovery/scrape for ${url}: ${error.message} ${error.stack}`);
+            }
+
+            // Create a structured error response with appropriate details
+            const errorResponse = {
+                success: false,
+                data: null,
+                error: error.message
+            };
+
+            // Add more specific error details based on error type
+            if (error instanceof NetworkError) {
+                errorResponse.errorType = 'network';
+                errorResponse.errorDetails = error.details;
+            } else if (error instanceof CaptchaError) {
+                errorResponse.errorType = 'captcha';
+                errorResponse.errorDetails = error.details;
+            } else if (error instanceof ExtractionError) {
+                errorResponse.errorType = 'extraction';
+                errorResponse.errorDetails = error.details;
+            } else if (error instanceof LLMError) {
+                errorResponse.errorType = 'llm';
+                errorResponse.errorDetails = error.details;
+            } else if (error instanceof ConfigurationError) {
+                errorResponse.errorType = 'configuration';
+                errorResponse.errorDetails = error.details;
+            }
+
+            return errorResponse;
         } finally {
             if (browser) {
                 await this.puppeteerController.cleanupPuppeteer(browser);

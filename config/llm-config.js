@@ -14,4 +14,4 @@ const llmConfig = {
   defaultMaxTokens: 1024, // Max tokens for LLM response (for XPath suggestions)
 };
 
-export default llmConfig;
+export { llmConfig };

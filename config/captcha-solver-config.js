@@ -15,4 +15,4 @@ const captchaSolverConfig = {
   pollingInterval: 5, // Interval to poll for CAPTCHA solution in seconds
 };
 
-export default captchaSolverConfig;
+export { captchaSolverConfig };

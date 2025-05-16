@@ -2,8 +2,9 @@
 
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import logger from '../utils/logger.js';
-// import { scraperSettings } from '../../config/index.js'; // If specific settings are needed directly
+import { logger } from '../utils/logger.js';
+import { NetworkError } from '../utils/error-handler.js';
+import { scraperSettings } from '../../config/index.js';
 
 // Apply the stealth plugin
 puppeteer.use(StealthPlugin());
@@ -12,12 +13,40 @@ puppeteer.use(StealthPlugin());
 class PuppeteerController {
     constructor(pluginManager, scraperConfig = {}) { // scraperConfig from core engine
         this.pluginManager = pluginManager; // For more advanced/custom plugin management
-        this.defaultTimeout = scraperConfig.puppeteerDefaultTimeout || 30000;
-        this.navigationTimeout = scraperConfig.puppeteerNavigationTimeout || 60000;
-        this.networkIdleTimeout = scraperConfig.puppeteerNetworkIdleTimeout || 5000;
-        this.postLoadDelay = scraperConfig.puppeteerPostLoadDelay || 2000;
-        this.interactionDelay = scraperConfig.puppeteerInteractionDelay || 2000;
-        this.executablePath = scraperConfig.puppeteerExecutablePath || undefined; // From config if specified
+
+        // Use values from scraperConfig if provided, otherwise fall back to global scraperSettings,
+        // and only use hardcoded defaults as a last resort
+        this.defaultTimeout = scraperConfig.puppeteerDefaultTimeout ||
+                             scraperSettings.puppeteerDefaultTimeout ||
+                             30000;
+
+        this.navigationTimeout = scraperConfig.puppeteerNavigationTimeout ||
+                                scraperSettings.puppeteerNavigationTimeout ||
+                                60000;
+
+        this.networkIdleTimeout = scraperConfig.puppeteerNetworkIdleTimeout ||
+                                 scraperSettings.puppeteerNetworkIdleTimeout ||
+                                 5000;
+
+        this.postLoadDelay = scraperConfig.puppeteerPostLoadDelay ||
+                            scraperSettings.puppeteerPostLoadDelay ||
+                            2000;
+
+        this.interactionDelay = scraperConfig.puppeteerInteractionDelay ||
+                               scraperSettings.puppeteerInteractionDelay ||
+                               2000;
+
+        this.executablePath = scraperConfig.puppeteerExecutablePath ||
+                             scraperSettings.puppeteerExecutablePath ||
+                             undefined;
+
+        logger.debug('PuppeteerController initialized with timeouts:', {
+            defaultTimeout: this.defaultTimeout,
+            navigationTimeout: this.navigationTimeout,
+            networkIdleTimeout: this.networkIdleTimeout,
+            postLoadDelay: this.postLoadDelay,
+            interactionDelay: this.interactionDelay
+        });
     }
 
     async launchBrowser(proxyDetails = null) {
@@ -64,7 +93,9 @@ class PuppeteerController {
             return browser;
         } catch (error) {
             logger.error(`Failed to launch Puppeteer browser: ${error.message}`);
-            throw error;
+            throw new NetworkError('Failed to launch Puppeteer browser', {
+                launchOptions: JSON.stringify(launchOptions)
+            }, error);
         }
     }
 
@@ -92,7 +123,9 @@ class PuppeteerController {
             return page;
         } catch (error) {
             logger.error(`Failed to create new Puppeteer page: ${error.message}`);
-            throw error;
+            throw new NetworkError('Failed to create new Puppeteer page', {
+                userAgentProvided: !!userAgentString
+            }, error);
         }
     }
 
@@ -106,7 +139,18 @@ class PuppeteerController {
         } catch (error) {
             logger.error(`Navigation failed in launchAndNavigate for ${url}: ${error.message}`);
             await this.cleanupPuppeteer(browser); // Clean up if navigation fails
-            throw error; // Re-throw to be caught by the engine
+
+            // If it's already a NetworkError, just re-throw it
+            if (error instanceof NetworkError) {
+                throw error;
+            }
+
+            // Otherwise, wrap it in a NetworkError
+            throw new NetworkError(`Navigation failed for ${url}`, {
+                url,
+                proxyDetails: proxyDetails ? true : false,
+                isInitialProbe
+            }, error);
         }
     }
 
@@ -135,7 +179,12 @@ class PuppeteerController {
 
         } catch (error) {
             logger.error(`Navigation to ${url} failed: ${error.message}`);
-            throw error;
+            throw new NetworkError(`Navigation to ${url} failed`, {
+                url,
+                waitUntil: effectiveWaitUntil,
+                timeout: effectiveTimeout,
+                isInitialProbe
+            }, error);
         }
     }
 
@@ -171,7 +220,9 @@ class PuppeteerController {
             return content;
         } catch (error) {
             logger.error(`Failed to get page content: ${error.message}`);
-            throw error;
+            throw new NetworkError('Failed to get page content', {
+                pageUrl: await page.url()
+            }, error);
         }
     }
 

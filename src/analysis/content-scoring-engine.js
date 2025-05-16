@@ -1,5 +1,6 @@
 // src/analysis/content-scoring-engine.js
-import logger from '../utils/logger.js';
+import { logger } from '../utils/logger.js';
+import { ExtractionError } from '../utils/error-handler.js';
 
 class ContentScoringEngine {
     constructor(
@@ -31,13 +32,20 @@ class ContentScoringEngine {
      * @returns {number} The calculated score for the element.
      */
     scoreElement(elementDetails) {
-        if (!elementDetails) return -Infinity; // Invalid input
+        if (!elementDetails) {
+            throw new ExtractionError('Cannot score element - missing element details', {
+                elementDetails: null
+            });
+        }
 
         let score = 0;
 
         // 0. Basic viability: Must have found at least one element
         if (elementDetails.element_found_count === 0) {
-            return -Infinity; // No element found by this XPath
+            throw new ExtractionError('Cannot score element - no elements found with the given XPath', {
+                xpath: elementDetails.xpath,
+                elementFoundCount: 0
+            });
         }
 
         // 1. Uniqueness of XPath (if element_found_count is available from a broader query)

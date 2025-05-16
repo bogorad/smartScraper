@@ -2,7 +2,8 @@
 
 import TurndownService from 'turndown';
 import { diffChars } from 'diff'; // Using diffChars for a basic similarity score
-import logger from '../utils/logger.js';
+import { logger } from '../utils/logger.js';
+import { ExtractionError } from '../utils/error-handler.js';
 
 class DomComparator {
     constructor(similarityThreshold = 0.90) { // Default 90% similarity
@@ -23,12 +24,21 @@ class DomComparator {
     }
 
     _htmlToMarkdown(htmlString) {
-        if (!htmlString || typeof htmlString !== 'string') return '';
+        if (!htmlString || typeof htmlString !== 'string') {
+            throw new ExtractionError('Invalid HTML string for Markdown conversion', {
+                htmlProvided: !!htmlString,
+                htmlType: typeof htmlString
+            });
+        }
+
         try {
             return this.turndownService.turndown(htmlString);
         } catch (error) {
             logger.warn(`Error converting HTML to Markdown: ${error.message}`);
-            return ''; // Return empty string on error to avoid breaking comparison
+            throw new ExtractionError('Error converting HTML to Markdown', {
+                htmlLength: htmlString.length,
+                error: error.message
+            }, error);
         }
     }
 
@@ -80,7 +90,10 @@ class DomComparator {
         }
         if (!htmlString1 || !htmlString2) {
             logger.debug("One HTML string is empty/null, considering them different.");
-            return false;
+            throw new ExtractionError('Cannot compare DOMs - one HTML string is empty/null', {
+                html1Provided: !!htmlString1,
+                html2Provided: !!htmlString2
+            });
         }
 
         const markdown1 = this._htmlToMarkdown(htmlString1);
@@ -96,7 +109,10 @@ class DomComparator {
         }
          if (cleanMd1.length === 0 || cleanMd2.length === 0) {
             logger.debug("One HTML string resulted in empty markdown, considering them different.");
-            return false;
+            throw new ExtractionError('Cannot compare DOMs - one HTML string resulted in empty markdown', {
+                markdown1Length: cleanMd1.length,
+                markdown2Length: cleanMd2.length
+            });
         }
 
 

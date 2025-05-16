@@ -1,8 +1,9 @@
 // src/browser/plugin-manager.js
 import path from 'path';
 import fs from 'fs/promises'; // To check if plugin paths exist
-import logger from '../utils/logger.js';
+import { logger } from '../utils/logger.js';
 import { fileURLToPath } from 'url';
+import { ConfigurationError, NetworkError } from '../utils/error-handler.js';
 
 // ES Module equivalent of __dirname for resolving paths relative to project root
 const __filename = fileURLToPath(import.meta.url);
@@ -66,6 +67,11 @@ class PluginManager {
                     }
                 } catch (error) {
                     logger.warn(`Plugin path for "${plugin.name}" not found or inaccessible: ${absolutePath}. Error: ${error.message}`);
+                    throw new ConfigurationError(`Plugin path for "${plugin.name}" not found or inaccessible`, {
+                        pluginName: plugin.name,
+                        path: absolutePath,
+                        originalError: error.message
+                    }, error);
                 }
             }
         }
@@ -144,6 +150,12 @@ class PluginManager {
             }
         } catch (error) {
             logger.warn(`Error during generic GDPR click attempt: ${error.message}`);
+            // We don't throw here since this is a non-critical operation
+            // But we still log it as a NetworkError for consistency
+            const networkError = new NetworkError('Error during generic GDPR click attempt', {
+                url: await page.url()
+            }, error);
+            logger.debug(`NetworkError details: ${JSON.stringify(networkError.details)}`);
         }
     }
 }

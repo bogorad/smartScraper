@@ -1,13 +1,16 @@
 // src/services/captcha-solver.js
 
 import axios from 'axios';
-import logger from '../utils/logger.js';
+import { logger } from '../utils/logger.js';
+import { CaptchaError, ConfigurationError } from '../utils/error-handler.js';
 // No need to import captchaSolverConfig directly here if passed in constructor
 
 class CaptchaSolver {
     constructor(captchaConfig) {
         if (!captchaConfig || !captchaConfig.apiKey || !captchaConfig.service) {
-            throw new Error('CaptchaSolver: Missing required CAPTCHA configuration (apiKey, service).');
+            throw new ConfigurationError('CaptchaSolver: Missing required CAPTCHA configuration', {
+                missing: ['apiKey', 'service'].filter(key => !captchaConfig || !captchaConfig[key])
+            });
         }
         this.config = captchaConfig;
         this.serviceName = captchaConfig.service.toLowerCase();
@@ -36,7 +39,9 @@ class CaptchaSolver {
             captchaDetails = await this._detectCaptchaType(page, currentUrl);
         } catch (detectionError) {
             logger.error(`Error during CAPTCHA detection: ${detectionError.message}`);
-            return false; // Cannot proceed if detection fails
+            throw new CaptchaError('Error during CAPTCHA detection', {
+                url: currentUrl
+            }, detectionError);
         }
 
 
@@ -55,20 +60,38 @@ class CaptchaSolver {
             } else if (this.serviceName === 'anticaptcha') {
                 // solutionToken = await this._solveWithAntiCaptcha(captchaDetails, currentUrl);
                 logger.warn('AntiCaptcha solver not yet implemented.');
-                return false;
+                throw new CaptchaError('AntiCaptcha solver not yet implemented', {
+                    captchaType: captchaDetails.type,
+                    url: currentUrl
+                });
             } else {
                 logger.error(`Unsupported CAPTCHA solving service: ${this.serviceName}`);
-                return false;
+                throw new CaptchaError('Unsupported CAPTCHA solving service', {
+                    service: this.serviceName,
+                    captchaType: captchaDetails.type,
+                    url: currentUrl
+                });
             }
         } catch (solvingError) {
+            // If it's already a CaptchaError, just re-throw it
+            if (solvingError instanceof CaptchaError) {
+                throw solvingError;
+            }
+
             logger.error(`Error solving CAPTCHA: ${solvingError.message}`);
-            return false;
+            throw new CaptchaError('Error solving CAPTCHA', {
+                captchaType: captchaDetails.type,
+                url: currentUrl
+            }, solvingError);
         }
 
 
         if (!solutionToken) {
             logger.error('Failed to obtain CAPTCHA solution token.');
-            return false;
+            throw new CaptchaError('Failed to obtain CAPTCHA solution token', {
+                captchaType: captchaDetails.type,
+                url: currentUrl
+            });
         }
 
         logger.info('Successfully obtained CAPTCHA solution token.');
@@ -85,11 +108,22 @@ class CaptchaSolver {
                 return true;
             } else {
                 logger.error('Failed to submit CAPTCHA solution to the page.');
-                return false;
+                throw new CaptchaError('Failed to submit CAPTCHA solution to the page', {
+                    captchaType: captchaDetails.type,
+                    url: currentUrl
+                });
             }
         } catch (submissionError) {
+            // If it's already a CaptchaError, just re-throw it
+            if (submissionError instanceof CaptchaError) {
+                throw submissionError;
+            }
+
             logger.error(`Error submitting CAPTCHA solution: ${submissionError.message}`);
-            return false;
+            throw new CaptchaError('Error submitting CAPTCHA solution', {
+                captchaType: captchaDetails.type,
+                url: currentUrl
+            }, submissionError);
         }
     }
 
@@ -153,12 +187,29 @@ class CaptchaSolver {
 
 
         logger.debug('Sending CAPTCHA to 2Captcha:', params);
-        const initialResponse = await axios.post(this.twoCaptchaInUrl, null, { params, timeout: 20000 });
+        let captchaId;
+        try {
+            const initialResponse = await axios.post(this.twoCaptchaInUrl, null, { params, timeout: 20000 });
 
-        if (initialResponse.data.status !== 1) {
-            throw new Error(`2Captcha submission error: ${initialResponse.data.request || 'Unknown error'}`);
+            if (initialResponse.data.status !== 1) {
+                throw new CaptchaError(`2Captcha submission error`, {
+                    errorCode: initialResponse.data.request || 'Unknown error',
+                    captchaType: captchaDetails.type,
+                    url: pageUrl
+                });
+            }
+
+            captchaId = initialResponse.data.request;
+        } catch (error) {
+            // If it's not already a CaptchaError, wrap it
+            if (!(error instanceof CaptchaError)) {
+                throw new CaptchaError('Error submitting to 2Captcha service', {
+                    captchaType: captchaDetails.type,
+                    url: pageUrl
+                }, error);
+            }
+            throw error;
         }
-        const captchaId = initialResponse.data.request;
         logger.info(`CAPTCHA submitted to 2Captcha, ID: ${captchaId}. Polling for solution...`);
 
         const pollingTimeout = Date.now() + (this.config.defaultTimeout || 120) * 1000;

@@ -56,4 +56,4 @@ const logger = {
 // logger.info('This is an info message.');
 // logger.debug('This is a debug message, only shown if LOG_LEVEL is DEBUG.');
 
-export default logger;
+export { logger };

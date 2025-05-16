@@ -2,228 +2,290 @@
 
 ## Overview
 
-SmartScraper is a Node.js script designed to intelligently extract the main article content (as raw HTML) from a given web page URL. It addresses the challenge of varying website structures by:
+SmartScraper is a modular Node.js library designed to intelligently extract the main article content from any web page URL. It addresses the challenge of varying website structures through a robust, adaptive approach:
 
-1.  **Attempting extraction using a known method:** If it has previously determined the correct structure (XPath) for the website's domain, it uses that stored XPath.
-2.  **Automatically discovering the structure:** If the domain is unknown or the previously stored XPath fails (indicating a potential website redesign), it uses browser automation (Puppeteer) and a Large Language Model (LLM via OpenRouter API) to analyze the page structure, identify the most likely XPath for the main content, and score potential candidates.
-3.  **Caching results:** Successfully discovered XPaths are stored locally (in `xpath_storage.json`) mapped to their domain name, speeding up future requests to the same domain.
+1. **Tiered Extraction Strategy:** Prioritizes simpler, faster methods (like cURL) and escalates to more complex, resource-intensive methods (like Puppeteer with LLM-assisted XPath discovery) only when necessary.
 
-The goal is to provide a robust way to get the core content block from diverse article-like web pages, minimizing the need for manual XPath creation for every site.
+2. **Learning & Adaptation:** Stores successful scraping configurations (method, XPath, CAPTCHA needs) for known domains to expedite future requests. Re-discovers configurations if they become stale.
+
+3. **Anti-Bot Evasion:** Utilizes `puppeteer-extra` and `puppeteer-extra-plugin-stealth` for advanced stealth techniques, with optional CAPTCHA solving capabilities.
+
+The goal is to provide a robust way to extract content from diverse web pages while maintaining efficiency and adaptability to website changes.
 
 ## Features
 
-*   **Automatic XPath Discovery:** Leverages LLMs to find the main content container XPath for unknown domains.
-*   **XPath Caching:** Stores successful domain-XPath pairs in a local JSON file (`xpath_storage.json`) for efficient reuse.
-*   **Self-Healing:** If a stored XPath fails during extraction, automatically triggers the discovery process to find a potentially updated XPath.
-*   **Raw HTML Extraction:** Returns the `innerHTML` of the identified main content element.
-*   **Configurable:** Uses environment variables (`.env` file) for API keys, LLM model selection, Puppeteer settings, and debugging.
-*   **Robust Error Handling:** Provides informative errors and uses exit codes for scripting integration.
-*   **Debug Logging:** Optional verbose logging for troubleshooting.
-*   **Failure Artifacts:** Optionally saves the full HTML of a page if XPath discovery fails.
+* **Modular Architecture:** Built with loosely coupled modules with well-defined responsibilities and interfaces, facilitating maintainability, testability, and extensibility.
+* **Automatic XPath Discovery:** Leverages LLMs to find the main content container XPath for unknown domains.
+* **Method Selection:** Intelligently chooses between cURL (for simple sites) and Puppeteer (for JavaScript-heavy sites or those requiring CAPTCHA solving).
+* **Configuration Storage:** Stores successful domain configurations in a local JSON file for efficient reuse.
+* **Self-Healing:** If a stored configuration fails during extraction, automatically triggers re-discovery to find updated selectors.
+* **Anti-Bot Measures:** Uses `puppeteer-extra-plugin-stealth` to bypass common bot detection techniques.
+* **CAPTCHA Handling:** Optional integration with external CAPTCHA solving services.
+* **Robust Error Handling:** Custom error classes with detailed context for better debugging.
+* **Configurable:** Uses environment variables (`.env` file) for API keys, LLM model selection, and other settings.
 
-## Workflow
+## Architecture & Workflow
 
-The script follows this logical flow when processing a URL:
+The system is designed with a modular architecture to ensure separation of concerns, testability, and maintainability. A core "Scraper Engine" orchestrates the overall flow, delegating tasks to specialized modules:
 
-1.  **Receive URL:** The script is invoked with a target URL.
-2.  **Normalize Domain:** The primary domain name is extracted from the URL (e.g., `https://www.example.com/article/123` -> `example.com`).
-3.  **Load Storage:** Reads the `xpath_storage.json` file into memory.
-4.  **Check Storage:** Looks up the normalized domain in the loaded storage data.
-5.  **Path A: Known XPath Found**
-    *   An XPath exists for the domain in storage.
-    *   **Attempt Extraction:** Launch Puppeteer, navigate to the URL, and try to extract the `innerHTML` using the stored XPath (`fetchWithKnownXpath` function).
-    *   **Extraction Success:** If content is successfully extracted, return the HTML content and exit successfully.
-    *   **Extraction Failure:** If the stored XPath doesn't find a valid element (returns null or empty content), log a warning. Assume the site structure may have changed. Proceed to Path B.
-6.  **Path B: Unknown Domain or Known XPath Failed**
-    *   No XPath exists for the domain, or the stored one failed in Path A.
-    *   **Run Discovery & Extraction:** Execute the core LLM-based discovery logic (`findArticleXPathAndExtract` function):
-        *   Launch Puppeteer, navigate to the URL, load the full HTML.
-        *   Extract text snippets for LLM context.
-        *   Iteratively query the LLM for candidate XPaths, providing feedback on failed attempts.
-        *   Validate candidate XPaths using Puppeteer (`queryXPathWithDetails`).
-        *   Score valid candidates based on heuristics (paragraph count, semantic tags, density, etc.).
-        *   Select the highest-scoring valid XPath.
-        *   **If a best XPath is found:** Immediately use the *current* Puppeteer page to extract the `innerHTML` using this newly found XPath.
-    *   **Discovery Success:**
-        *   The `findArticleXPathAndExtract` function returns the `foundXPath` and the `extractedHtml`.
-        *   Update the in-memory storage: `storage[domain] = foundXPath`.
-        *   Save the updated storage object back to `xpath_storage.json`.
-        *   Return the `extractedHtml` and exit successfully.
-    *   **Discovery Failure:**
-        *   If no suitable XPath can be found after all retries, log an error.
-        *   Optionally save the full page HTML to the `failed_html_dumps` directory if `SAVE_HTML_ON_FAILURE` is enabled.
-        *   Return an error message and exit with a non-zero status code.
+### Key Modules
 
-*Note: This workflow ensures Puppeteer is launched at most once per `getContent` call. If discovery is needed, the same browser session is efficiently reused for the final extraction.*
+* **`CoreScraperEngine`**: Orchestrates the main workflow, deciding whether to use known site logic or trigger discovery.
+* **`KnownSitesManager`**: Handles CRUD operations for the known sites storage.
+* **`PuppeteerController`**: Manages Puppeteer browser instances with `puppeteer-extra` and `puppeteer-extra-plugin-stealth` integration.
+* **`CurlHandler`**: Executes HTTP requests for non-JavaScript reliant fetching.
+* **`DomComparator`**: Compares HTML DOM structures to assess similarity.
+* **`LLMInterface`**: Interacts with the Large Language Model API for XPath discovery.
+* **`ContentScoringEngine`**: Implements heuristic scoring logic to evaluate content relevance.
+* **`CaptchaSolver`**: Interfaces with external CAPTCHA solving services.
+* **`HtmlAnalyser`**: Performs static analysis on HTML content.
+* **`PluginManager`**: Manages browser plugins/extensions within Puppeteer.
+
+### High-Level Workflow
+
+1. **Request Initiation:** Core engine receives URL, proxy info, User-Agent, etc.
+2. **Known Site Check:**
+   * If **Known Site & Config Valid:** Use stored configuration.
+   * If **Known Site & Config Stale/Fails:** Trigger re-discovery.
+   * If **Unknown Site:** Proceed to discovery.
+3. **Discovery Process:**
+   * **Initial Probing:** Try both cURL and Puppeteer, compare results.
+   * **XPath Discovery:** Use LLM to generate candidate XPaths, validate and score them.
+   * **Method Selection:** Choose between cURL, Puppeteer, or Puppeteer with CAPTCHA solving.
+   * **Store Configuration:** Save successful configuration for future use.
+4. **Content Extraction:** Use determined method, XPath, and CAPTCHA solver if needed.
+5. **Return Data.**
+
+This modular approach allows for easy extension and maintenance of the system.
 
 ## Technology Stack
 
-*   **Runtime:** Node.js
-*   **Browser Automation:** `puppeteer-core` (requires a separate Chromium/Chrome installation)
-*   **HTTP Requests:** `axios` (for LLM API calls)
-*   **Configuration:** `dotenv` (for loading `.env` files)
-*   **LLM API:** OpenRouter.ai (or any OpenAI-compatible API endpoint)
+* **Runtime:** Node.js
+* **Browser Automation:** `puppeteer-extra` with `puppeteer-extra-plugin-stealth`
+* **DOM Parsing:** `jsdom` for static HTML analysis
+* **HTTP Requests:** `axios` for API calls and cURL-like requests
+* **HTML Processing:** `turndown` for HTML-to-markdown conversion
+* **Configuration:** `dotenv` for environment variable management
+* **LLM API:** OpenRouter.ai (or any OpenAI-compatible API endpoint)
 
 ## Prerequisites
 
-*   **Node.js:** Version 16 or higher recommended.
-*   **npm:** Node Package Manager (usually comes with Node.js).
-*   **Chromium/Chrome:** A compatible version of Chromium or Google Chrome installed and accessible by Puppeteer. The path might need to be configured.
-*   **OpenRouter API Key:** An API key from [OpenRouter.ai](https://openrouter.ai/).
-*   **LLM Model Access:** Ensure the selected LLM model in your `.env` file is available via your OpenRouter account.
+* **Node.js:** Version 16 or higher recommended.
+* **npm:** Node Package Manager (usually comes with Node.js).
+* **Chromium/Chrome:** A compatible version of Chromium or Google Chrome installed and accessible by Puppeteer.
+* **OpenRouter API Key:** An API key from [OpenRouter.ai](https://openrouter.ai/).
+* **LLM Model Access:** Ensure the selected LLM model in your `.env` file is available via your OpenRouter account.
+* **CAPTCHA Solver API Key (Optional):** If you need CAPTCHA solving capabilities.
 
 ## Installation
 
-1.  Clone or download the `smartScraper.js` script.
-2.  Navigate to the script's directory in your terminal.
-3.  Install the required Node.js packages:
-    ```bash
-    npm install dotenv axios puppeteer-core
-    ```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/universal-scraper.git
+   cd universal-scraper
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Create a `.env` file with your configuration (see Configuration section).
 
 ## Configuration
 
-Create a file named `.env` in the same directory as the script. Add the following variables:
+Create a file named `.env` in the root directory. Add the following variables:
 
 ```dotenv
-# --- Required ---
+# --- LLM Configuration ---
 # Your OpenRouter API Key
 OPENROUTER_API_KEY=your_openrouter_api_key_here
-# The LLM model identifier to use (e.g., openai/gpt-4o, anthropic/claude-3-haiku)
-LLM_MODEL=google/gemini-2.0-flash-lite-001
+# The LLM model identifier to use
+LLM_MODEL=openai/gpt-3.5-turbo
 
-# --- Optional ---
-# Path to your Chrome/Chromium executable if not found automatically by Puppeteer
-# Example Linux: EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-# Example macOS: EXECUTABLE_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
-# Example Windows: EXECUTABLE_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"
-EXECUTABLE_PATH=/usr/lib/chromium/chromium # Or wherever your Chromium/Chrome executable is
+# --- Puppeteer Configuration ---
+# Path to your Chrome/Chromium executable (optional)
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+# Default timeout for Puppeteer operations (in milliseconds)
+PUPPETEER_DEFAULT_TIMEOUT=30000
+# Navigation timeout (in milliseconds)
+PUPPETEER_NAVIGATION_TIMEOUT=60000
 
-# Comma-separated paths to browser extensions to load (optional)
-EXTENSION_PATHS="/home/chuck/git/I-Still-Dont-Care-About-Cookies/src,/home/chuck/git/bypass-paywalls-chrome-clean-master,/home/chuck/git/uBOL-home/chromium"
+# --- CAPTCHA Solver Configuration (Optional) ---
+CAPTCHA_SERVICE_NAME=2captcha
+CAPTCHA_API_KEY=your_captcha_api_key_here
 
-# Enable verbose debug logging (true or false)
-DEBUG=false
-
-# Save full HTML to ./failed_html_dumps/ if XPath discovery fails (true or false)
+# --- Logging Configuration ---
+# Set log level (DEBUG, INFO, WARN, ERROR)
+LOG_LEVEL=INFO
+# Save HTML to ./failed_html_dumps/ if extraction fails
 SAVE_HTML_ON_FAILURE=false
+
+# --- Plugin Configuration (Optional) ---
+# Paths to browser extensions (comma-separated)
+EXTENSION_PATHS=/path/to/extension1,/path/to/extension2
 ```
 
-**Important:** Ensure the `EXECUTABLE_PATH` points to a valid browser installation that `puppeteer-core` can use.
+You can customize these settings based on your specific requirements.
 
 ## Usage
 
-Run the script from your terminal, providing the target URL as a command-line argument:
-Note: xvfb-run creates a fake x-server so chromium is happy.
+### As a Library
 
-```bash
-xvfb-run -a node smartScraper.js <URL>
+```javascript
+import { UniversalScraper } from './src/index.js';
+
+// Create a scraper instance
+const scraper = new UniversalScraper();
+
+// Extract content from a URL
+async function extractContent() {
+  try {
+    const result = await scraper.getContent('https://example.com/article');
+    console.log('Extracted content:', result.content);
+    console.log('Method used:', result.method);
+    console.log('XPath used:', result.xpath);
+  } catch (error) {
+    console.error('Extraction failed:', error.message);
+  }
+}
+
+extractContent();
 ```
 
-**Example:**
+### Advanced Usage
 
-```bash
-xvfb-run -a node smartScraper.js "https://en.wikipedia.org/wiki/Web_scraping"
+```javascript
+import { UniversalScraper } from './src/index.js';
+
+// Custom configuration
+const customConfig = {
+  llmConfig: {
+    model: 'anthropic/claude-3-haiku'
+  },
+  scraperSettings: {
+    puppeteerNavigationTimeout: 90000,
+    domComparisonThreshold: 0.85
+  }
+};
+
+// Create a scraper instance with custom configuration
+const scraper = new UniversalScraper(customConfig);
+
+// Extract content with proxy and user agent
+async function extractWithProxy() {
+  const options = {
+    proxyDetails: {
+      server: 'http://your-proxy-server:port',
+      auth: { username: 'user', password: 'pass' }
+    },
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    outputType: 'markdown' // Get markdown instead of HTML
+  };
+
+  try {
+    const result = await scraper.getContent('https://example.com/article', options);
+    console.log('Extracted content:', result.content);
+  } catch (error) {
+    console.error('Extraction failed:', error.message);
+  }
+}
+
+extractWithProxy();
 ```
-
-**Output:**
-
-*   **On Success:** The script will print the raw HTML content of the main article body to standard output (`stdout`) and exit with code `0`. All informational and debug logs go to standard error (`stderr`).
-*   **On Failure:** The script will print an error message to standard error (`stderr`) and exit with a non-zero exit code (usually `1`).
 
 ## Storage
 
-*   **File:** `xpath_storage.json`
-*   **Location:** Same directory as the script.
-*   **Format:** A JSON object mapping normalized domain names (keys) to their corresponding discovered XPath strings (values).
-    ```json
-    {
-      "piratewires.com": "//section[contains(@class, 'article_postBody')]",
-      "nypost.com": "//article[contains(@class, 'single')]",
-      "nytimes.com": "//article",
-      "ft.com": "//article[@id='article-body']",
-      "usatoday.com": "//article[@class='story primary-content text opinion row']",
-      "prospect.org": "//main[@id='maincontent']",
-      "unherd.com": "//article",
-      "thespectator.com": "//main",
-      "realclearmarkets.com": "//article",
-      "civitasinstitute.org": "//main",
-      "realclearinvestigations.com": "//article",
-      "foxnews.com": "//article",
-      "washingtontimes.com": "//section[@id='content']",
-      "thehill.com": "//div[@class='article__text | body-copy | flow']",
-      "apnews.com": "//div[@class='RichTextStoryBody RichTextBody']",
-      "newsnationnow.com": "//main",
-      "bostonherald.com": "//article[@id='post-5524767']/div[@class='article-content']/div[@class='article-content-wrapper']/div[@class='article-body']",
-      "yahoo.com": "//article",
-      "foreignaffairs.com": "//*[@class='article-dropcap--inner paywall-content']",
-      "city-journal.org": "//div[@id='article-content']",
-      "harvardsalient.com": "//article",
-      "theamericanconservative.com": "//div[@class='c-blog-post__content s-wysiwyg s-wysiwyg--blog']",
-      "theatlantic.com": "//main/article",
-      "theglobeandmail.com": "//*[@id='content-gate']",
-      "spiked-online.com": "//article",
-      "freebeacon.com": "//div[@class='article-content']",
-      "nationalpost.com": "//*[@class='story-v2-block-content']",
-      "sltrib.com": "//div[@class='article-body-container']",
-      "thestar.com": "//*[@class='asset-body']",
-      "sfchronicle.com": "//article[@class='rel']",
-      "tippinsights.com": "//div[@class='c-content ']",
-      "washingtonexaminer.com": "//div[@class='article-paywall']",
-      "coolidgereview.com": "//div[@class='blog-item-content e-content']",
-      "bloomberg.com": "//div[@class='body-content']",
-      "manhattancontrarian.com": "//div[@data-content-field='main-content']//article",
-      "commentary.org": "//div[@class='entry-content']",
-      "compactmag.com": "//main",
-      "esquire.com": "//div[@data-journey-body='longform-article']",
-      "realclearworld.com": "//div[@id='article_content']",
-      "alexberenson.substack.com": "//div[@class='body markup']",
-      "issuesinsights.com": "//div[@class='entry-content']",
-      "axios.com": "//div[contains(@class,'col-1-13') and *[contains(@data-schema,'smart-brevity')]]",
-      "pjmedia.com": "//section[@class='post-body']",
-      "amgreatness.com": "//main//article//div[@class='entry-content relative  dropcap ']",
-      "vox.com": "//div[@id='zephr-anchor']",
-      "theguardian.com": "//div[@data-gu-name='body']",
-      "thefederalist.com": "//main[@id='main']",
-      "post-gazette.com": "//div[@class='pgevoke-contentarea-body-text']",
-      "time.com": "/html/body/div/main/article",
-      "reason.com": "//div[@class='entry-content']",
-      "newcriterion.com": "//main",
-      "commonplace.org": "//div[contains(@class, 'entry-content')]",
-      "universetoday.com": "//div[@class='article-content']",
-      "gizmodo.com": "//div[contains(@class,'entry-content')]"
-    }
-    ```
-*   **Management:** The file is automatically created if it doesn't exist. It's read when the script starts processing a URL and updated whenever a new XPath is successfully discovered or an existing one is re-discovered after a failure.
+The system stores successful scraping configurations in a JSON file for efficient reuse:
+
+* **File:** `known_sites_storage.json` (configurable)
+* **Location:** `./data/` directory by default (configurable)
+* **Format:** A JSON object mapping normalized domain names to their corresponding configurations:
+
+```json
+{
+  "example.com": {
+    "domain_pattern": "example.com",
+    "method": "curl",
+    "xpath_main_content": "//article[@class='main-content']",
+    "last_successful_scrape_timestamp": "2023-07-15T14:32:45.123Z",
+    "failure_count_since_last_success": 0,
+    "needs_captcha_solver": false
+  },
+  "news-site.com": {
+    "domain_pattern": "news-site.com",
+    "method": "puppeteer_stealth",
+    "xpath_main_content": "//div[@id='article-body']",
+    "last_successful_scrape_timestamp": "2023-07-16T09:12:30.456Z",
+    "failure_count_since_last_success": 0,
+    "needs_captcha_solver": false
+  },
+  "paywall-site.com": {
+    "domain_pattern": "paywall-site.com",
+    "method": "puppeteer_captcha",
+    "xpath_main_content": "//main[@class='content']",
+    "last_successful_scrape_timestamp": "2023-07-17T18:45:22.789Z",
+    "failure_count_since_last_success": 0,
+    "needs_captcha_solver": true
+  }
+}
+```
+
+The `KnownSitesManager` module handles all CRUD operations for this storage, including:
+- Loading configurations at startup
+- Querying by domain
+- Saving/updating entries after successful scrapes
+- Tracking failure counts for stale configurations
 
 ## Error Handling & Robustness
 
-*   **Stored XPath Failure:** Automatically triggers re-discovery.
-*   **LLM Retries:** Attempts multiple interactions with the LLM if initial candidates fail validation.
-*   **Puppeteer Errors:** Catches errors during browser launch, navigation, and interaction.
-*   **Network Errors:** Handles potential errors during LLM API calls.
-*   **Invalid URLs:** Checks URL format before processing.
-*   **Clear Exit Codes:** Uses `0` for success and `1` for failure.
-*   **Failure HTML Dumps:** Optionally saves the full HTML when discovery fails, aiding manual debugging.
+The system implements a comprehensive error handling strategy with custom error classes:
 
-## Debugging
+* **`ScraperError`**: Base error class for all scraper-related errors
+* **`LLMError`**: For issues with LLM API calls
+* **`CaptchaError`**: For CAPTCHA solving failures
+* **`NetworkError`**: For network-related issues (cURL, Puppeteer navigation)
+* **`ConfigurationError`**: For configuration problems
+* **`ExtractionError`**: For content extraction failures
 
-To enable verbose logging, set the `DEBUG` variable in your `.env` file to `true`:
+Each error class includes:
+- Detailed error message
+- Additional context in a `details` object
+- Original error (if applicable)
+- Timestamp
 
-```dotenv
-DEBUG=true
+This structured approach makes debugging easier and provides more useful information when things go wrong.
+
+## Logging
+
+The system uses a flexible logging system with configurable levels:
+
+```javascript
+// Example usage
+import { logger } from './src/utils/logger.js';
+
+logger.debug('Detailed debugging information');
+logger.info('General information about operation');
+logger.warn('Warning about potential issues');
+logger.error('Error information when something fails');
 ```
 
-This will print detailed step-by-step logs from Puppeteer interactions, scoring logic, and API calls to `stderr`.
+To set the log level, use the `LOG_LEVEL` environment variable:
 
-## Potential Improvements
+```dotenv
+# Set to DEBUG, INFO, WARN, ERROR, or NONE
+LOG_LEVEL=INFO
+```
 
-*   **Alternative Storage:** Implement support for more robust storage like SQLite for better scalability and concurrent access handling.
-*   **Advanced Domain Normalization:** Handle subdomains more granularly if needed (e.g., treat `blog.example.com` differently from `www.example.com`).
-*   **Periodic XPath Validation:** Add a mechanism to proactively check if stored XPaths are still valid over time.
-*   **Content Cleaning:** Add options to further process the extracted HTML (e.g., remove script tags, convert to markdown).
-*   **Web UI / API:** Wrap the script in a simple web server (e.g., using Express.js) to provide an API endpoint.
-*   **Rate Limiting / Politeness:** Implement delays between requests to the same domain.
+## Future Enhancements
+
+* **Database Integration**: Replace JSON storage with a database for better concurrency and scalability
+* **Visual Analysis**: Implement screenshot-based content detection for complex layouts
+* **Machine Learning**: Train models to identify main content without relying on XPaths
+* **API Server**: Create a REST API for remote content extraction
+* **Proxy Rotation**: Add support for rotating proxies to avoid IP blocking
+* **Content Cleaning**: Add more output formats and content cleaning options
+* **Performance Optimization**: Implement caching and parallel processing for faster extraction
 
 ## License
 
