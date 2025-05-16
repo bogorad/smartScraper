@@ -1,8 +1,10 @@
-Understood. If proxy and User-Agent management are handled by an external service or are passed as parameters to the scraper, we can simplify that section in the specification. The core scraper logic would then assume these are provided or configured externally.
+You're right. If stealth is the baseline for any Puppeteer usage, then "basic Puppeteer" is redundant. The distinction should be between `puppeteer_stealth` (for JS rendering and standard interactions) and `puppeteer_captcha` (which implies stealth plus CAPTCHA solving capabilities).
 
-Here's the revised specification with that section adjusted:
+This simplifies the logic slightly and makes the `method` field more precise.
 
-## Universal Web Scraper: Detailed Specification (Revised v2)
+Here's the revised specification reflecting this:
+
+## Universal Web Scraper: Detailed Specification (Revised v3)
 
 ### 1. Goal
 
@@ -13,7 +15,7 @@ To create a robust and adaptive web scraper capable of extracting relevant conte
 *   **Tiered Approach:** Prioritize simpler, faster methods (like cURL) and escalate to more complex, resource-intensive methods (like Puppeteer with LLM-assisted XPath discovery) only when necessary.
 *   **Learning & Adaptation:** Store successful scraping configurations (method, XPath, CAPTCHA needs) for known domains to expedite future requests. Re-discover configurations if they become stale.
 *   **Proxy Usage (External):** Assumes proxy information is provided externally for requests.
-*   **Anti-Bot Evasion:** Incorporate techniques to bypass common anti-bot measures.
+*   **Anti-Bot Evasion:** Puppeteer usage implies stealth techniques by default. CAPTCHA solving is an additional layer.
 
 ### 3. Obstacles Addressed
 
@@ -28,170 +30,139 @@ To create a robust and adaptive web scraper capable of extracting relevant conte
 
 ### 4. Internal Data Structure: `KnownSitesTable`
 
-This table (e.g., a JSON file or database) stores configurations for domains where scraping has been successful. Each entry could be keyed by a domain pattern (e.g., `example.com` or `blog.example.com/article/*`).
+This table (e.g., a JSON file or database) stores configurations for domains where scraping has been successful. Each entry could be keyed by a domain pattern.
 
 **Fields per entry:**
 
 *   `domain_pattern`: The URL pattern this configuration applies to.
-*   `method`: The determined scraping method (`curl`, `puppeteer_basic`, `puppeteer_stealth`, `puppeteer_captcha`).
+*   `method`: The determined scraping method (`curl`, `puppeteer_stealth`, `puppeteer_captcha`).
 *   `xpath_main_content`: The validated XPath to the main relevant content.
 *   `last_successful_scrape_timestamp`: Timestamp of the last successful scrape using this config.
 *   `failure_count_since_last_success`: Counter for consecutive failures, to trigger re-validation/re-discovery.
 *   `site_specific_headers`: (Optional) Any custom HTTP headers required.
 *   `user_agent_to_use`: (Optional) A specific User-Agent string if one proved particularly effective (can be overridden by request-specific UA).
-*   `needs_captcha_solver`: (Boolean) **True if a CAPTCHA was detected during discovery and requires an external solver for this site using the stored method.**
-*   `puppeteer_wait_conditions`: (Optional) Specific conditions for Puppeteer to wait for (e.g., selector, network idle duration) if defaults are insufficient.
+*   `needs_captcha_solver`: (Boolean) True if a CAPTCHA was detected during discovery. If true, `method` will typically be `puppeteer_captcha`.
+*   `puppeteer_wait_conditions`: (Optional) Specific conditions for Puppeteer to wait for.
 *   `discovered_by_llm`: (Boolean) True if the XPath was found via the LLM discovery process.
 
 ### 5. High-Level Algorithm Flow
 
-1.  **Request Initiation:** Scraper receives a URL, proxy information (if applicable), User-Agent (optional), and other optional parameters (e.g., desired output format).
-2.  **Known Site Check:** Check if the URL matches a pattern in the `KnownSitesTable`.
-    *   If **Known Site & Config Valid:** Use stored configuration (including CAPTCHA handling) to scrape.
+1.  **Request Initiation:** Scraper receives URL, proxy info, User-Agent (optional), etc.
+2.  **Known Site Check:**
+    *   If **Known Site & Config Valid:** Use stored configuration (method will be `curl`, `puppeteer_stealth`, or `puppeteer_captcha`).
     *   If **Known Site & Config Stale/Fails:** Trigger re-discovery.
     *   If **Unknown Site:** Proceed to discovery.
 3.  **Unknown Site / Re-Discovery Process:**
-    *   Attempt various methods (cURL, Puppeteer, using provided proxy/UA) to fetch page content.
-    *   Analyze page for CAPTCHAs and JavaScript dependency.
-    *   Employ "SmartScraper" logic (LLM + heuristics) to identify the XPath for relevant content and determine if a CAPTCHA solver is needed.
-    *   If successful, store the new configuration (including `needs_captcha_solver` status) in `KnownSitesTable`.
-4.  **Content Extraction:** Use the determined method, XPath, and CAPTCHA handling to extract content.
-5.  **Return Data:** Return extracted content or an error/status message.
+    *   Attempt cURL, then Puppeteer (with stealth) to fetch page content and analyze for JS dependency/CAPTCHAs.
+    *   Employ "SmartScraper" logic (LLM + heuristics) to identify XPath and confirm CAPTCHA needs.
+    *   If successful, store new configuration (`curl`, `puppeteer_stealth`, or `puppeteer_captcha`).
+4.  **Content Extraction:** Use determined method, XPath, and CAPTCHA handling.
+5.  **Return Data.**
 
 ### 6. Detailed Algorithm Steps
 
 **A. Request Preparation**
 
-1.  Receive input: `target_url`, `proxy_details` (e.g., proxy server string for Puppeteer/cURL), `user_agent_string` (optional, fallback to a default or site-specific stored UA).
-2.  Configure HTTP clients (cURL, Puppeteer) to use the provided `proxy_details`.
-3.  Set the `user_agent_string` for requests.
+1.  Receive input: `target_url`, `proxy_details`, `user_agent_string` (optional).
+2.  Configure HTTP clients (cURL, Puppeteer) for proxy and User-Agent.
 
 **B. Known Site Processing**
 
-1.  Normalize the `target_url` to derive a domain key/match against `domain_pattern` in `KnownSitesTable`.
+1.  Normalize `target_url`, check `KnownSitesTable`.
 2.  **If a matching entry is found:**
-    a.  Retrieve `method`, `xpath_main_content`, `needs_captcha_solver`, and other configurations. Use request-provided `user_agent_string` if available, else use `KnownSitesTable[domain].user_agent_to_use` or a default.
-    b.  Check `failure_count_since_last_success`. If above a threshold, or if `last_successful_scrape_timestamp` is too old, consider the config potentially stale and proceed to step **C (Unknown Site Processing / Re-Discovery)**, passing the old XPath and `needs_captcha_solver` status as hints.
-    c.  **CAPTCHA Handling (Known Site):**
-        *   If `KnownSitesTable[domain].needs_captcha_solver` is true:
-            *   Integrate with an external CAPTCHA solving service (see step **D.2** for details). This must be done *before or during* the main method execution if the CAPTCHA blocks content access.
-    d.  **Execute Stored Method:**
-        *   If `method` is `curl`: Use cURL with appropriate headers, configured proxy, and User-Agent.
-        *   If `method` involves `puppeteer`: Launch Puppeteer (basic, stealth), configured with the proxy. If `needs_captcha_solver` is true, ensure the CAPTCHA solving logic is integrated into the Puppeteer flow.
-    e.  **Validate Extraction:**
-        *   Attempt to find the element using `xpath_main_content`.
-        *   **Success Condition (for now):** XPath exists and the element is not empty.
-    f.  **If successful:**
-        *   Reset `failure_count_since_last_success` to 0. Update `last_successful_scrape_timestamp`.
-        *   Extract content (full HTML or `innerHTML` of the element at `xpath_main_content` based on request arguments).
-        *   Return extracted data. **(END)**
-    g.  **If stored XPath fails (element not found/empty, or method execution failed despite CAPTCHA attempt):**
-        *   Increment `failure_count_since_last_success`.
-        *   Save updated `KnownSitesTable`.
-        *   Log the failure.
-        *   Proceed to step **C (Unknown Site Processing / Re-Discovery)**, passing the failed XPath and `needs_captcha_solver` status as feedback.
+    a.  Retrieve `method`, `xpath_main_content`, `needs_captcha_solver` (which informs if method is `puppeteer_captcha`), etc.
+    b.  If config stale/high failure, proceed to **C (Re-Discovery)**.
+    c.  **Execute Stored Method:**
+        *   If `method` is `curl`: Use cURL.
+        *   If `method` is `puppeteer_stealth`: Launch Puppeteer with stealth.
+        *   If `method` is `puppeteer_captcha`: Launch Puppeteer with stealth AND integrate CAPTCHA solving logic (see **D.2**).
+    d.  **Validate Extraction:** Check XPath.
+    e.  **If successful:** Update stats, extract content, return data. **(END)**
+    f.  **If fails:** Increment failure count, proceed to **C (Re-Discovery)**.
 
 **C. Unknown Site Processing / XPath Re-Discovery (SmartScraper Logic Integration)**
 
 1.  **C.1. Initial Probing (Determine JS Dependency & Obvious Blockers):**
     a.  `discovered_needs_captcha_solver = false`.
-    b.  **Attempt cURL:**
-        *   Fetch page with the configured User-Agent and proxy.
-        *   If cURL fails, note this.
-        *   Analyze cURL response for obvious CAPTCHA markers. If found, `discovered_needs_captcha_solver = true`.
-    c.  **Attempt Basic Puppeteer:**
-        *   Launch Puppeteer with minimal configuration, using the configured proxy.
-        *   Navigate to URL, wait for `domcontentloaded` or a short timeout.
-        *   Get page HTML.
-        *   Analyze Puppeteer response for obvious CAPTCHA markers. If found, `discovered_needs_captcha_solver = true`.
+    b.  **Attempt cURL:** Fetch page. If fails, note. Analyze for CAPTCHA markers; if found, `discovered_needs_captcha_solver = true`.
+    c.  **Attempt Puppeteer (with Stealth):**
+        *   Launch Puppeteer with stealth plugins, configured proxy, and UA.
+        *   Navigate to URL, wait for `domcontentloaded` or short timeout.
+        *   Get page HTML (`puppeteer_html`).
+        *   Analyze `puppeteer_html` for CAPTCHA markers; if found, `discovered_needs_captcha_solver = true`.
     d.  **Compare DOMs (if cURL was successful):**
-        *   Convert cURL HTML and Puppeteer HTML to Markdown. Calculate similarity.
-        *   If similarity is high and cURL response seems valid, `tentative_method = curl`, `html_for_analysis = curl_html`.
-        *   Else, `tentative_method = puppeteer`, `html_for_analysis` will come from a more advanced Puppeteer attempt.
+        *   If cURL HTML and `puppeteer_html` are highly similar and cURL response is valid, `tentative_method_is_curl = true`, `html_for_analysis = curl_html`.
+        *   Else, `tentative_method_is_curl = false`, `html_for_analysis = puppeteer_html`. (If cURL failed, `tentative_method_is_curl` is false by default).
 
-2.  **C.2. Advanced Puppeteer Attempt (if needed for discovery):**
-    a.  If `tentative_method` is `puppeteer` or if re-discovery is forced for a Puppeteer-known site:
-        *   Launch Puppeteer using `launchPuppeteerBrowser()` (stealth, plugins), configured with the proxy.
-        *   `navigateAndPreparePage()` (navigation, waits, basic interactions).
+2.  **C.2. Page Preparation for XPath Discovery (if Puppeteer HTML is used):**
+    a.  If `html_for_analysis` is from Puppeteer (i.e., `!tentative_method_is_curl` or if re-discovery is forced for a Puppeteer-known site):
+        *   Ensure Puppeteer instance is running (or re-launch if needed, with stealth).
+        *   `navigateAndPreparePage()`: Full navigation, waits for network idle, basic interactions (scrolls, mouse moves) to trigger dynamic content.
         *   `html_for_analysis = await page.content()`.
         *   Re-analyze `html_for_analysis` for CAPTCHA markers if not already confirmed. If found, `discovered_needs_captcha_solver = true`.
+    b.  (If `tentative_method_is_curl` is true, `html_for_analysis` is already set from cURL).
 
 3.  **C.3. XPath Discovery via LLM & Heuristics:**
-    a.  `llm_feedback = []` (include hints from previous failed attempts if re-discovering).
+    a.  `llm_feedback = []`.
     b.  `article_snippets = extractArticleSnippets(html_for_analysis)`.
-    c.  **Loop** up to `MAX_LLM_RETRIES`:
-        i.  `llm_candidate_xpaths = getLlmCandidateXPaths(...)`.
-        ii. If LLM call fails/malformed, log, add feedback, `continue` or break.
-        iii. `scored_candidates = []`.
-        iv. For each `candidate_xpath`:
-            1.  `details = queryXPathWithDetails(...)`.
-            2.  If element not found, add feedback, continue.
-            3.  `score = scoreElement(...)`.
-            4.  If `score > 0`, add to `scored_candidates`.
-            5.  Else, add feedback about low score/paragraphs.
+    c.  **Loop** up to `MAX_LLM_RETRIES`: (LLM interaction, XPath validation, scoring as before).
+        *   ...
         v. If `scored_candidates` not empty, `best_candidate =` highest scoring, `found_xpath = best_candidate.xpath`, break loop.
-    d.  Close Puppeteer if launched for discovery.
+    d.  Close Puppeteer if launched primarily for discovery and not needed for `html_for_analysis` source.
 
 4.  **C.4. Outcome of Discovery:**
     a.  **If `found_xpath` is identified:**
-        i.  Determine `method_to_store`: `curl` if viable and `found_xpath` works on `curl_html`, else `puppeteer_stealth` (or `puppeteer_captcha` if `discovered_needs_captcha_solver` is true).
+        i.  Determine `method_to_store`:
+            *   If `tentative_method_is_curl` AND `found_xpath` successfully extracts content from `curl_html` (quick re-validation), then `method_to_store = curl`.
+            *   Else if `discovered_needs_captcha_solver` is true, then `method_to_store = puppeteer_captcha`.
+            *   Else (JS rendering needed, no CAPTCHA detected), `method_to_store = puppeteer_stealth`.
         ii. Create/Update entry in `KnownSitesTable`:
-            *   `domain_pattern`, `method: method_to_store`, `xpath_main_content: found_xpath`, timestamps, `failure_count: 0`, **`needs_captcha_solver: discovered_needs_captcha_solver`**, `discovered_by_llm: true`, `user_agent_to_use: current_user_agent_if_successful_or_default`.
+            *   `domain_pattern`, `method: method_to_store`, `xpath_main_content: found_xpath`, timestamps, `failure_count: 0`, **`needs_captcha_solver: discovered_needs_captcha_solver`** (this flag is true if `method_to_store` is `puppeteer_captcha`), `discovered_by_llm: true`, `user_agent_to_use`.
         iii. Save `KnownSitesTable`.
         iv. Proceed to step **D (Content Extraction)** using `method_to_store`, `found_xpath`, and `discovered_needs_captcha_solver`.
-    b.  **If no `found_xpath`:**
-        i.  Log failure, save debug HTML if enabled.
-        ii. Notify caller, return error. **(END)**
+    b.  **If no `found_xpath`:** Log failure, save debug HTML, return error. **(END)**
 
 **D. Content Extraction (Post-XPath Identification / For Newly Discovered)**
 
-1.  The method (`current_method`), XPath (`current_xpath`), and CAPTCHA requirement (`current_needs_captcha`) are now known.
-2.  **D.2. CAPTCHA Handling (if `current_needs_captcha` is true):**
-    a.  This step is primarily relevant if `current_method` is Puppeteer-based.
-    b.  Integrate with an external CAPTCHA solving service:
-        *   Identify CAPTCHA elements on the page.
-        *   Send CAPTCHA details to the solver API.
-        *   Receive a solution token or instructions.
-        *   Automate submission of the token/solution.
-    c.  If CAPTCHA solving fails, the overall extraction for this attempt fails.
-3.  Execute `current_method` (cURL or Puppeteer, using configured proxy and UA). If Puppeteer, ensure CAPTCHA solving (if applicable) is part of its execution flow.
-4.  Once page is loaded/rendered (and CAPTCHA solved if applicable):
-    a.  Extract content: Full HTML or `innerHTML` at `current_xpath`.
-    b.  **Basic Validation:** Check if XPath still exists and content is not empty.
+1.  The method (`current_method`), XPath (`current_xpath`), and CAPTCHA requirement (`current_needs_captcha` which is true if `current_method` is `puppeteer_captcha`) are now known.
+2.  **D.2. CAPTCHA Handling (if `current_method` is `puppeteer_captcha`):**
+    a.  Integrate with an external CAPTCHA solving service (identify elements, send to API, receive solution, submit).
+    b.  If CAPTCHA solving fails, the overall extraction attempt fails.
+3.  Execute `current_method` (cURL; or Puppeteer with stealth, and with CAPTCHA solving if `current_method` is `puppeteer_captcha`).
+4.  Once page loaded/rendered (and CAPTCHA solved if applicable): Extract content.
+5.  **Basic Validation:** Check XPath and content.
 
 **E. Return Data**
 
-1.  Return the extracted content.
-2.  Include status (success/failure) and messages.
+1.  Return extracted content, status, messages.
 
 ### 7. Key Sub-Modules/Components
 
-*   **`KnownSitesTableManager`**: Manages loading, querying, and saving the `KnownSitesTable`.
+*   **`KnownSitesTableManager`**
 *   **`PuppeteerController`**:
-    *   `launchPuppeteerBrowser()`: Configures and launches Puppeteer instances (accepts proxy settings).
-    *   `navigateAndPreparePage()`: Handles navigation, waits, and basic interactions.
-    *   `queryXPathWithDetails()`: Evaluates XPath and gathers element details.
-    *   `cleanupPuppeteer()`: Closes browser and cleans up.
-*   **`CurlHandler`**: Executes cURL requests (accepts proxy settings).
-*   **`DomComparator`**: Compares DOMs.
-*   **`LLMInterface`**:
-    *   `getLlmCandidateXPaths()`: Constructs prompts, calls LLM API, parses responses.
-*   **`ContentScoringEngine`**:
-    *   `scoreElement()`: Implements the heuristic scoring logic for XPath candidates.
-*   **`CaptchaSolverIntegration`**: Interface to external CAPTCHA solving services.
-*   **`HtmlAnalyser`**:
-    *   `extractArticleSnippets()`: Extracts text snippets for LLM.
-    *   Detects CAPTCHA markers.
+    *   `launchPuppeteerBrowser()`: Configures and launches Puppeteer instances (always with stealth, accepts proxy).
+    *   ... (other functions as before)
+*   **`CurlHandler`**
+*   **`DomComparator`**
+*   **`LLMInterface`**
+*   **`ContentScoringEngine`**
+*   **`CaptchaSolverIntegration`**
+*   **`HtmlAnalyser`**
 
 ### 8. Failure Handling & Re-validation
 
-*   **Stale Configuration Detection:** Track `failure_count_since_last_success`. Force re-discovery on high count or old timestamp.
-*   **Proactive Re-validation:** Periodically re-validate a subset of known site configurations.
-*   **Debugging:** Logging, `SAVE_HTML_ON_FAILURE`.
-*   **LLM Errors:** Retry, fallback, report.
+(As previously listed)
 
 ### 9. Future Considerations / Advanced Features
 
-(As previously listed: advanced interactions, ML for direct extraction, visual analysis, diverse content types, granular XPaths).
+(As previously listed)
 
-This version now clearly states that proxy and User-Agent are expected inputs or handled externally to the core scraper's internal management logic, simplifying section A and adjusting references throughout.
+**Key Changes in this Version (v3):**
+
+*   Removed `puppeteer_basic` as a distinct method. All Puppeteer usage implies stealth.
+*   The `method` field in `KnownSitesTable` can be `curl`, `puppeteer_stealth`, or `puppeteer_captcha`.
+*   The `needs_captcha_solver` field in `KnownSitesTable` is true if a CAPTCHA was detected. If this is true, the `method` stored will typically be `puppeteer_captcha`.
+*   Initial Puppeteer attempt in C.1.c is now explicitly "Puppeteer (with Stealth)".
+*   Logic for determining `method_to_store` in C.4.a.i is updated to reflect the new method types.
+
+This makes the specification more streamlined regarding Puppeteer's operational modes.
