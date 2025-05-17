@@ -13,7 +13,8 @@ digraph SmartScraperFlow {
 
   // Core Engine Decisions
   CheckKnownSite [label="Known Site Check\n(KnownSitesTableManager)"];
-  IsConfigValid [label="Config Valid & Not Stale?", shape=diamond, fillcolor=lightyellow];
+  IsConfigValid [label="Attempt Known Config", shape=box, fillcolor=lightyellow]; // Changed from diamond to reflect action
+  KnownConfigWorks [label="Known Config Worked?", shape=diamond, fillcolor=lightyellow];
   
   // Discovery Sub-System
   DiscoveryProcess [label="Unknown Site / Re-Discovery Process", shape= Mrecord, fillcolor=lightgoldenrodyellow,
@@ -55,10 +56,8 @@ digraph SmartScraperFlow {
       Basic Validation\
     }"
   ];
-  ExecuteStoredMethod [label="Execute Stored Method\n(CurlHandler or PuppeteerController)"];
-  ValidateExtraction [label="Validate Extraction\n(XPath, Content Check)"];
-  ExtractionSuccess [label="Extraction Successful?", shape=diamond, fillcolor=lightyellow];
-  
+  // ExecuteStoredMethod node removed, integrated into IsConfigValid/KnownConfigWorks logic
+
   // CAPTCHA Handling
   CaptchaHandling [label="CAPTCHA Handling\n(CaptchaSolver, DataDomeSolver)"];
   CaptchaSolved [label="CAPTCHA Solved?", shape=diamond, fillcolor=lightyellow];
@@ -71,21 +70,19 @@ digraph SmartScraperFlow {
   Start -> InputURL;
   InputURL -> CheckKnownSite;
   CheckKnownSite -> IsConfigValid [label="Config Found"];
-  CheckKnownSite -> DiscoveryProcess [label="Unknown Site / Re-Discovery Needed"];
+  CheckKnownSite -> DiscoveryProcess [label="Unknown Site"];
   
-  IsConfigValid -> ExecuteStoredMethod [label="Yes"];
-  IsConfigValid -> DiscoveryProcess [label="No (Stale/Fails)\nIncrement Failure Count"];
-  
-  ExecuteStoredMethod -> ValidateExtraction;
-  ValidateExtraction -> ExtractionSuccess;
-  ExtractionSuccess -> UpdateSuccessStats [label="Yes"];
+  IsConfigValid -> KnownConfigWorks; // Attempting the known config
+  KnownConfigWorks -> UpdateSuccessStats [label="Yes"];
+  KnownConfigWorks -> IncrementFailureAndRediscover [label="No (Config Failed)"];
+
   UpdateSuccessStats [label="Update Success Stats\n(KnownSitesTableManager)"];
   UpdateSuccessStats -> SaveHtmlSuccess;
   SaveHtmlSuccess -> EndSuccess;
   
-  ExtractionSuccess -> IncrementFailureAndRediscover [label="No"];
   IncrementFailureAndRediscover [label="Increment Failure Count\n(KnownSitesTableManager)"];
-  IncrementFailureAndRediscover -> DiscoveryProcess;
+  IncrementFailureAndRediscover -> DiscoveryProcess [label="Trigger Re-Discovery"];
+
 
   // Discovery Process Details
   DiscoveryProcess -> InitialProbeCurl;

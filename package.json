@@ -1,6 +1,6 @@
 {
   "name": "smartscraper",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "An intelligent web scraper designed to extract main content from various web pages.",
   "main": "src/index.js",
   "type": "module",
