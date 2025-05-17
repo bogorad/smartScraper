@@ -1,8 +1,8 @@
 // src/browser/plugin-manager.js
 import path from 'path';
 import fs from 'fs/promises'; // To check if plugin paths exist
-import { logger } from '../utils/logger.js';
 import { fileURLToPath } from 'url';
+import { logger } from '../utils/logger.js';
 import { ConfigurationError, NetworkError } from '../utils/error-handler.js';
 
 // ES Module equivalent of __dirname for resolving paths relative to project root
@@ -11,153 +11,177 @@ const __dirname = path.dirname(__filename);
 const projectRootDir = path.resolve(__dirname, '..', '..'); // Assuming src/browser/ is two levels down from root
 
 class PluginManager {
-    constructor(customPluginConfigs = []) {
-        // Define default plugins with paths relative to the project root
-        this.defaultPluginConfigs = [
-            {
-                name: 'I-Still-Dont-Care-About-Cookies',
-                relativePath: 'plugins/I-Still-Dont-Care-About-Cookies/src', // Path relative to project root
-                enabled: true, // You can enable/disable plugins via config
-            },
-            {
-                name: 'Bypass-Paywalls-Chrome-Clean',
-                relativePath: 'plugins/bypass-paywalls-chrome-clean-master', // Path relative to project root
-                enabled: true,
-            },
-            // Add more default plugins here
-        ];
+  constructor(customPluginConfigs = []) {
+    // Define default plugins with paths relative to the project root
+    // These can serve as fallbacks if EXTENSION_PATHS is not set or if paths there are invalid
+    this.defaultPlugins = [
+      {
+        name: 'I Still Dont Care About Cookies',
+        relativePath: 'plugins/I-Still-Dont-Care-About-Cookies/src', // Path relative to project root
+        enabled: true,
+        isAbsolutePath: false,
+      },
+      {
+        name: 'Bypass Paywalls Chrome Clean',
+        relativePath: 'plugins/bypass-paywalls-chrome-clean-master', // Path relative to project root
+        enabled: true,
+        isAbsolutePath: false,
+      },
+      // Add more default plugins here
+    ];
 
-        // Merge custom configs with defaults, allowing overrides
-        this.activePlugins = this.defaultPluginConfigs
-            .map(defaultConfig => {
-                const customConfig = customPluginConfigs.find(c => c.name === defaultConfig.name);
-                return { ...defaultConfig, ...(customConfig || {}) };
-            })
-            .filter(plugin => plugin.enabled); // Only consider enabled plugins
+    this.activePlugins = [];
+    const extensionPathsEnv = process.env.EXTENSION_PATHS;
 
-        logger.info('PluginManager initialized.');
-        if (this.activePlugins.length > 0) {
-            logger.info('Active plugins:', this.activePlugins.map(p => p.name).join(', '));
+    if (extensionPathsEnv) {
+      const paths = extensionPathsEnv.split(',').map(p => p.trim()).filter(p => p); // Trim and filter empty paths
+      if (paths.length > 0) {
+        this.activePlugins = paths.map(p_str => {
+          // Basic name derivation, can be improved
+          const name = p_str.substring(p_str.lastIndexOf(path.sep) + 1) || `env_ext_${Date.now()}`;
+          return {
+            name: name,
+            relativePath: p_str, // For EXTENSION_PATHS, this is treated as an absolute or directly resolvable path
+            isAbsolutePath: true, // Flag to indicate it's from env and likely absolute
+            enabled: true
+          };
+        });
+        logger.info(`PluginManager: Loaded ${this.activePlugins.length} extensions from EXTENSION_PATHS environment variable: ${paths.join(', ')}`);
+      } else {
+         logger.warn('PluginManager: EXTENSION_PATHS was set but no valid paths were parsed. Check formatting. Falling back to defaults.');
+         this._useDefaultPlugins(customPluginConfigs);
+      }
+    } else {
+      logger.info('PluginManager: EXTENSION_PATHS not set. Using default/custom plugin configurations.');
+      this._useDefaultPlugins(customPluginConfigs);
+    }
+    
+    if (this.activePlugins.length > 0) {
+      logger.info('PluginManager initialized.');
+      logger.info('Active plugins:', this.activePlugins.map(p => `${p.name} (Path: ${p.relativePath})`).join('; '));
+    } else {
+      logger.info('PluginManager initialized with no active plugins configured.');
+    }
+  }
+
+  _useDefaultPlugins(customPluginConfigs = []) {
+     this.activePlugins = this.defaultPlugins
+        .map(defaultConfig => {
+          const customConfig = customPluginConfigs.find(c => c.name === defaultConfig.name);
+          return { ...defaultConfig, ...(customConfig || {}) };
+        })
+        .filter(plugin => plugin.enabled);
+  }
+
+  async configureLaunchOptions(launchOptions) {
+    if (!this.activePlugins || this.activePlugins.length === 0) {
+      logger.info('No active plugins to load.');
+      return;
+    }
+
+    const extensionPathsToLoad = [];
+    for (const plugin of this.activePlugins) {
+      if (!plugin.relativePath) {
+        logger.warn(`Plugin "${plugin.name}" is missing 'relativePath'. Skipping.`);
+        continue;
+      }
+
+      let absolutePath = plugin.relativePath;
+      if (!plugin.isAbsolutePath) { // If from default config, resolve relative to project root
+        absolutePath = path.resolve(projectRootDir, plugin.relativePath);
+      }
+      // For paths from EXTENSION_PATHS, we assume they are absolute or resolvable as is.
+
+      try {
+        const stats = await fs.stat(absolutePath);
+        if (stats.isDirectory()) {
+          extensionPathsToLoad.push(absolutePath);
         } else {
-            logger.info('No active plugins configured.');
+          logger.warn(`Plugin path for "${plugin.name}" (Path: ${absolutePath}) is not a directory.`);
         }
+      } catch (error) {
+        logger.warn(`Plugin path for "${plugin.name}" (Path: ${absolutePath}) not found or inaccessible. Error: ${error.message}`);
+        // If a path from EXTENSION_PATHS is invalid, we log a warning and skip it.
+        // If it's critical, an error could be thrown here.
+        // if (plugin.isAbsolutePath) {
+        //   throw new ConfigurationError(`Invalid extension path from EXTENSION_PATHS: ${absolutePath}`, {
+        //     pluginName: plugin.name, path: absolutePath, originalError: error.message
+        //   });
+        // }
+      }
     }
 
-    /**
-     * Modifies Puppeteer launch options to load enabled unpacked extensions.
-     * This is called by PuppeteerController before launching the browser.
-     * @param {object} launchOptions - The Puppeteer launch options object.
-     */
-    async configureLaunchOptions(launchOptions) {
-        if (this.activePlugins.length === 0) {
-            return; // No plugins to load
-        }
+    if (extensionPathsToLoad.length > 0) {
+      const disableExtensionsExceptArg = `--disable-extensions-except=${extensionPathsToLoad.join(',')}`;
+      const loadExtensionArg = `--load-extension=${extensionPathsToLoad.join(',')}`;
 
-        const extensionPathsToLoad = [];
-        for (const plugin of this.activePlugins) {
-            if (plugin.relativePath) {
-                const absolutePath = path.resolve(projectRootDir, plugin.relativePath);
-                try {
-                    // Check if the path exists and is a directory
-                    const stats = await fs.stat(absolutePath);
-                    if (stats.isDirectory()) {
-                        extensionPathsToLoad.push(absolutePath);
-                    } else {
-                        logger.warn(`Plugin path for "${plugin.name}" is not a directory: ${absolutePath}`);
-                    }
-                } catch (error) {
-                    logger.warn(`Plugin path for "${plugin.name}" not found or inaccessible: ${absolutePath}. Error: ${error.message}`);
-                    throw new ConfigurationError(`Plugin path for "${plugin.name}" not found or inaccessible`, {
-                        pluginName: plugin.name,
-                        path: absolutePath,
-                        originalError: error.message
-                    }, error);
-                }
-            }
-        }
-
-        if (extensionPathsToLoad.length > 0) {
-            const existingArgs = launchOptions.args || [];
-            // Important: Using string concatenation for these arguments
-            const disableExtensionsExceptArg = `--disable-extensions-except=${extensionPathsToLoad.join(',')}`;
-            const loadExtensionArg = `--load-extension=${extensionPathsToLoad.join(',')}`;
-
-            launchOptions.args = [
-                ...existingArgs.filter(arg => !arg.startsWith('--disable-extensions-except=') && !arg.startsWith('--load-extension=')), // Remove old ones if any
-                disableExtensionsExceptArg,
-                loadExtensionArg,
-            ];
-            logger.info(`Configured Puppeteer to load extensions: ${extensionPathsToLoad.join(', ')}`);
-        } else {
-            logger.info('No valid extension paths found to load.');
-        }
+      const existingArgs = launchOptions.args || [];
+      launchOptions.args = [
+        ...existingArgs.filter(arg => !arg.startsWith('--disable-extensions-except=') && !arg.startsWith('--load-extension=')),
+        disableExtensionsExceptArg,
+        loadExtensionArg,
+      ];
+      logger.info(`Configured Puppeteer to load extensions: ${extensionPathsToLoad.join(', ')}`);
+    } else {
+      logger.info('No valid extension paths found to load from EXTENSION_PATHS or defaults.');
     }
+  }
 
-    /**
-     * Applies actions to a page after navigation.
-     * Currently, this is a placeholder for any specific interactions your plugins might need
-     * or for generic actions like the GDPR clicker.
-     * Most well-behaved extensions should work automatically once loaded.
-     * @param {object} page - The Puppeteer page object.
-     */
-    async applyToPageAfterNavigation(page) {
-        logger.debug('PluginManager: applyToPageAfterNavigation called.');
+  async applyToPageAfterNavigation(page) {
+    logger.debug('PluginManager: applyToPageAfterNavigation called.');
+    // Generic GDPR clicker logic (can be expanded or made configurable)
+    const gdprKeywords = ['accept', 'agree', 'consent', 'got it', 'allow all', 'ok', 'continue', 'i understand'];
+    const gdprSelectors = [
+      "//button[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')]",
+      "//a[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')]",
+      "//*[contains(@id, 'cookie') or contains(@class, 'cookie') or contains(@id, 'gdpr') or contains(@class, 'gdpr') or contains(@id, 'consent') or contains(@class, 'consent')]//button[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')]",
+      "//*[contains(@id, 'cookie') or contains(@class, 'cookie') or contains(@id, 'gdpr') or contains(@class, 'gdpr') or contains(@id, 'consent') or contains(@class, 'consent')]//a[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')]",
+      "//div[contains(@role, 'dialog')]//button[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')]"
+    ];
+    let clicked = false;
 
-        // The "I Still Don't Care About Cookies" and "Bypass Paywalls" extensions
-        // generally work by modifying page content or network requests automatically.
-        // Explicit actions here might only be needed for very specific scenarios
-        // or for plugins that require manual triggering via content scripts.
+    try {
+      for (const keyword of gdprKeywords) {
+        if (clicked) break;
+        for (const selectorTemplate of gdprSelectors) {
+          if (clicked) break;
+          const selector = selectorTemplate.replace('{keyword}', keyword);
+          const elementHandles = await page.$x(selector);
 
-        // Example: Generic GDPR clicker (kept from previous version, can be refined or removed)
-        // This is independent of the loaded extensions but can be considered a "plugin-like" action.
-        try {
-            const gdprKeywords = ['accept', 'agree', 'consent', 'got it', 'ok', 'allow all', 'i understand'];
-            let clicked = false;
-            for (const keyword of gdprKeywords) {
-                if (clicked) break;
-                const selectors = [
-                    `//button[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${keyword}')]`,
-                    `//a[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${keyword}')]`,
-                    `//div[@role='button' and contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${keyword}')]`
-                ];
-
-                for (const selector of selectors) {
-                    if (clicked) break;
-                    const elementHandles = await page.$x(selector); // Get all matching elements
-                    for (const elementHandle of elementHandles) {
-                         try {
-                            const isVisible = await elementHandle.isIntersectingViewport();
-                            if (isVisible) {
-                                logger.info(`Attempting to click GDPR element matching keyword: "${keyword}" with selector: ${selector.substring(0, 100)}`);
-                                await elementHandle.click({ delay: Math.random() * 100 + 50 });
-                                await page.waitForTimeout(750 + Math.random() * 500); // Wait for potential overlay
-                                logger.info(`Clicked GDPR element for keyword: "${keyword}"`);
-                                clicked = true; // Assume one click is enough
-                                break; // Break from inner loop (selectors for this keyword)
-                            }
-                        } catch(clickError) {
-                            logger.warn(`Failed to click element for keyword "${keyword}": ${clickError.message.substring(0,100)}`);
-                        } finally {
-                            if (elementHandle) await elementHandle.dispose();
-                        }
-                    }
-                }
+          for (const elementHandle of elementHandles) {
+            try {
+              const isVisible = await elementHandle.isIntersectingViewport();
+              if (isVisible) {
+                logger.info(`Attempting to click GDPR element matching keyword: "${keyword}" with selector: ${selector.substring(0, 100)}`);
+                await elementHandle.click({ delay: Math.random() * 100 + 50 });
+                await page.waitForTimeout(750 + Math.random() * 500); // Wait for potential overlay/page reaction
+                logger.info(`Clicked GDPR element for keyword: "${keyword}"`);
+                clicked = true;
+                break; 
+              }
+            } catch (clickError) {
+              logger.warn(`Failed to click element for keyword "${keyword}" with selector ${selector.substring(0,100)}: ${clickError.message.substring(0,100)}`);
+            } finally {
+              if (elementHandle) await elementHandle.dispose();
             }
-            if (clicked) {
-                logger.info("GDPR interaction attempted.");
-            } else {
-                logger.debug("No GDPR elements found/clicked based on keywords.");
-            }
-        } catch (error) {
-            logger.warn(`Error during generic GDPR click attempt: ${error.message}`);
-            // We don't throw here since this is a non-critical operation
-            // But we still log it as a NetworkError for consistency
-            const networkError = new NetworkError('Error during generic GDPR click attempt', {
-                url: await page.url()
-            }, error);
-            logger.debug(`NetworkError details: ${JSON.stringify(networkError.details)}`);
+          }
         }
+      }
+      if (clicked) {
+        logger.info("GDPR interaction attempted and an element was clicked.");
+      } else {
+        logger.debug("No GDPR elements found/clicked based on keywords.");
+      }
+    } catch (error) {
+      logger.warn(`Error during generic GDPR click attempt: ${error.message}`);
+      // Don't throw, as this is a best-effort enhancement.
+      const networkError = new NetworkError('Error during generic GDPR click attempt', {
+        url: await page.url().catch(() => 'unknown_url'), 
+        originalError: error.message
+      });
+      logger.debug(`NetworkError details during GDPR click: ${JSON.stringify(networkError.details)}`);
     }
+  }
 }
 
 export { PluginManager };

@@ -62,7 +62,7 @@ This table (e.g., a JSON file or database), managed by the `KnownSitesTableManag
 
 ## 6. Detailed Algorithm Steps
 
-(Refer to `core/engine.js` for the most up-to-date logic. The general flow remains similar to the original README, with refinements in CAPTCHA handling and discovery.)
+(Refer to `src/core/engine.js` for the most up-to-date logic. The general flow remains similar to the original README, with refinements in CAPTCHA handling and discovery.)
 
 ## 7. Modular Architecture & Key Sub-Modules
 
@@ -118,7 +118,7 @@ EXTENSION_PATHS=/path/to/extension1/src,/path/to/extension2
 # --- Proxy Configuration ---
 # HTTP proxy for web scraping (format: http://username:password@hostname:port)
 # This proxy is used for both curl and Puppeteer requests
-HTTP_PROXY=http://your_proxy_user:your_proxy_pass@proxy.example.com:8080
+HTTP_PROXY=http://xxx:xxx@proxy:port
 
 # --- CAPTCHA Solver Configuration ---
 # Your 2Captcha API key (or other supported service)

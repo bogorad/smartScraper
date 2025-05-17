@@ -1,196 +1,137 @@
 // src/services/llm-interface.js
-
 import axios from 'axios';
 import { logger } from '../utils/logger.js';
 import { LLMError, ConfigurationError } from '../utils/error-handler.js';
-// No need to import llmConfig directly here if passed in constructor
+import { llmConfig as globalLlmConfig } from '../../config/index.js'; 
 
 class LLMInterface {
-    constructor(llmConfig) {
-        if (!llmConfig || !llmConfig.apiKey || !llmConfig.chatCompletionsEndpoint || !llmConfig.model) {
-            throw new ConfigurationError('LLMInterface: Missing required LLM configuration', {
-                missing: ['apiKey', 'chatCompletionsEndpoint', 'model'].filter(key => !llmConfig || !llmConfig[key])
-            });
-        }
-        this.apiKey = llmConfig.apiKey;
-        this.endpoint = llmConfig.chatCompletionsEndpoint;
-        this.model = llmConfig.model;
-        this.defaultTemperature = llmConfig.defaultTemperature || 0.5; // More deterministic for XPath
-        this.defaultMaxTokens = llmConfig.defaultMaxTokens || 256; // XPaths are usually not too long
+  constructor(llmConfig = {}) {
+    this.apiKey = llmConfig.apiKey || globalLlmConfig.apiKey;
+    this.endpoint = llmConfig.chatCompletionsEndpoint || globalLlmConfig.chatCompletionsEndpoint;
+    this.model = llmConfig.model || globalLlmConfig.model;
+    this.defaultTemperature = llmConfig.defaultTemperature !== undefined ? llmConfig.defaultTemperature : globalLlmConfig.defaultTemperature;
+    this.defaultMaxTokens = llmConfig.defaultMaxTokens || globalLlmConfig.defaultMaxTokens;
 
-        this.axiosInstance = axios.create({
-            baseURL: this.endpoint.substring(0, this.endpoint.lastIndexOf('/')), // Base URL for OpenRouter
-            headers: {
-                'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json',
-                // OpenRouter specific headers (good practice)
-                'HTTP-Referer': 'https://github.com/bogorad/smartScraper',
-                'X-Title': 'SmartScraper'
-            }
-        });
-        logger.info(`LLMInterface initialized for model: ${this.model}`);
+    if (!this.apiKey || !this.endpoint || !this.model) {
+      throw new ConfigurationError('LLMInterface: Missing required LLM configuration values (apiKey, chatCompletionsEndpoint, model)', {
+        apiKeyProvided: !!this.apiKey,
+        endpointProvided: !!this.endpoint,
+        modelProvided: !!this.model
+      });
+    }
+    
+    this.axiosInstance = axios.create({
+      baseURL: this.endpoint.substring(0, this.endpoint.lastIndexOf('/')),
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://smartscraper.dev', 
+        'X-Title': 'SmartScraper Universal Scraper', 
+      },
+    });
+    logger.info(`LLMInterface initialized for model: ${this.model}`);
+  }
+
+  _constructPrompt(htmlContentSummary, snippets, feedbackContext) {
+    const maxHtmlLength = 15000; 
+    let truncatedHtml = htmlContentSummary;
+    if (htmlContentSummary.length > maxHtmlLength) {
+      truncatedHtml = htmlContentSummary.substring(0, maxHtmlLength) + "\n... (HTML truncated) ...";
     }
 
-    _constructPrompt(htmlContentSummary, snippets, feedbackContext) {
-        // Truncate HTML content if too long to avoid excessive token usage
-        const maxHtmlLength = 15000; // Adjust based on model context window and typical page sizes
-        let truncatedHtml = htmlContentSummary;
-        if (htmlContentSummary.length > maxHtmlLength) {
-            truncatedHtml = htmlContentSummary.substring(0, maxHtmlLength) + "\n... (HTML truncated) ...";
-        }
+    let prompt = `
+Analyze the following HTML content summary and text snippets to identify the main article content.
+Provide up to 5 candidate XPath expressions that point to the primary article container.
+Return the XPaths as a JSON array of strings. Example: ["//div[@id='main-content']", "//article[contains(@class,'post-body')]"]
 
-        let prompt = `
-You are an expert web scraper tasked with identifying the main content area of a webpage.
-Analyze the provided HTML structure and text snippets to suggest robust XPath expressions that point to the primary article body or main content container.
-
-Prioritize XPaths that use:
-1. Semantic HTML5 tags like <article>, <main>.
-2. IDs or classes that are descriptive of content (e.g., "article-body", "main-content", "story-text").
-3. Relative XPaths if they are clearly anchored to a stable element.
-Avoid overly brittle XPaths that rely on specific numerical indices if possible (e.g., /div[3]/div[2]/p[5]).
-
-HTML Structure Summary (may be truncated):
+HTML Content Summary (first ${maxHtmlLength} chars if truncated):
 \`\`\`html
 ${truncatedHtml}
 \`\`\`
-
-Key Text Snippets from the page to help identify relevant content:
-${snippets.map(s => `- "${s}"`).join('\n')}
-
-${feedbackContext && feedbackContext.length > 0 ? `
-Previous attempts and feedback (use this to improve your suggestions):
-${feedbackContext.map(f => `- ${f}`).join('\n')}
-Please provide DIFFERENT and BETTER XPath suggestions based on this feedback.
-` : ''}
-
-Respond ONLY with a JSON array of unique XPath strings, like this: ["//article", "//div[@id='content']"]
-Do not include any other text, explanations, or markdown formatting outside the JSON array.
-Suggest up to 5 diverse and high-quality candidate XPaths.
 `;
-        return prompt.trim();
+    if (snippets && snippets.length > 0) {
+      prompt += `
+Key Text Snippets from the page:
+${snippets.map(s => `- "${s.substring(0, 100)}${s.length > 100 ? '...' : ''}"`).join('\n')}
+`;
     }
 
-    /**
-     * Gets candidate XPath expressions from the LLM.
-     * @param {string} htmlContent - A summary or significant portion of the page's HTML.
-     * @param {string[]} snippets - Array of text snippets from the page.
-     * @param {string[]} feedbackContext - Array of feedback strings from previous failed attempts.
-     * @returns {Promise<string[]|null>} An array of XPath strings or null if an error occurs.
-     */
-    async getCandidateXPaths(htmlContent, snippets, feedbackContext = []) {
-        const prompt = this._constructPrompt(htmlContent, snippets, feedbackContext);
-        const payload = {
-            model: this.model,
-            messages: [
-                { role: 'system', content: 'You are an expert XPath generator for web scraping.' },
-                { role: 'user', content: prompt }
-            ],
-            temperature: this.defaultTemperature,
-            max_tokens: this.defaultMaxTokens,
-            // stream: false, // Not streaming for this use case
-        };
+    if (feedbackContext && feedbackContext.length > 0) {
+      prompt += `
+Previous XPath attempts and feedback (use this to refine your suggestions):
+${feedbackContext.map(f => `- ${f}`).join('\n')}
+`;
+    }
+    prompt += "\nCandidate XPaths (JSON array of strings):";
+    return prompt.trim();
+  }
 
-        logger.info(`Sending request to LLM. Prompt length (approx): ${prompt.length} chars.`);
-        logger.debug(`LLM request headers: ${JSON.stringify(this.axiosInstance.defaults.headers)}`);
-        logger.debug(`LLM request URL: ${this.endpoint}`);
-        // logger.debug(`LLM Payload: ${JSON.stringify(payload, null, 2)}`); // Can be very verbose
+  async getCandidateXPaths(htmlContent, snippets, feedbackContext = []) {
+    const prompt = this._constructPrompt(htmlContent, snippets, feedbackContext);
+    const payload = {
+      model: this.model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: this.defaultTemperature,
+      max_tokens: this.defaultMaxTokens,
+    };
 
-        try {
-            const response = await this.axiosInstance.post(
-                this.endpoint.substring(this.endpoint.lastIndexOf('/')), // Just the path part e.g. /chat/completions
-                payload,
-                { timeout: 30000 } // 30 second timeout for LLM response
-            );
+    logger.info(`Sending request to LLM. Prompt length (approx): ${prompt.length} chars.`);
+    try {
+      const response = await this.axiosInstance.post(
+        this.endpoint.substring(this.endpoint.lastIndexOf('/')), 
+        payload,
+        { timeout: 45000 } 
+      );
 
-            if (response.data && response.data.choices && response.data.choices.length > 0) {
-                const messageContent = response.data.choices[0].message?.content;
-                if (messageContent) {
-                    logger.debug(`LLM raw response content: ${messageContent}`);
-                    try {
-                        // Attempt to parse the content as a JSON array of strings
-                        // The LLM might sometimes include markdown backticks around the JSON
-                        const cleanedContent = messageContent.replace(/^```json\s*|```\s*$/g, '').trim();
-                        const xpaths = JSON.parse(cleanedContent);
-                        if (Array.isArray(xpaths) && xpaths.every(item => typeof item === 'string')) {
-                            logger.info(`LLM returned ${xpaths.length} candidate XPaths.`);
-                            return xpaths.filter((xpath, index, self) => self.indexOf(xpath) === index); // Ensure uniqueness
-                        } else {
-                            logger.warn('LLM response content was not a valid JSON array of strings:', cleanedContent);
-                            throw new LLMError('LLM response content was not a valid JSON array of strings', {
-                                model: this.model,
-                                content: cleanedContent
-                            });
-                        }
-                    } catch (parseError) {
-                        logger.error(`Failed to parse LLM response as JSON: ${parseError.message}. Raw content: ${messageContent}`);
-
-                        // Fallback: try to extract XPaths using a regex if parsing fails (less reliable)
-                        const xpathRegex = /\/\/[a-zA-Z0-9\[\]@='".:,()\s-]+/g;
-                        const extracted = messageContent.match(xpathRegex);
-                        if (extracted && extracted.length > 0) {
-                            logger.warn(`Fallback: Extracted ${extracted.length} XPaths using regex.`);
-                            return extracted.filter((xpath, index, self) => self.indexOf(xpath) === index);
-                        }
-
-                        // If fallback fails, throw a proper LLMError
-                        throw new LLMError(
-                            'Failed to parse LLM response as JSON and regex fallback failed',
-                            {
-                                model: this.model,
-                                rawContent: messageContent.substring(0, 500) + (messageContent.length > 500 ? '...' : '')
-                            },
-                            parseError
-                        );
-                    }
-                } else {
-                    logger.warn('LLM response did not contain expected message content.');
-                    throw new LLMError('LLM response did not contain expected message content', {
-                        model: this.model,
-                        responseData: response.data
-                    });
-                }
-            } else {
-                logger.warn('LLM response was empty or malformed:', response.data);
-                throw new LLMError('LLM response was empty or malformed', {
-                    model: this.model,
-                    responseData: response.data
-                });
+      if (response.data && response.data.choices && response.data.choices.length > 0) {
+        const messageContent = response.data.choices[0].message?.content;
+        if (messageContent) {
+          logger.debug(`LLM raw response content: ${messageContent}`);
+          try {
+            const cleanedContent = messageContent.replace(/^```json\s*|```\s*$/g, '').trim();
+            const xpaths = JSON.parse(cleanedContent);
+            if (Array.isArray(xpaths) && xpaths.every(item => typeof item === 'string' && item.startsWith('/'))) {
+              logger.info(`LLM returned ${xpaths.length} candidate XPaths.`);
+              return xpaths.filter((xpath, index, self) => self.indexOf(xpath) === index);
             }
-        } catch (error) {
-            // If it's already a LLMError, just re-throw it
-            if (error instanceof LLMError) {
-                throw error;
+            logger.warn('LLM response content was not a valid JSON array of valid XPath strings:', cleanedContent);
+            throw new LLMError('LLM response content was not a valid JSON array of valid XPath strings', { rawContent: cleanedContent });
+          } catch (parseError) {
+            logger.error(`Failed to parse LLM response as JSON: ${parseError.message}. Raw content: ${messageContent}`);
+            const xpathRegex = /(\/\/[a-zA-Z0-9\-_:\*\[\]\(\)@=\.'"\s]+)/g;
+            const extracted = messageContent.match(xpathRegex);
+            if (extracted && extracted.length > 0) {
+              logger.warn(`Fallback: Extracted ${extracted.length} XPaths using regex.`);
+              return extracted.filter((xpath, index, self) => self.indexOf(xpath) === index);
             }
-
-            // Otherwise, wrap it in an LLMError with appropriate details
-            if (error.response) {
-                logger.error(`LLM API request failed with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);
-                throw new LLMError(
-                    `LLM API request failed with status ${error.response.status}`,
-                    {
-                        model: this.model,
-                        status: error.response.status,
-                        responseData: error.response.data
-                    },
-                    error
-                );
-            } else if (error.request) {
-                logger.error(`LLM API request failed: No response received. ${error.message}`);
-                throw new LLMError(
-                    'LLM API request failed: No response received',
-                    { model: this.model },
-                    error
-                );
-            } else {
-                logger.error(`Error setting up LLM API request: ${error.message}`);
-                throw new LLMError(
-                    'Error setting up LLM API request',
-                    { model: this.model },
-                    error
-                );
-            }
+            throw new LLMError('Failed to parse LLM response and fallback regex extraction failed.', {
+                originalError: parseError.message,
+                rawContent: messageContent.substring(0, 500) + (messageContent.length > 500 ? '...' : '')
+            });
+          }
         }
+      }
+      logger.warn('LLM response did not contain expected message content or choices.', { responseData: response.data });
+      throw new LLMError('LLM response did not contain expected message content or choices', { responseData: response.data });
+    } catch (error) {
+      if (error instanceof LLMError) throw error; 
+
+      if (error.response) {
+        logger.error(`LLM API request failed with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+        throw new LLMError(`LLM API request failed with status ${error.response.status}`, {
+          statusCode: error.response.status,
+          responseData: error.response.data,
+          originalError: error.message
+        });
+      } else if (error.request) {
+        logger.error(`LLM API request failed: No response received. ${error.message}`);
+        throw new LLMError('LLM API request failed: No response received', { originalError: error.message });
+      } else {
+        logger.error(`Error setting up LLM API request: ${error.message}`);
+        throw new LLMError(`Error setting up LLM API request: ${error.message}`, { originalError: error.message });
+      }
     }
+  }
 }
 
 export { LLMInterface };

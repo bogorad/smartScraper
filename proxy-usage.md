@@ -16,7 +16,7 @@ HTTP_PROXY=http://username:password@hostname:port
 For example:
 
 ```dotenv
-HTTP_PROXY=http://myuser:mypass@proxy.example.com:8000
+HTTP_PROXY=
 ```
 
 ### Proxy Format

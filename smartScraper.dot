@@ -93,22 +93,20 @@ digraph SmartScraperFlow {
   CurlResponse -> CheckCaptchaCurl [label="Success"];
   CurlResponse -> InitialProbePuppeteer [label="Fail (or proceed to Puppeteer anyway)"];
   
-  CheckCaptchaCurl -> InitialProbePuppeteer [label="No CAPTCHA"]; // Or proceed to DOM comparison if Puppeteer also runs
-  CheckCaptchaCurl -> CaptchaHandling [label="Yes (DataDome?)\nSkip Puppeteer-Stealth"]; // Path to direct CAPTCHA solving
-  CaptchaHandling -> InitialProbePuppeteer [label="CAPTCHA Not Solved / Other CAPTCHA"]; // Fallback or if general CAPTCHA
+  CheckCaptchaCurl -> InitialProbePuppeteer [label="No CAPTCHA"]; 
+  CheckCaptchaCurl -> CaptchaHandling [label="Yes (DataDome?)\nSkip Puppeteer-Stealth"]; 
+  CaptchaHandling -> InitialProbePuppeteer [label="CAPTCHA Not Solved / Other CAPTCHA"]; 
   CaptchaHandling -> PreparePageForLLM [label="DataDome Solved by Puppeteer"];
 
 
   InitialProbePuppeteer -> PuppeteerResponse;
   PuppeteerResponse -> CheckCaptchaPuppeteer [label="Success"];
-  PuppeteerResponse -> CompareDOMs [label="Fail (use cURL if available)"]; // Or error if cURL also failed
+  PuppeteerResponse -> CompareDOMs [label="Fail (use cURL if available)"]; 
 
-  // Simplified flow after probes for diagram clarity
   CheckCaptchaPuppeteer -> CompareDOMs [label="No CAPTCHA"];
   CheckCaptchaPuppeteer -> CaptchaHandling [label="Yes (DataDome?)\nUse Puppeteer"];
   
   CompareDOMs -> PreparePageForLLM [label="Choose HTML for Analysis\n(cURL or Puppeteer)"];
-  // If cURL HTML chosen and Puppeteer was used for probing, Puppeteer instance might be closed here.
   
   PreparePageForLLM -> ExtractSnippets;
   ExtractSnippets -> LLMXPathDiscovery;
@@ -121,7 +119,6 @@ digraph SmartScraperFlow {
   XPathFoundLLM -> SaveHtmlFailure [label="No (Discovery Failed)"];
   SaveHtmlFailure -> EndError [label="Discovery Failed"];
 
-  // Extraction Process Details
   ExtractionProcess -> CaptchaHandling [label="If method=puppeteer_captcha"];
   CaptchaHandling -> ExecuteExtractionMethod [label="Solved"];
   CaptchaHandling -> SaveHtmlFailure [label="Not Solved"]; 
@@ -133,7 +130,6 @@ digraph SmartScraperFlow {
   ExtractionSuccessFromDiscovery -> SaveHtmlSuccess [label="Yes"];
   ExtractionSuccessFromDiscovery -> SaveHtmlFailure [label="No (Extraction Failed)"];
   
-  // General Error Path
   DiscoveryProcess -> SaveHtmlFailure [label="Critical Error During Discovery"];
   ExtractionProcess -> SaveHtmlFailure [label="Critical Error During Extraction"];
   SaveHtmlFailure -> EndError; 

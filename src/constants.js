@@ -26,9 +26,3 @@ export const OUTPUT_TYPES = Object.freeze({
  */
 export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 // Periodically update this to a recent common User-Agent.
-
-// Add any other application-wide constants here.
-// For example, if you have specific status codes or event names used internally.
-
-// Ensure all exported constants are immutable if they are objects/arrays
-// Object.freeze helps prevent accidental modification.
