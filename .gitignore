@@ -8,3 +8,4 @@ site_storage.json
 plugins/
 .vscode/
 debug_dumps/
+repomix-output.xml
