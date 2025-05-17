@@ -1,0 +1,169 @@
+{
+  "alexberenson.substack.com": {
+    "xpath": "//div[@class='body markup']"
+  },
+  "amgreatness.com": {
+    "xpath": "//main//article//div[@class='entry-content relative  dropcap ']"
+  },
+  "apnews.com": {
+    "xpath": "//div[@class='RichTextStoryBody RichTextBody']"
+  },
+  "axios.com": {
+    "xpath": "//div[contains(@class,'col-1-13') and *[contains(@data-schema,'smart-brevity')]]"
+  },
+  "bloomberg.com": {
+    "xpath": "//div[@class='body-content']"
+  },
+  "bostonherald.com": {
+    "xpath": "//article[@id='post-5524767']/div[@class='article-content']/div[@class='article-content-wrapper']/div[@class='article-body']"
+  },
+  "city-journal.org": {
+    "xpath": "//div[@id='article-content']"
+  },
+  "civitasinstitute.org": {
+    "xpath": "//main"
+  },
+  "commentary.org": {
+    "xpath": "//div[@class='entry-content']"
+  },
+  "commonplace.org": {
+    "xpath": "//div[contains(@class, 'entry-content')]"
+  },
+  "compactmag.com": {
+    "xpath": "//main"
+  },
+  "coolidgereview.com": {
+    "xpath": "//div[@class='blog-item-content e-content']"
+  },
+  "esquire.com": {
+    "xpath": "//div[@data-journey-body='longform-article']"
+  },
+  "foreignaffairs.com": {
+    "xpath": "//*[@class='article-dropcap--inner paywall-content']"
+  },
+  "foxnews.com": {
+    "xpath": "//article"
+  },
+  "freebeacon.com": {
+    "xpath": "//div[@class='article-content']"
+  },
+  "ft.com": {
+    "xpath": "//article[@id='article-body']"
+  },
+  "gizmodo.com": {
+    "xpath": "//div[contains(@class,'entry-content')]"
+  },
+  "harvardsalient.com": {
+    "xpath": "//article"
+  },
+  "issuesinsights.com": {
+    "xpath": "//div[@class='entry-content']"
+  },
+  "manhattancontrarian.com": {
+    "xpath": "//div[@data-content-field='main-content']//article"
+  },
+  "nationalpost.com": {
+    "xpath": "//*[@class='story-v2-block-content']"
+  },
+  "newcriterion.com": {
+    "xpath": "//main"
+  },
+  "newsnationnow.com": {
+    "xpath": "//main"
+  },
+  "nypost.com": {
+    "xpath": "//article//div[contains(@class, 'content')]"
+  },
+  "nytimes.com": {
+    "xpath": "//article"
+  },
+  "piratewires.com": {
+    "xpath": "//section[contains(@class, 'article_postBody')]"
+  },
+  "pjmedia.com": {
+    "xpath": "//section[@class='post-body']"
+  },
+  "post-gazette.com": {
+    "xpath": "//div[@class='pgevoke-contentarea-body-text']"
+  },
+  "prospect.org": {
+    "xpath": "//main[@id='maincontent']"
+  },
+  "realclearinvestigations.com": {
+    "xpath": "//article"
+  },
+  "realclearmarkets.com": {
+    "xpath": "//article"
+  },
+  "realclearworld.com": {
+    "xpath": "//div[@id='article_content']"
+  },
+  "reason.com": {
+    "xpath": "//div[@class='entry-content']"
+  },
+  "sfchronicle.com": {
+    "xpath": "//article[@class='rel']"
+  },
+  "sltrib.com": {
+    "xpath": "//div[@class='article-body-container']"
+  },
+  "spiked-online.com": {
+    "xpath": "//article"
+  },
+  "theamericanconservative.com": {
+    "xpath": "//div[@class='c-blog-post__content s-wysiwyg s-wysiwyg--blog']"
+  },
+  "theatlantic.com": {
+    "xpath": "//main/article"
+  },
+  "thefederalist.com": {
+    "xpath": "//main[@id='main']"
+  },
+  "theglobeandmail.com": {
+    "xpath": "//*[@id='content-gate']"
+  },
+  "theguardian.com": {
+    "xpath": "//div[@data-gu-name='body']"
+  },
+  "thehill.com": {
+    "xpath": "//div[@class='article__text | body-copy | flow']"
+  },
+  "thespectator.com": {
+    "xpath": "//main"
+  },
+  "thestar.com": {
+    "xpath": "//*[@class='asset-body']"
+  },
+  "time.com": {
+    "xpath": "/html/body/div/main/article"
+  },
+  "tippinsights.com": {
+    "xpath": "//div[@class='c-content ']"
+  },
+  "unherd.com": {
+    "xpath": "//article"
+  },
+  "universetoday.com": {
+    "xpath": "//div[@class='article-content']"
+  },
+  "usatoday.com": {
+    "xpath": "//article[@class='story primary-content text opinion row']"
+  },
+  "vox.com": {
+    "xpath": "//div[@id='zephr-anchor']"
+  },
+  "washingtonexaminer.com": {
+    "xpath": "//div[@class='article-paywall']"
+  },
+  "washingtontimes.com": {
+    "xpath": "//section[@id='content']"
+  },
+  "wsj.com": {
+    "xpath": "//section[contains(@class,'Container')]",
+    "cookie_name": "datadome",
+    "cookie_value": "VK5X0DKtvJJR9WlPHCOTaIyO2LEwpUqzbts5aRd0O~W64lQ5LIpm3350C6JILsGTm10ZpT2Ou4MZiFYu5r41qwiSvZSn13hj_nQgr11a9NOs8Uvz3g8S5ES0dteid4i~"
+  },
+  "yahoo.com": {
+    "xpath": "//article"
+  }
+}

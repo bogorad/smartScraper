@@ -1,138 +1,140 @@
-digraph UniversalScraper {
-    rankdir=TB;
-    node [shape=box, style=rounded];
-    edge [fontsize=10];
+digraph SmartScraperFlow {
+  rankdir=TB;
+  node [shape=box, style="rounded,filled", fillcolor=lightblue, fontname="Helvetica"];
+  edge [fontname="Helvetica"];
 
-    start [label="Start\n(URL, Request Args)", shape=ellipse];
-    proxy_ua_setup [label="Setup Proxy & User-Agent"];
-    check_known_site [label="URL in KnownSitesTable?", shape=diamond];
+  // Start and End
+  Start [shape=ellipse, fillcolor=lightgreen];
+  EndSuccess [shape=ellipse, fillcolor=lightgreen, label="Return Data"];
+  EndError [shape=ellipse, fillcolor=salmon, label="Return Error"];
 
-    subgraph cluster_known_site {
-        label="Known Site Processing";
-        style=filled;
-        color=lightgrey;
-        retrieve_config [label="Retrieve Stored Config\n(Method, XPath, NeedsCaptcha, etc.)"];
-        is_config_stale [label="Config Stale or\nHigh Failure Count?", shape=diamond];
-        
-        // Added CAPTCHA check for known sites
-        known_site_captcha_check [label="Stored Config Indicates\nNeeds CAPTCHA Solver?", shape=diamond];
-        known_site_solve_captcha [label="Integrate with CAPTCHA Solver\n(Based on Stored Config)"];
-        
-        execute_stored_method [label="Execute Stored Method\n(cURL/Puppeteer)"];
-        validate_stored_xpath [label="Validate Stored XPath\n(Exists? Not Empty?)", shape=diamond];
-        extract_known_data [label="Extract Data\n(Full HTML or by XPath)"];
-        update_known_site_stats [label="Update Success Stats\n(Timestamp, Reset Failures)"];
-        increment_failure_count [label="Increment Failure Count"];
-    }
+  // Input
+  InputURL [label="Input: URL, Proxy (optional), UA (optional)"];
 
-    subgraph cluster_unknown_site {
-        label="Unknown Site / Re-Discovery";
-        style=filled;
-        color=beige;
+  // Core Engine Decisions
+  CheckKnownSite [label="Known Site Check\n(KnownSitesTableManager)"];
+  IsConfigValid [label="Config Valid & Not Stale?", shape=diamond, fillcolor=lightyellow];
+  
+  // Discovery Sub-System
+  DiscoveryProcess [label="Unknown Site / Re-Discovery Process", shape= Mrecord, fillcolor=lightgoldenrodyellow,
+    label="{Discovery Sub-system | \
+      C.1 Initial Probing (cURL, Puppeteer-Stealth) | \
+      Detect CAPTCHA (HtmlAnalyser - now HtmlAnalyserFixed) | \
+      Compare DOMs (DomComparator) | \
+      C.2 Page Prep for XPath Discovery (Puppeteer Interactions) | \
+      C.3 DOM Structure Extraction (HtmlAnalyser - Planned) & XPath Discovery (LLMInterface, ContentScoringEngine) | \
+      C.4 Outcome of Discovery\nStore New Config (KnownSitesTableManager)\
+    }"
+  ];
+  
+  InitialProbeCurl [label="Attempt cURL\n(CurlHandler)"];
+  CurlResponse [label="cURL HTML Received?"];
+  CheckCaptchaCurl [label="CAPTCHA in cURL HTML?\n(HtmlAnalyser)", shape=diamond, fillcolor=lightyellow];
+  
+  InitialProbePuppeteer [label="Attempt Puppeteer-Stealth\n(PuppeteerController, PluginManager from EXTENSION_PATHS)"];
+  PuppeteerResponse [label="Puppeteer HTML Received?"];
+  CheckCaptchaPuppeteer [label="CAPTCHA in Puppeteer HTML?\n(HtmlAnalyser)", shape=diamond, fillcolor=lightyellow];
+  
+  CompareDOMs [label="Compare cURL & Puppeteer DOMs\n(DomComparator)", shape=diamond, fillcolor=lightyellow];
+  
+  PreparePageForLLM [label="Prepare Page for LLM\n(Puppeteer Interactions if needed)"];
+  ExtractSnippets [label="Extract Snippets/DOM Structure\n(HtmlAnalyser)"]; // DOM Structure is planned
+  LLMXPathDiscovery [label="LLM XPath Discovery Loop\n(LLMInterface, HtmlAnalyser, ContentScoringEngine)\nUp to MAX_LLM_RETRIES"];
+  XPathFoundLLM [label="XPath Found by LLM?", shape=diamond, fillcolor=lightyellow];
+  
+  DetermineMethodToStore [label="Determine Method to Store\n(curl, puppeteer_stealth, puppeteer_captcha)"];
+  StoreNewConfig [label="Store New Config\n(KnownSitesTableManager)"];
 
-        subgraph cluster_initial_probe {
-            label="Initial Probing";
-            probe_curl [label="Attempt cURL"];
-            curl_ok [label="cURL OK?", shape=diamond];
-            probe_basic_puppeteer [label="Attempt Basic Puppeteer"];
-            compare_doms [label="Compare cURL & Puppeteer DOMs"];
-            doms_similar [label="DOMs Similar & cURL Valid?", shape=diamond];
-            set_method_curl [label="Tentative Method: cURL\nHTML: cURL Output"];
-            set_method_puppeteer_basic [label="Tentative Method: Puppeteer\nHTML: Basic Puppeteer Output"];
-        }
+  // Extraction Sub-System
+  ExtractionProcess [label="Content Extraction", shape=Mrecord, fillcolor=lightcyan,
+    label="{Extraction Sub-system | \
+      Method, XPath, CAPTCHA Need Known | \
+      D.2 CAPTCHA Handling (CaptchaSolver, DataDomeSolver) if method=puppeteer_captcha | \
+      Execute Method (CurlHandler or PuppeteerController) | \
+      Extract Content via XPath | \
+      Basic Validation\
+    }"
+  ];
+  ExecuteStoredMethod [label="Execute Stored Method\n(CurlHandler or PuppeteerController)"];
+  ValidateExtraction [label="Validate Extraction\n(XPath, Content Check)"];
+  ExtractionSuccess [label="Extraction Successful?", shape=diamond, fillcolor=lightyellow];
+  
+  // CAPTCHA Handling
+  CaptchaHandling [label="CAPTCHA Handling\n(CaptchaSolver, DataDomeSolver)"];
+  CaptchaSolved [label="CAPTCHA Solved?", shape=diamond, fillcolor=lightyellow];
 
-        advanced_puppeteer_setup [label="Advanced Puppeteer Setup\n(Stealth, Plugins, Interactions)\nGet HTML for Analysis"];
-        
-        subgraph cluster_smart_scraper {
-            label="SmartScraper: XPath Discovery";
-            extract_snippets [label="Extract Text Snippets"];
-            llm_loop_start [label="LLM Retry Loop Start\n(Max Retries)", shape=cds];
-            llm_call [label="Call LLM for Candidate XPaths\n(with HTML, Snippets, Feedback)"];
-            validate_score_xpaths [label="Validate & Score LLM XPaths\n(Heuristics: paragraphs, semantic, density)"];
-            good_xpath_found_llm [label="Good XPath Found?", shape=diamond];
-            collect_llm_feedback [label="Collect Feedback for LLM\n(Why XPaths Failed)"];
-            llm_loop_end [label="LLM Retry Loop End", shape=cds];
-            best_xpath_selected [label="Best XPath Selected"];
-        }
-        
-        no_xpath_found [label="No Good XPath Found"];
-        determine_final_method [label="Determine Final Method & NeedsCaptcha\n(cURL if viable, else Puppeteer)"];
-        store_new_config [label="Store New/Updated Config\n(Method, XPath, NeedsCaptcha) in KnownSitesTable"];
-    }
+  // HTML Saving (Debug)
+  SaveHtmlSuccess [label="Save HTML (Success)\n(if DEBUG=true & SAVE_HTML_ON_SUCCESS_NAV=true)", fillcolor=lightgrey, shape=note];
+  SaveHtmlFailure [label="Save HTML (Failure)\n(if DEBUG=true)", fillcolor=lightgrey, shape=note];
 
-    subgraph cluster_extraction_unknown { // Renamed to differentiate from known site CAPTCHA
-        label="Content Extraction (Post-Discovery)";
-        style=filled;
-        color=lightblue;
-        unknown_site_captcha_check_execute [label="Newly Discovered Config\nNeeds CAPTCHA Solver?", shape=diamond];
-        unknown_site_solve_captcha [label="Integrate with CAPTCHA Solver"];
-        execute_final_method [label="Execute Final Method\n(cURL/Puppeteer)"];
-        extract_data_final [label="Extract Data\n(Full HTML or by Discovered/Validated XPath)"];
-    }
+  // Connections
+  Start -> InputURL;
+  InputURL -> CheckKnownSite;
+  CheckKnownSite -> IsConfigValid [label="Config Found"];
+  CheckKnownSite -> DiscoveryProcess [label="Unknown Site / Re-Discovery Needed"];
+  
+  IsConfigValid -> ExecuteStoredMethod [label="Yes"];
+  IsConfigValid -> DiscoveryProcess [label="No (Stale/Fails)\nIncrement Failure Count"];
+  
+  ExecuteStoredMethod -> ValidateExtraction;
+  ValidateExtraction -> ExtractionSuccess;
+  ExtractionSuccess -> UpdateSuccessStats [label="Yes"];
+  UpdateSuccessStats [label="Update Success Stats\n(KnownSitesTableManager)"];
+  UpdateSuccessStats -> SaveHtmlSuccess;
+  SaveHtmlSuccess -> EndSuccess;
+  
+  ExtractionSuccess -> IncrementFailureAndRediscover [label="No"];
+  IncrementFailureAndRediscover [label="Increment Failure Count\n(KnownSitesTableManager)"];
+  IncrementFailureAndRediscover -> DiscoveryProcess;
 
-    return_data [label="Return Extracted Data & Status", shape=ellipse];
-    return_failure [label="Return Failure & Analysis", shape=ellipse];
-    save_debug_info [label="Save Debug Info\n(e.g., Failed HTML)"];
+  // Discovery Process Details
+  DiscoveryProcess -> InitialProbeCurl;
+  InitialProbeCurl -> CurlResponse;
+  CurlResponse -> CheckCaptchaCurl [label="Success"];
+  CurlResponse -> InitialProbePuppeteer [label="Fail (or proceed to Puppeteer anyway)"];
+  
+  CheckCaptchaCurl -> InitialProbePuppeteer [label="No CAPTCHA"]; // Or proceed to DOM comparison if Puppeteer also runs
+  CheckCaptchaCurl -> CaptchaHandling [label="Yes (DataDome?)\nSkip Puppeteer-Stealth"]; // Path to direct CAPTCHA solving
+  CaptchaHandling -> InitialProbePuppeteer [label="CAPTCHA Not Solved / Other CAPTCHA"]; // Fallback or if general CAPTCHA
+  CaptchaHandling -> PreparePageForLLM [label="DataDome Solved by Puppeteer"];
 
-    // Main Flow
-    start -> proxy_ua_setup;
-    proxy_ua_setup -> check_known_site;
 
-    // Known Site Path
-    check_known_site -> retrieve_config [label="Yes"];
-    retrieve_config -> is_config_stale;
-    is_config_stale -> known_site_captcha_check [label="No (Config OK)"]; // Proceed to CAPTCHA check
-    
-    known_site_captcha_check -> known_site_solve_captcha [label="Yes"];
-    known_site_solve_captcha -> execute_stored_method;
-    known_site_captcha_check -> execute_stored_method [label="No"];
-    
-    execute_stored_method -> validate_stored_xpath;
-    validate_stored_xpath -> extract_known_data [label="Yes (Valid)"];
-    extract_known_data -> update_known_site_stats;
-    update_known_site_stats -> return_data;
-    validate_stored_xpath -> increment_failure_count [label="No (Invalid)"];
-    increment_failure_count -> probe_curl [label="Trigger Re-Discovery"]; 
-    is_config_stale -> probe_curl [label="Yes (Stale/High Failures)"]; 
+  InitialProbePuppeteer -> PuppeteerResponse;
+  PuppeteerResponse -> CheckCaptchaPuppeteer [label="Success"];
+  PuppeteerResponse -> CompareDOMs [label="Fail (use cURL if available)"]; // Or error if cURL also failed
 
-    // Unknown Site / Re-Discovery Path
-    check_known_site -> probe_curl [label="No (Unknown Site)"];
-    
-    // Initial Probing Flow
-    probe_curl -> curl_ok;
-    curl_ok -> probe_basic_puppeteer [label="Yes"];
-    probe_basic_puppeteer -> compare_doms;
-    compare_doms -> doms_similar;
-    doms_similar -> set_method_curl [label="Yes"];
-    set_method_curl -> extract_snippets; 
-    doms_similar -> set_method_puppeteer_basic [label="No"];
-    set_method_puppeteer_basic -> extract_snippets; 
-    curl_ok -> advanced_puppeteer_setup [label="No (cURL Failed or Blocker)"];
-    advanced_puppeteer_setup -> extract_snippets; 
+  // Simplified flow after probes for diagram clarity
+  CheckCaptchaPuppeteer -> CompareDOMs [label="No CAPTCHA"];
+  CheckCaptchaPuppeteer -> CaptchaHandling [label="Yes (DataDome?)\nUse Puppeteer"];
+  
+  CompareDOMs -> PreparePageForLLM [label="Choose HTML for Analysis\n(cURL or Puppeteer)"];
+  // If cURL HTML chosen and Puppeteer was used for probing, Puppeteer instance might be closed here.
+  
+  PreparePageForLLM -> ExtractSnippets;
+  ExtractSnippets -> LLMXPathDiscovery;
+  LLMXPathDiscovery -> XPathFoundLLM;
+  
+  XPathFoundLLM -> DetermineMethodToStore [label="Yes"];
+  DetermineMethodToStore -> StoreNewConfig;
+  StoreNewConfig -> ExtractionProcess [label="Proceed to Extract"];
+  
+  XPathFoundLLM -> SaveHtmlFailure [label="No (Discovery Failed)"];
+  SaveHtmlFailure -> EndError [label="Discovery Failed"];
 
-    // SmartScraper XPath Discovery Flow
-    extract_snippets -> llm_loop_start;
-    llm_loop_start -> llm_call;
-    llm_call -> validate_score_xpaths;
-    validate_score_xpaths -> good_xpath_found_llm;
-    good_xpath_found_llm -> best_xpath_selected [label="Yes"];
-    best_xpath_selected -> determine_final_method;
-    good_xpath_found_llm -> collect_llm_feedback [label="No, Retries Left"];
-    collect_llm_feedback -> llm_loop_end;
-    llm_loop_end -> llm_loop_start [label="Retry"];
-    llm_loop_end -> no_xpath_found [label="Max Retries Reached"];
-    
-    no_xpath_found -> save_debug_info;
-    save_debug_info -> return_failure;
+  // Extraction Process Details
+  ExtractionProcess -> CaptchaHandling [label="If method=puppeteer_captcha"];
+  CaptchaHandling -> ExecuteExtractionMethod [label="Solved"];
+  CaptchaHandling -> SaveHtmlFailure [label="Not Solved"]; 
 
-    // Post-Discovery / Storing Config
-    determine_final_method -> store_new_config;
-    store_new_config -> unknown_site_captcha_check_execute; // Proceed to extraction for newly discovered
-
-    // Content Extraction Flow (Post-Discovery)
-    unknown_site_captcha_check_execute -> unknown_site_solve_captcha [label="Yes"];
-    unknown_site_solve_captcha -> execute_final_method;
-    unknown_site_captcha_check_execute -> execute_final_method [label="No"];
-    execute_final_method -> extract_data_final;
-    extract_data_final -> return_data;
+  ExtractionProcess -> ExecuteExtractionMethod [label="If method != puppeteer_captcha"];
+  ExecuteExtractionMethod [label="Execute Method & Extract Content"];
+  ExecuteExtractionMethod -> ExtractionSuccessFromDiscovery [label="Content Extracted"];
+  ExtractionSuccessFromDiscovery [label="Extraction Successful?", shape=diamond, fillcolor=lightyellow];
+  ExtractionSuccessFromDiscovery -> SaveHtmlSuccess [label="Yes"];
+  ExtractionSuccessFromDiscovery -> SaveHtmlFailure [label="No (Extraction Failed)"];
+  
+  // General Error Path
+  DiscoveryProcess -> SaveHtmlFailure [label="Critical Error During Discovery"];
+  ExtractionProcess -> SaveHtmlFailure [label="Critical Error During Extraction"];
+  SaveHtmlFailure -> EndError; 
 }
