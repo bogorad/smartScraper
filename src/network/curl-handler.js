@@ -33,6 +33,11 @@ async function fetchWithCurl(
     timeout = DEFAULT_TIMEOUT,
     ignoreHttpsErrors = true // Often useful for scraping, but be aware of security implications
 ) {
+    // If no proxy is provided, use the default HTTP_PROXY from environment
+    if (!proxyDetails && process.env.HTTP_PROXY) {
+        proxyDetails = { server: process.env.HTTP_PROXY };
+        logger.info(`Using default proxy from HTTP_PROXY environment variable`);
+    }
     const headers = {
         'User-Agent': userAgentString || DEFAULT_USER_AGENT,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',

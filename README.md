@@ -144,7 +144,7 @@ The system is designed with modularity in mind to ensure separation of concerns,
 
 * **`CoreScraperEngine`**: Orchestrates the main workflow, deciding whether to use known site logic or trigger discovery. Manages the overall state of a scraping request.
 * **`KnownSitesTableManager`**:
-  * **Responsibilities:** CRUD operations for the `KnownSitesTable` (e.g., `site_storage.json`). Handles loading, querying by domain, saving/updating entries.
+  * **Responsibilities:** CRUD operations for the `KnownSitesTable`. Handles loading, querying by domain, saving/updating entries.
   * **Interface:** `getKnownSiteConfig(domain)`, `updateKnownSiteConfig(domain, config)`, `incrementFailureCount(domain)`.
 * **`PuppeteerController`**:
   * **Responsibilities:** Manages all Puppeteer browser instances. Encapsulates Puppeteer setup, including the integration of **`puppeteer-extra` and `puppeteer-extra-plugin-stealth`** for enhanced anti-detection. Handles navigation, page interaction, XPath evaluation, and cleanup.
@@ -153,8 +153,9 @@ The system is designed with modularity in mind to ensure separation of concerns,
   * **Responsibilities:** Executes HTTP requests using a cURL-like library. Handles headers, proxies, and timeouts for non-JavaScript reliant fetching.
   * **Interface:** `fetchPage(url, proxyConfig, headers, userAgent)`.
 * **`DomComparator`**:
-  * **Responsibilities:** Compares two HTML DOM structures (e.g., from cURL and Puppeteer) to assess similarity, often by converting to Markdown or using tree diffing algorithms.
+  * **Responsibilities:** Compares two HTML DOM structures (e.g., from cURL and Puppeteer) to assess similarity by converting to Markdown and calculating character-level similarity.
   * **Interface:** `compareDoms(htmlString1, htmlString2)`.
+  * **Key Settings:** Uses a 60% similarity threshold to determine if DOMs are similar enough to use curl instead of Puppeteer.
 * **`LLMInterface`**:
   * **Responsibilities:** Interacts with the Large Language Model API (e.g., OpenRouter). Constructs prompts, sends requests with temperature=0 for deterministic and consistent XPath generation, parses responses for candidate XPaths, and handles LLM API errors.
   * **Interface:** `getLlmCandidateXPaths(domStructure, snippets, feedbackContext)`.
@@ -174,7 +175,7 @@ The system is designed with modularity in mind to ensure separation of concerns,
 
 ## 8. Common Content Patterns
 
-The system uses a comprehensive list of common content-related class/ID names derived from `site_storage.json` to help identify article content across different websites:
+The system uses a comprehensive list of common content-related class/ID names to help identify article content across different websites:
 
 1. **Common element types:**
    - `<article>` elements
@@ -227,18 +228,21 @@ LLM_MODEL=meta-llama/llama-4-maverick:free
 LLM_TEMPERATURE=0
 
 # --- Puppeteer Configuration ---
-# Path to your Chrome/Chromium executable (optional)
-PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+# Path to your Chrome/Chromium executable (required)
+EXECUTABLE_PATH=/usr/lib/chromium/chromium
 # Whether to run Puppeteer in headless mode
 PUPPETEER_HEADLESS=true
 # Timeout for Puppeteer operations in milliseconds
 PUPPETEER_TIMEOUT=30000
 # HTTP proxy for web scraping (format: http://username:password@hostname:port)
+# This proxy is used for both curl and Puppeteer requests
 HTTP_PROXY=http://username:password@hostname:port
 
 # --- CAPTCHA Solver Configuration ---
 # Your 2Captcha API key
-TWOCAPTCHA_API_KEY=your_2captcha_api_key_here
+CAPTCHA_API_KEY=your_2captcha_api_key_here
+# CAPTCHA service name (default: 2captcha)
+CAPTCHA_SERVICE_NAME=2captcha
 # List of domains that need DataDome CAPTCHA handling (comma-separated)
 DATADOME_DOMAINS=wsj.com,nytimes.com
 
@@ -255,7 +259,7 @@ LOG_LEVEL=INFO
 
 * Added DOM structure extraction with text size annotations to reduce LLM token usage while maintaining accuracy
 * Updated XPath evaluation to use `document.evaluate` instead of `xpath.select` for better compatibility
-* Added a comprehensive list of common content-related class/ID names from `site_storage.json`
+* Added a comprehensive list of common content-related class/ID names
 * Enhanced scoring function to better differentiate between container elements and actual content elements
 * Added improved error handling and debugging for LLM responses
 * Set LLM temperature to zero for deterministic XPath generation
@@ -264,3 +268,9 @@ LOG_LEVEL=INFO
 * Added HTTP proxy support for web scraping to bypass restrictions
 * Enhanced DataDome CAPTCHA detection and handling for sites with anti-bot protection
 * Updated module interfaces to reflect new functionality
+* Improved DataDome CAPTCHA handling with proper cookie formatting
+* Added automatic proxy usage for curl requests from HTTP_PROXY environment variable
+* Enhanced DataDome CAPTCHA detection with additional markers
+* Removed XPath expiration logic as it's no longer needed
+* Added banned IP detection for DataDome CAPTCHA
+* Lowered DOM similarity threshold from 90% to 60% for more realistic DOM comparison between curl and Puppeteer results

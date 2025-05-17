@@ -6,7 +6,7 @@ import { logger } from '../utils/logger.js';
 import { ExtractionError } from '../utils/error-handler.js';
 
 class DomComparator {
-    constructor(similarityThreshold = 0.90) { // Default 90% similarity
+    constructor(similarityThreshold = 0.60) { // Default 60% similarity
         this.turndownService = new TurndownService({
             headingStyle: 'atx',
             hr: '---',

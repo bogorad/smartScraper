@@ -3,10 +3,11 @@
 import axios from 'axios';
 import { logger } from '../utils/logger.js';
 import { CaptchaError, ConfigurationError } from '../utils/error-handler.js';
+import { DataDomeSolver } from './datadome-solver.js';
 // No need to import captchaSolverConfig directly here if passed in constructor
 
 class CaptchaSolver {
-    constructor(captchaConfig) {
+    constructor(captchaConfig, knownSitesManager = null) {
         if (!captchaConfig || !captchaConfig.apiKey || !captchaConfig.service) {
             throw new ConfigurationError('CaptchaSolver: Missing required CAPTCHA configuration', {
                 missing: ['apiKey', 'service'].filter(key => !captchaConfig || !captchaConfig[key])
@@ -14,6 +15,7 @@ class CaptchaSolver {
         }
         this.config = captchaConfig;
         this.serviceName = captchaConfig.service.toLowerCase();
+        this.knownSitesManager = knownSitesManager;
 
         // Set up API endpoints based on the service
         if (this.serviceName === '2captcha') {
@@ -24,6 +26,15 @@ class CaptchaSolver {
             // For DataDome and other modern CAPTCHA types that use the new API
             this.twoCaptchaCreateTaskUrl = this.config.twoCaptcha?.createTaskUrl || 'https://api.2captcha.com/createTask';
             this.twoCaptchaGetResultUrl = this.config.twoCaptcha?.getResultUrl || 'https://api.2captcha.com/getTaskResult';
+
+            // Create specialized solvers
+            if (this.knownSitesManager) {
+                this.dataDomeSolver = new DataDomeSolver(captchaConfig, knownSitesManager);
+                logger.info('DataDomeSolver initialized with KnownSitesManager');
+            } else {
+                this.dataDomeSolver = new DataDomeSolver(captchaConfig, null);
+                logger.warn('DataDomeSolver initialized without KnownSitesManager - cookie storage disabled');
+            }
         }
 
         logger.info(`CaptchaSolver initialized for service: ${this.serviceName}`);
@@ -39,8 +50,29 @@ class CaptchaSolver {
     async solveIfPresent(page, currentUrl) {
         logger.info(`Checking for CAPTCHAs on ${currentUrl}`);
 
-        // 1. Detect CAPTCHA type (reCAPTCHA v2, hCaptcha, etc.)
-        // This requires inspecting the DOM for specific elements/iframes.
+        // First, check for DataDome CAPTCHA using the specialized solver
+        if (this.dataDomeSolver) {
+            try {
+                // Try to solve with DataDomeSolver first
+                const dataDomeResult = await this.dataDomeSolver.solveIfPresent(page);
+                if (dataDomeResult === true) {
+                    // Either no DataDome CAPTCHA was found, or it was successfully solved
+                    logger.info('DataDome check completed successfully');
+                    return true;
+                }
+                // If we get here, DataDome was detected but couldn't be solved
+                // We'll fall through to the general CAPTCHA detection
+                logger.warn('DataDome CAPTCHA could not be solved, continuing with general detection');
+            } catch (dataDomeError) {
+                // If it's a banned IP or other critical error, we should stop
+                if (dataDomeError instanceof CaptchaError && dataDomeError.details?.isBanned) {
+                    throw dataDomeError;
+                }
+                logger.warn(`DataDome solver error: ${dataDomeError.message}, continuing with general detection`);
+            }
+        }
+
+        // 1. Detect other CAPTCHA types (reCAPTCHA v2, hCaptcha, etc.)
         let captchaDetails = null;
         try {
             captchaDetails = await this._detectCaptchaType(page, currentUrl);
@@ -51,10 +83,15 @@ class CaptchaSolver {
             }, detectionError);
         }
 
-
         if (!captchaDetails) {
             logger.info('No known solvable CAPTCHA detected on the page.');
             return true; // No CAPTCHA to solve, so "success" in this context
+        }
+
+        // Skip DataDome CAPTCHA as it's already handled by the specialized solver
+        if (captchaDetails.type === 'DataDome') {
+            logger.warn('DataDome CAPTCHA detected but not solved by specialized solver, this is unexpected');
+            return false;
         }
 
         logger.info(`Detected CAPTCHA: ${captchaDetails.type} with sitekey: ${captchaDetails.sitekey}`);
@@ -92,7 +129,6 @@ class CaptchaSolver {
             }, solvingError);
         }
 
-
         if (!solutionToken) {
             logger.error('Failed to obtain CAPTCHA solution token.');
             throw new CaptchaError('Failed to obtain CAPTCHA solution token', {
@@ -111,7 +147,6 @@ class CaptchaSolver {
                 // It's crucial to wait for the page to react to the CAPTCHA solution
                 // This might involve waiting for navigation, an element to disappear/appear, or network activity.
                 await page.waitForTimeout(this.config.postCaptchaSubmitDelay || 5000); // Configurable delay
-                // You might need more sophisticated waits here.
                 return true;
             } else {
                 logger.error('Failed to submit CAPTCHA solution to the page.');
@@ -171,33 +206,13 @@ class CaptchaSolver {
             return { type: 'CloudflareTurnstile', sitekey: turnstileSitekey, url: currentUrl };
         }
 
-        // Check for DataDome CAPTCHA
-        const dataDomeCaptchaInfo = await page.evaluate(() => {
-            const iframe = document.querySelector('iframe[src*="captcha-delivery.com"], iframe[src*="geo.captcha-delivery.com"]');
-            if (!iframe) return null;
-
-            return {
-                captchaUrl: iframe.src
-            };
-        });
-
-        if (dataDomeCaptchaInfo) {
-            logger.info(`DataDome CAPTCHA detected with URL: ${dataDomeCaptchaInfo.captchaUrl}`);
-            return {
-                type: 'DataDome',
-                captchaUrl: dataDomeCaptchaInfo.captchaUrl,
-                url: currentUrl
-            };
-        }
+        // DataDome CAPTCHA detection is now handled by the specialized DataDomeSolver
 
         return null; // No known CAPTCHA found
     }
 
     async _solveWith2Captcha(captchaDetails, pageUrl) {
-        // Handle DataDome CAPTCHA separately as it uses a different API endpoint
-        if (captchaDetails.type === 'DataDome') {
-            return this._solveDataDomeWith2Captcha(captchaDetails, pageUrl);
-        }
+        // DataDome CAPTCHA is now handled by the specialized DataDomeSolver
 
         // Standard 2Captcha API for other CAPTCHA types
         const params = {
@@ -267,218 +282,13 @@ class CaptchaSolver {
         throw new Error('2Captcha solution timed out.');
     }
 
-    /**
-     * Solve a DataDome CAPTCHA using 2Captcha's new API
-     * @param {object} captchaDetails - Details about the CAPTCHA
-     * @param {string} pageUrl - The URL of the page with the CAPTCHA
-     * @returns {Promise<string>} The cookie string to set
-     */
-    async _solveDataDomeWith2Captcha(captchaDetails, pageUrl) {
-        logger.info(`Solving DataDome CAPTCHA for ${pageUrl}`);
-
-        // Get proxy information from config
-        const proxyInfo = this.config.proxy || {};
-
-        // Get user agent from config or use a default
-        const userAgent = this.config.userAgent ||
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
-
-        // Check if the CAPTCHA URL indicates a banned IP
-        const htmlAnalyser = new (await import('../analysis/html-analyser-fixed.js')).HtmlAnalyserFixed();
-        const bannedIPCheck = htmlAnalyser.checkDataDomeBannedIP(captchaDetails.captchaUrl);
-
-        if (bannedIPCheck.isBanned) {
-            logger.error(`DataDome CAPTCHA indicates banned IP: ${bannedIPCheck.details}`);
-            throw new CaptchaError('DataDome CAPTCHA indicates banned IP', {
-                details: bannedIPCheck.details,
-                url: pageUrl,
-                captchaUrl: captchaDetails.captchaUrl
-            });
-        }
-
-        if (bannedIPCheck.warning) {
-            logger.warn(`DataDome CAPTCHA warning: ${bannedIPCheck.details}`);
-        }
-
-        // Create the task payload for 2Captcha
-        const taskPayload = {
-            type: "DataDomeSliderTask",
-            websiteURL: pageUrl,
-            captchaUrl: captchaDetails.captchaUrl,
-            userAgent: userAgent
-        };
-
-        // Add proxy information if available
-        if (proxyInfo.server) {
-            // Parse proxy URL to extract components
-            try {
-                const proxyUrl = new URL(proxyInfo.server.startsWith('http') ?
-                    proxyInfo.server : `http://${proxyInfo.server}`);
-
-                const proxyType = proxyUrl.protocol.replace(':', '');
-                const proxyAddress = proxyUrl.hostname;
-                const proxyPort = proxyUrl.port || (proxyType === 'http' ? '80' : '1080');
-
-                taskPayload.proxyType = proxyType;
-                taskPayload.proxyAddress = proxyAddress;
-                taskPayload.proxyPort = proxyPort;
-
-                // Add authentication if present
-                if (proxyUrl.username) {
-                    taskPayload.proxyLogin = proxyUrl.username;
-                    taskPayload.proxyPassword = proxyUrl.password || '';
-                }
-
-                logger.info(`Using proxy for DataDome CAPTCHA: ${proxyType}://${proxyAddress}:${proxyPort}`);
-            } catch (error) {
-                logger.warn(`Error parsing proxy URL: ${error.message}. Continuing without proxy.`);
-            }
-        }
-
-        // Create the request body
-        const requestBody = {
-            clientKey: this.config.apiKey,
-            task: taskPayload
-        };
-
-        logger.debug('Sending DataDome CAPTCHA task to 2Captcha API:', {
-            ...requestBody,
-            task: {
-                ...requestBody.task,
-                proxyPassword: requestBody.task.proxyPassword ? '***' : undefined
-            }
-        });
-
-        // Send the task to 2Captcha
-        let taskId;
-        try {
-            const createTaskResponse = await axios.post(this.twoCaptchaCreateTaskUrl, requestBody, {
-                timeout: 30000,
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            logger.debug(`2Captcha create task response: ${JSON.stringify(createTaskResponse.data)}`);
-
-            if (createTaskResponse.data.errorId !== 0) {
-                throw new CaptchaError(`2Captcha create task failed: ${createTaskResponse.data.errorCode}`, {
-                    errorCode: createTaskResponse.data.errorCode,
-                    errorDescription: createTaskResponse.data.errorDescription,
-                    captchaType: 'DataDome',
-                    url: pageUrl
-                });
-            }
-
-            taskId = createTaskResponse.data.taskId;
-            logger.info(`2Captcha task ID: ${taskId}`);
-        } catch (error) {
-            // If it's not already a CaptchaError, wrap it
-            if (!(error instanceof CaptchaError)) {
-                throw new CaptchaError('Error submitting DataDome CAPTCHA to 2Captcha service', {
-                    captchaType: 'DataDome',
-                    url: pageUrl
-                }, error);
-            }
-            throw error;
-        }
-
-        // Poll for the result
-        const pollingTimeout = Date.now() + (this.config.defaultTimeout || 120) * 1000;
-        const pollingInterval = (this.config.pollingInterval || 5) * 1000;
-
-        while (Date.now() < pollingTimeout) {
-            logger.debug(`Polling 2Captcha for DataDome task ID: ${taskId}...`);
-
-            try {
-                await new Promise(resolve => setTimeout(resolve, pollingInterval));
-
-                const getResultResponse = await axios.post(this.twoCaptchaGetResultUrl, {
-                    clientKey: this.config.apiKey,
-                    taskId
-                }, {
-                    timeout: 20000,
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                logger.debug(`2Captcha get result response: ${JSON.stringify(getResultResponse.data)}`);
-
-                if (getResultResponse.data.errorId !== 0) {
-                    const errorCode = getResultResponse.data.errorCode;
-                    logger.error(`2Captcha get result failed: ${errorCode} - ${getResultResponse.data.errorDescription}`);
-
-                    if (errorCode === 'ERROR_CAPTCHA_UNSOLVABLE') {
-                        throw new CaptchaError('DataDome CAPTCHA unsolvable', {
-                            captchaType: 'DataDome',
-                            url: pageUrl
-                        });
-                    } else if (errorCode === 'ERR_PROXY_CONNECTION_FAILED') {
-                        throw new CaptchaError('DataDome CAPTCHA proxy error', {
-                            captchaType: 'DataDome',
-                            url: pageUrl,
-                            proxy: taskPayload.proxyType ? `${taskPayload.proxyType}://${taskPayload.proxyAddress}:${taskPayload.proxyPort}` : 'none'
-                        });
-                    } else {
-                        throw new CaptchaError(`DataDome CAPTCHA API error: ${errorCode}`, {
-                            captchaType: 'DataDome',
-                            url: pageUrl,
-                            errorCode
-                        });
-                    }
-                }
-
-                const status = getResultResponse.data.status;
-
-                if (status === "ready") {
-                    logger.info(`2Captcha solved DataDome task ID: ${taskId}`);
-
-                    const solutionCookie = getResultResponse.data.solution?.cookie;
-
-                    if (!solutionCookie) {
-                        throw new CaptchaError('DataDome CAPTCHA solution missing cookie', {
-                            captchaType: 'DataDome',
-                            url: pageUrl
-                        });
-                    }
-
-                    logger.info(`2Captcha DataDome cookie: ${solutionCookie.substring(0, 50)}...`);
-                    return solutionCookie;
-                } else if (status === "processing") {
-                    logger.debug("2Captcha still processing DataDome CAPTCHA...");
-                } else {
-                    logger.warn(`2Captcha unknown status for DataDome CAPTCHA: ${status}`);
-                }
-            } catch (error) {
-                // If it's already a CaptchaError, just re-throw it
-                if (error instanceof CaptchaError) {
-                    throw error;
-                }
-
-                logger.error(`2Captcha poll error for DataDome task ID ${taskId}: ${error.message}`);
-                // Don't give up immediately on polling errors
-                await new Promise(resolve => setTimeout(resolve, pollingInterval / 2));
-            }
-        }
-
-        logger.error(`2Captcha timeout for DataDome task ID: ${taskId}`);
-        throw new CaptchaError('DataDome CAPTCHA solution timed out', {
-            captchaType: 'DataDome',
-            url: pageUrl,
-            taskId
-        });
-    }
+    // DataDome CAPTCHA handling has been moved to the DataDomeSolver class
 
     async _submitCaptchaSolution(page, captchaDetails, solutionToken) {
         // This is highly dependent on how the specific CAPTCHA is implemented on the page.
         // For reCAPTCHA v2, it's often setting the value of a hidden textarea and then triggering a callback or submit.
         // For hCaptcha, similar. For Turnstile, it might also involve a callback.
-        // For DataDome, we need to set a cookie and reload the page.
-
-        if (captchaDetails.type === 'DataDome') {
-            return this._submitDataDomeSolution(page, captchaDetails, solutionToken);
-        }
+        // DataDome CAPTCHA is now handled by the specialized DataDomeSolver
 
         if (captchaDetails.type === 'reCAPTCHA_v2' || captchaDetails.type === 'hCaptcha' || captchaDetails.type === 'CloudflareTurnstile') {
             // Common pattern: find the textarea (often g-recaptcha-response or h-captcha-response)
@@ -544,170 +354,7 @@ class CaptchaSolver {
         return false;
     }
 
-    /**
-     * Format a DataDome cookie for use with Puppeteer
-     * @param {string} cookieString - The cookie string from 2Captcha
-     * @param {string} targetUrl - The URL the cookie is for
-     * @returns {Object|null} - The formatted cookie object or null if parsing fails
-     */
-    _formatDataDomeCookie(cookieString, targetUrl) {
-        logger.info(`Formatting DataDome cookie: ${cookieString.substring(0, 50)}...`);
-
-        if (!cookieString?.includes("=")) {
-            logger.error("DataDome cookie string format error");
-            return null;
-        }
-
-        try {
-            // Parse the cookie string
-            const parts = cookieString.split(";").map(p => p.trim());
-            const [name, ...valueParts] = parts[0].split("=");
-            const value = valueParts.join("=");
-
-            if (!name || !value) {
-                logger.error("Bad name/value in DataDome cookie");
-                return null;
-            }
-
-            // Create a simple cookie object with just the name and value
-            const cookie = {
-                name: name.trim(),
-                value: value.trim(),
-                url: targetUrl
-            };
-
-            // Parse cookie attributes
-            for (let i = 1; i < parts.length; i++) {
-                const part = parts[i].trim();
-
-                if (part.toLowerCase() === 'secure') {
-                    cookie.secure = true;
-                    continue;
-                }
-
-                if (part.toLowerCase() === 'httponly') {
-                    cookie.httpOnly = true;
-                    continue;
-                }
-
-                const [attrName, ...attrValueParts] = part.split("=");
-                if (!attrName) continue;
-
-                const attrNameLower = attrName.trim().toLowerCase();
-                const attrValue = attrValueParts.join("=").trim();
-
-                switch (attrNameLower) {
-                    case "domain":
-                        cookie.domain = attrValue;
-                        break;
-                    case "path":
-                        cookie.path = attrValue || "/";
-                        break;
-                    case "max-age":
-                        try {
-                            const maxAgeSec = parseInt(attrValue, 10);
-                            if (!isNaN(maxAgeSec)) {
-                                cookie.expires = Math.floor(Date.now() / 1000) + maxAgeSec;
-                            }
-                        } catch (e) {
-                            logger.warn(`Error parsing max-age: ${e.message}`);
-                        }
-                        break;
-                    case "samesite":
-                        if (attrValue.toLowerCase() === 'lax') {
-                            cookie.sameSite = 'Lax';
-                        } else if (attrValue.toLowerCase() === 'strict') {
-                            cookie.sameSite = 'Strict';
-                        } else if (attrValue.toLowerCase() === 'none') {
-                            cookie.sameSite = 'None';
-                            // SameSite=None requires Secure
-                            cookie.secure = true;
-                        }
-                        break;
-                }
-            }
-
-            logger.debug(`Formatted DataDome cookie: ${JSON.stringify(cookie)}`);
-            return cookie;
-        } catch (error) {
-            logger.error(`DataDome cookie parsing error: ${error.message}`);
-            return null;
-        }
-    }
-
-    /**
-     * Submit a DataDome CAPTCHA solution by setting the cookie and reloading the page
-     * @param {object} page - The Puppeteer page object
-     * @param {object} captchaDetails - Details about the CAPTCHA
-     * @param {string} cookieString - The cookie string from 2Captcha
-     * @returns {Promise<boolean>} True if the solution was submitted successfully
-     */
-    async _submitDataDomeSolution(page, captchaDetails, cookieString) {
-        logger.info('Submitting DataDome CAPTCHA solution...');
-
-        try {
-            // Format the cookie
-            const formattedCookie = this._formatDataDomeCookie(cookieString, captchaDetails.url);
-            if (!formattedCookie) {
-                logger.error('Failed to format DataDome cookie');
-                return false;
-            }
-
-            // Set the cookie
-            logger.info('Setting DataDome cookie...');
-            await page.setCookie(formattedCookie);
-
-            // Log all cookies after setting
-            const cookies = await page.cookies(captchaDetails.url);
-            logger.debug('All cookies after setting DataDome cookie:', cookies);
-
-            // Reload the page
-            logger.info('Reloading page after setting DataDome cookie...');
-            await page.goto(captchaDetails.url, {
-                waitUntil: 'networkidle2',
-                timeout: this.config.navigationTimeout || 60000
-            });
-
-            // Verify that the CAPTCHA is no longer present
-            const captchaStillPresent = await page.evaluate(() => {
-                return !!document.querySelector('iframe[src*="captcha-delivery.com"], iframe[src*="geo.captcha-delivery.com"]');
-            });
-
-            if (captchaStillPresent) {
-                logger.warn('DataDome CAPTCHA is still present after setting cookie and reloading');
-
-                // Check if we have content anyway (sometimes the CAPTCHA iframe remains but content is accessible)
-                const hasContent = await page.evaluate(() => {
-                    // Check for common content indicators
-                    const mainContent = document.querySelector('main');
-                    const article = document.querySelector('article');
-                    const h1 = document.querySelector('h1');
-
-                    return {
-                        hasMainContent: !!mainContent,
-                        hasArticle: !!article,
-                        hasH1: !!h1,
-                        title: document.title
-                    };
-                });
-
-                logger.debug('Content check after DataDome CAPTCHA solution:', hasContent);
-
-                if (hasContent.hasMainContent || hasContent.hasArticle || hasContent.hasH1) {
-                    logger.info('DataDome CAPTCHA bypass successful despite iframe still present. Content found.');
-                    return true;
-                }
-
-                return false;
-            }
-
-            logger.info('DataDome CAPTCHA no longer present after setting cookie and reloading');
-            return true;
-        } catch (error) {
-            logger.error(`Error submitting DataDome CAPTCHA solution: ${error.message}`);
-            return false;
-        }
-    }
+    // DataDome cookie handling has been moved to the DataDomeSolver class
 }
 
 export { CaptchaSolver };

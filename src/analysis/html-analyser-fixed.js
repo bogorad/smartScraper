@@ -12,7 +12,9 @@ class HtmlAnalyserFixed {
             /g-recaptcha/i, /recaptcha/i, /hcaptcha/i,
             /turnstile/i, /cf-turnstile/i, /cloudflare.*challenge/i,
             /are you human/i, /verify you are human/i, /security check/i,
-            /enter the code/i, /captcha/i, /human verification/i
+            /enter the code/i, /captcha/i, /human verification/i,
+            /datadome/i, /checking browser/i, /please enable js/i,
+            /disable any ad blocker/i
         ];
         this.captchaIframeSrcRegex = [
             /google\.com\/recaptcha/i,
@@ -119,8 +121,12 @@ class HtmlAnalyserFixed {
             '[class*="datadome"]', '[id*="datadome"]'
         ];
 
-        // Check for DataDome script
-        if (lowerHtml.includes('datadome') || lowerHtml.includes('captcha-delivery.com')) {
+        // Check for DataDome script or markers
+        if (lowerHtml.includes('datadome') ||
+            lowerHtml.includes('captcha-delivery.com') ||
+            lowerHtml.includes('geo.captcha-delivery.com') ||
+            lowerHtml.includes('checking browser') ||
+            lowerHtml.includes('please enable js and disable any ad blocker')) {
             logger.info('DataDome CAPTCHA marker found in HTML');
             return true;
         }

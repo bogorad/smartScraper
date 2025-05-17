@@ -40,7 +40,7 @@ class CoreScraperEngine {
         this.domComparator = new DomComparator(this.configs.scraper.domComparisonThreshold);
         this.contentScoringEngine = new ContentScoringEngine(this.configs.scraper.scoreWeights, this.configs.scraper.minParagraphThreshold, this.configs.scraper.tagsToCount, this.configs.scraper.unwantedTags, this.configs.scraper.descriptiveIdOrClassKeywords);
         this.llmInterface = new LLMInterface(this.configs.llm);
-        this.captchaSolver = new CaptchaSolver(this.configs.captchaSolver);
+        this.captchaSolver = new CaptchaSolver(this.configs.captchaSolver, this.knownSitesManager);
 
         logger.info('CoreScraperEngine initialized.');
     }
@@ -53,24 +53,27 @@ class CoreScraperEngine {
             return { success: false, error: 'Invalid URL', data: null };
         }
 
+        // If no proxy is provided, use the default HTTP_PROXY from environment
+        if (!proxyDetails && process.env.HTTP_PROXY) {
+            proxyDetails = { server: process.env.HTTP_PROXY };
+            logger.info(`Using default proxy from HTTP_PROXY environment variable`);
+        }
+
         let siteConfig = await this.knownSitesManager.getConfig(domain);
         let effectiveUserAgent = userAgentString || (siteConfig ? siteConfig.user_agent_to_use : null) || this.configs.scraper.defaultUserAgent;
 
         if (siteConfig) {
             logger.info(`Found known site config for domain: ${domain}`);
-            if (this._isConfigStale(siteConfig)) {
-                logger.warn(`Config for ${domain} is stale. Triggering re-discovery.`);
-                siteConfig = null; // Force re-discovery
-            } else {
-                // Attempt with known config
-                const knownScrapeResult = await this._scrapeWithKnownConfig(targetUrl, siteConfig, proxyDetails, effectiveUserAgent, requestedOutput);
-                if (knownScrapeResult.success) {
-                    return knownScrapeResult;
-                }
-                logger.warn(`Scraping with known config failed for ${domain}. Triggering re-discovery.`);
-                await this.knownSitesManager.incrementFailure(domain);
-                // Fall through to re-discovery
+
+            // Attempt with known config
+            const knownScrapeResult = await this._scrapeWithKnownConfig(targetUrl, siteConfig, proxyDetails, effectiveUserAgent, requestedOutput);
+            if (knownScrapeResult.success) {
+                return knownScrapeResult;
             }
+
+            logger.warn(`Scraping with known config failed for ${domain}. Triggering re-discovery.`);
+            await this.knownSitesManager.incrementFailure(domain);
+            // Fall through to re-discovery
         } else {
             logger.info(`No known site config for domain: ${domain}. Starting discovery.`);
         }
@@ -80,20 +83,7 @@ class CoreScraperEngine {
         return discoveryResult;
     }
 
-    _isConfigStale(siteConfig) {
-        if (!siteConfig) return true;
-        if (siteConfig.failure_count_since_last_success >= this.configs.scraper.maxFailuresBeforeRediscovery) {
-            return true;
-        }
-        if (siteConfig.last_successful_scrape_timestamp) {
-            const lastSuccessDate = new Date(siteConfig.last_successful_scrape_timestamp);
-            const stalenessDuration = this.configs.scraper.stalenessDurationDays * 24 * 60 * 60 * 1000;
-            if (Date.now() - lastSuccessDate.getTime() > stalenessDuration) {
-                return true;
-            }
-        }
-        return false;
-    }
+    // XPath expiration logic has been removed as per requirements
 
     async _scrapeWithKnownConfig(url, config, proxyDetails, userAgent, requestedOutput) {
         logger.info(`Attempting scrape with known config for: ${url} using method: ${config.method}`);
@@ -226,6 +216,12 @@ class CoreScraperEngine {
 
                         // Skip puppeteer-stealth and go directly to puppeteer-captcha
                         logger.info('Skipping puppeteer-stealth and going directly to puppeteer-captcha for DataDome CAPTCHA.');
+
+                        // Check for banned IP indicators
+                        if (curlHtml.includes('t=bv')) {
+                            logger.warn('DataDome CAPTCHA indicates banned IP (t=bv parameter detected)');
+                            logger.warn('You may need to use a different proxy. Current proxy might be in a blocklist.');
+                        }
 
                         // Launch puppeteer with CAPTCHA handling
                         try {

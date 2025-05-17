@@ -3,12 +3,13 @@
 const scraperSettings = {
   maxLlmRetries: 3,
   minParagraphThreshold: 3, // Minimum paragraphs for content to be considered valid
-  domComparisonThreshold: 0.90, // For cURL vs Puppeteer DOM similarity (0.0 to 1.0)
+  domComparisonThreshold: 0.60, // For cURL vs Puppeteer DOM similarity (0.0 to 1.0)
   puppeteerDefaultTimeout: 30000, // 30 seconds
   puppeteerNavigationTimeout: 60000, // 60 seconds
   puppeteerNetworkIdleTimeout: 5000, // Wait 5s after network becomes idle
   puppeteerPostLoadDelay: 2000, // 2 seconds delay after page load for dynamic content/plugins
   puppeteerInteractionDelay: 2000, // 2 seconds for mouse/scroll interactions
+  puppeteerExecutablePath: process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium', // Path to Chromium executable
   saveHtmlOnFailure: process.env.SAVE_HTML_ON_FAILURE === 'true' || false, // Default to false
   failedHtmlDumpsPath: './failed_html_dumps', // Relative to project root
 

@@ -190,6 +190,47 @@ class KnownSitesManager {
         await this._ensureInitialized();
         return { ...this.storageData }; // Return a copy
     }
+
+    /**
+     * Stores a CAPTCHA cookie for a domain.
+     * @param {string} domain - The domain key.
+     * @param {string} cookieName - The name of the cookie.
+     * @param {string} cookieValue - The value of the cookie.
+     */
+    async storeCaptchaCookie(domain, cookieName, cookieValue) {
+        await this._ensureInitialized();
+        if (!domain || !cookieName || !cookieValue) {
+            logger.warn('Attempted to store invalid CAPTCHA cookie.');
+            return;
+        }
+
+        // Get existing config or create a new one
+        const config = this.storageData[domain] || { domain_pattern: domain };
+
+        // Store the cookie
+        config.captcha_cookie = { name: cookieName, value: cookieValue };
+
+        // Save the updated config
+        this.storageData[domain] = config;
+        logger.info(`CAPTCHA cookie stored for domain: ${domain}`);
+        await this._saveStorage();
+    }
+
+    /**
+     * Retrieves a stored CAPTCHA cookie for a domain.
+     * @param {string} domain - The domain key.
+     * @returns {Promise<object|null>} The CAPTCHA cookie object or null if not found.
+     */
+    async getCaptchaCookie(domain) {
+        await this._ensureInitialized();
+        const config = this.storageData[domain];
+        if (config && config.captcha_cookie) {
+            logger.debug(`CAPTCHA cookie found for domain: ${domain}`);
+            return { ...config.captcha_cookie }; // Return a copy
+        }
+        logger.debug(`No CAPTCHA cookie found for domain: ${domain}`);
+        return null;
+    }
 }
 
 export { KnownSitesManager };
