@@ -17,7 +17,6 @@ const DEFAULT_TIMEOUT = 15000; // 15 seconds default timeout for cURL requests
  * @param {string} url - The URL to fetch.
  * @param {object|null} proxyDetails - Proxy configuration.
  *        Example: { protocol: 'http', host: 'proxy.example.com', port: 8080, auth: { username: 'user', password: 'pass'} }
- *        Or for a simple proxy string: { server: 'http://user:pass@proxy.example.com:8080' }
  * @param {object|null} customHeaders - Custom HTTP headers to include in the request.
  * @param {string|null} userAgentString - The User-Agent string to use. Defaults to a common browser UA.
  * @param {number} timeout - Request timeout in milliseconds.

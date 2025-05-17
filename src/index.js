@@ -43,7 +43,6 @@ function getDefaultEngine() {
  * @param {string} url - The URL to scrape.
  * @param {object} [options={}] - Optional parameters for the scrape.
  * @param {object|null} [options.proxyDetails=null] - Proxy configuration.
- *        Example: { server: 'http://user:pass@proxy.example.com:8080' }
  * @param {string|null} [options.userAgentString=null] - Custom User-Agent string.
  * @param {string} [options.outputType='content'] - Desired output type ('content' or 'full_html').
  *                                                  See OUTPUT_TYPES in constants.js.
