@@ -1,19 +1,22 @@
 // config/captcha-solver-config.js
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path'; 
+import { fileURLToPath } from 'url';
 
-export const captchaSolverConfig = {
-  apiKey: process.env.TWOCAPTCHA_API_KEY,
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+
+const captchaSolverConfig = {
   service: process.env.CAPTCHA_SERVICE_NAME || '2captcha',
-  defaultTimeout: 120, 
-  pollingInterval: 5, 
-  navigationTimeout: 60000,
-  postCaptchaSubmitDelay: 5000,
-  proxy: {
-    server: process.env.HTTP_PROXY || null,
-  },
-  inUrl: 'https://2captcha.com/in.php',
-  resUrl: 'https://2captcha.com/res.php',
-  createTaskUrl: 'https://api.2captcha.com/createTask',
-  getTaskResultUrl: 'https://api.2captcha.com/getTaskResult'
+  apiKey: process.env.TWOCAPTCHA_API_KEY, 
+  defaultTimeout: process.env.CAPTCHA_DEFAULT_TIMEOUT ? parseInt(process.env.CAPTCHA_DEFAULT_TIMEOUT, 10) : 120,
+  pollingInterval: process.env.CAPTCHA_POLLING_INTERVAL ? parseInt(process.env.CAPTCHA_POLLING_INTERVAL, 10) : 5000,
+  maxRetries: process.env.CAPTCHA_MAX_RETRIES ? parseInt(process.env.CAPTCHA_MAX_RETRIES, 10) : 3,
+  postCaptchaSubmitDelay: process.env.POST_CAPTCHA_SUBMIT_DELAY ? parseInt(process.env.POST_CAPTCHA_SUBMIT_DELAY, 10) : 5000,
+  twoCaptchaInUrl: 'https://2captcha.com/in.php',
+  twoCaptchaResUrl: 'https://2captcha.com/res.php',
+  dataDomeDomains: process.env.DATADOME_DOMAINS ? process.env.DATADOME_DOMAINS.split(',').map(d => d.trim()) : [],
 };
+
+export default captchaSolverConfig; // ADDED DEFAULT EXPORT

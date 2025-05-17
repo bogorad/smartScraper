@@ -4,136 +4,142 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
-// Load environment variables from .env file at the project root
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRootDir = path.resolve(__dirname, '..'); // Assumes tools/ is one level down from root
+const projectRootDir = path.resolve(__dirname, '..');
 dotenv.config({ path: path.join(projectRootDir, '.env') });
 
-// Import from the main codebase
-import { scrapeUrl } from '../src/index.js'; // Adjust path if script is elsewhere
+import { scrapeUrl, OUTPUT_TYPES } from '../src/index.js';
 import { logger } from '../src/utils/logger.js';
-import { OUTPUT_TYPES } from '../src/constants.js';
+import { ScraperError, ConfigurationError } from '../src/utils/error-handler.js';
 
 const URL_FILE_PATH = path.join(projectRootDir, 'urls_for_testing.txt');
-const LOG_FILE_PATH = path.join(projectRootDir, 'tools_processing_log.txt'); // For detailed logging
+const LOG_FILE_PATH = path.join(projectRootDir, 'tools_processing_log.txt');
+const DELAY_MS = 2000;
 
 async function appendToLogFile(message) {
   try {
     await fs.appendFile(LOG_FILE_PATH, `${new Date().toISOString()} - ${message}\n`);
-  } catch (error) {
-    console.error(`Failed to write to log file: ${error.message}`);
+  } catch (e) {
+    console.error(`Failed to append to log file: ${e.message}`);
   }
 }
 
 async function processUrls() {
-  logger.info(`Starting URL processing. Reading URLs from: ${URL_FILE_PATH}`);
-  await appendToLogFile(`--- Session Start: URL Processing ---`);
-
   let urlsToTest = [];
   try {
     const fileContent = await fs.readFile(URL_FILE_PATH, 'utf-8');
-    urlsToTest = fileContent
-      .split('\n')
-      .map(url => url.trim())
-      .filter(url => url && !url.startsWith('#')); // Filter out empty lines and comments
+    urlsToTest = fileContent.split('\n').map(url => url.trim()).filter(url => url.length > 0);
   } catch (error) {
-    logger.error(`Failed to read URL file at ${URL_FILE_PATH}: ${error.message}`);
-    await appendToLogFile(`ERROR: Failed to read URL file: ${error.message}`);
-    return;
+    logger.error(`Failed to read URL file: ${URL_FILE_PATH}. Error: ${error.message}`);
+    urlsToTest = ["https://www.foreignaffairs.com/russia/putins-new-hermit-kingdom-closed-dictatorship"];
+    logger.warn(`Using hardcoded fallback URL: ${urlsToTest[0]}`);
+    await appendToLogFile(`ERROR_READING_URL_FILE: ${error.message}. Using fallback: ${urlsToTest[0]}`);
   }
 
   if (urlsToTest.length === 0) {
-    logger.info('No URLs found in the file to process.');
-    await appendToLogFile('INFO: No URLs found to process.');
+    logger.warn('No URLs to process.');
+    await appendToLogFile('NO_URLS_TO_PROCESS');
     return;
   }
 
-  logger.info(`Found ${urlsToTest.length} URLs to process.`);
-  await appendToLogFile(`INFO: Found ${urlsToTest.length} URLs to process.`);
+  logger.info(`Starting processing for ${urlsToTest.length} URLs.`);
+  await appendToLogFile(`START_PROCESSING: ${urlsToTest.length} URLs`);
 
   let successCount = 0;
-  let failureCount = 0;
+  let operationalFailureCount = 0;
 
-  for (let i = 0; i < urlsToTest.length; i++) {
-    const url = urlsToTest[i];
-    logger.info(`\n[${i + 1}/${urlsToTest.length}] Processing URL: ${url}`);
-    await appendToLogFile(`\nINFO: [${i + 1}/${urlsToTest.length}] Processing URL: ${url}`);
-    await appendToLogFile(`INFO: --------------------------------------------------`);
-    await appendToLogFile(`INFO: URL: ${url}`);
+  for (const url of urlsToTest) {
+    logger.debug(`[DEBUG_MODE][processUrls] Processing URL from list: "${url}" (Type: ${typeof url}, Length: ${url?.length})`);
+    if (url && typeof url === 'string') {
+        const charCodes = Array.from(url).map(c => c.charCodeAt(0));
+        logger.debug(`[DEBUG_MODE][processUrls] Character codes for current URL: [${charCodes.join(', ')}]`);
+    }
+
+    logger.info(`Processing URL: ${url}`);
+    await appendToLogFile(`PROCESSING: ${url}`);
 
     try {
-      // Using the main public API of the scraper
-      // We request CONTENT_ONLY to get the main extracted data along with method and xpath
       const result = await scrapeUrl(url, { outputType: OUTPUT_TYPES.CONTENT_ONLY });
 
       if (result.success) {
-        successCount++;
         logger.info(`  STATUS: SUCCESS`);
-        logger.info(`  METHOD_USED: ${result.method || 'N/A'}`);
-        logger.info(`  XPATH_FOUND: ${result.xpath || 'N/A'}`);
-        const contentSnippet = result.data ? result.data.substring(0, 150).replace(/\s+/g, ' ') + '...' : 'No data';
-        logger.info(`  CONTENT_SNIPPET: ${contentSnippet}`);
-
-        await appendToLogFile(`INFO: STATUS: SUCCESS`);
-        await appendToLogFile(`INFO: METHOD_USED: ${result.method || 'N/A'}`);
-        await appendToLogFile(`INFO: XPATH_FOUND: ${result.xpath || 'N/A'}`);
-        await appendToLogFile(`INFO: CONTENT_SNIPPET: ${contentSnippet}`);
+        logger.info(`  METHOD: ${result.method}`);
+        logger.info(`  XPATH: ${result.xpath || 'N/A'}`);
+        await appendToLogFile(`SUCCESS: ${url} - Method: ${result.method}, XPath: ${result.xpath || 'N/A'}`);
+        successCount++;
       } else {
-        // scrapeUrl is designed to return a specific structure on failure if it catches the error itself
-        failureCount++;
-        logger.warn(`  STATUS: FAILURE (handled by scrapeUrl)`);
-        logger.warn(`  ERROR: ${result.error || 'Unknown error from scrapeUrl'}`);
-        if (result.errorDetails) logger.warn(`  DETAILS: ${JSON.stringify(result.errorDetails)}`);
-
-        await appendToLogFile(`WARN: STATUS: FAILURE (handled by scrapeUrl)`);
-        await appendToLogFile(`WARN: ERROR: ${result.error || 'Unknown error from scrapeUrl'}`);
-        if (result.errorDetails) await appendToLogFile(`WARN: DETAILS: ${JSON.stringify(result.errorDetails)}`);
+        logger.error(`  STATUS: OPERATIONAL FAILURE`);
+        logger.error(`  ERROR_TYPE: ${result.errorType}`);
+        logger.error(`  ERROR_MESSAGE: ${result.error}`);
+        if (result.details) logger.error(`  DETAILS: ${JSON.stringify(result.details)}`);
+        await appendToLogFile(`OPERATIONAL_FAILURE: For ${url} - ${result.errorType}: ${result.error}`);
+        operationalFailureCount++;
       }
     } catch (error) {
-      // Catch errors not handled by scrapeUrl's internal try/catch (e.g., config errors before scrape starts)
-      failureCount++;
-      logger.error(`  STATUS: FAILURE (exception caught)`);
+      // This catch block in the loop is for errors thrown by scrapeUrl that are NOT handled by returning a result object.
+      // This should ideally only be for truly unexpected issues within scrapeUrl itself,
+      // as ScraperErrors (including ConfigurationError from engine init) should be returned as result objects by scrapeUrl.
+      // However, if scrapeUrl re-throws a critical error, it lands here.
+      logger.error(`  STATUS: CRITICAL FAILURE (unhandled exception in processUrls for ${url})`);
       logger.error(`  ERROR_NAME: ${error.name}`);
       logger.error(`  ERROR_MESSAGE: ${error.message}`);
       if (error.details) logger.error(`  DETAILS: ${JSON.stringify(error.details)}`);
-      // logger.debug(error.stack); // Optionally log full stack for deeper debug
+      if (error.stack) logger.error(`  STACK: ${error.stack}`);
+      await appendToLogFile(`CRITICAL_ERROR_PROCESS_URLS: For ${url} - ${error.name}: ${error.message}`);
+      operationalFailureCount++; // Still count as a failure for this URL
 
-      await appendToLogFile(`ERROR: STATUS: FAILURE (exception caught)`);
-      await appendToLogFile(`ERROR: ERROR_NAME: ${error.name}`);
-      await appendToLogFile(`ERROR: ERROR_MESSAGE: ${error.message}`);
-      if (error.details) await appendToLogFile(`ERROR: DETAILS: ${JSON.stringify(error.details)}`);
-    } finally {
-      await appendToLogFile(`INFO: --------------------------------------------------`);
-      // Optional: Add a small delay between requests if hitting many sites rapidly
-      if (i < urlsToTest.length - 1) {
-        // const delayMs = 1000; // 1 second delay
-        // logger.debug(`Waiting ${delayMs / 1000}s before next URL...`);
-        // await new Promise(resolve => setTimeout(resolve, delayMs));
+      // If it's a critical non-ScraperError, re-throw to be caught by the top-level IIFE catch, which will terminate the script.
+      if (!(error instanceof ScraperError)) {
+        logger.error(`[CRITICAL_INTERNAL_SCRIPT_ERROR_IN_LOOP] Uncaught non-ScraperError in processUrls loop for ${url}. Error:`, error);
+        throw error; 
       }
+    }
+
+    if (urlsToTest.indexOf(url) < urlsToTest.length - 1) {
+      logger.info(`Waiting for ${DELAY_MS / 1000} seconds before next URL...`);
+      await new Promise(resolve => setTimeout(resolve, DELAY_MS));
     }
   }
 
-  logger.info(`\n--- Processing Complete ---`);
-  logger.info(`Total URLs Processed: ${urlsToTest.length}`);
-  logger.info(`Successful Scrapes: ${successCount}`);
-  logger.info(`Failed Scrapes: ${failureCount}`);
-  logger.info(`Detailed log written to: ${LOG_FILE_PATH}`);
-
-  await appendToLogFile(`\n--- Session End ---`);
-  await appendToLogFile(`INFO: Total URLs Processed: ${urlsToTest.length}`);
-  await appendToLogFile(`INFO: Successful Scrapes: ${successCount}`);
-  await appendToLogFile(`INFO: Failed Scrapes: ${failureCount}`);
+  logger.info('--------------------------------------------------');
+  logger.info('URL Processing Summary:');
+  logger.info(`  Total URLs Processed: ${urlsToTest.length}`);
+  logger.info(`  Successful Scrapes: ${successCount}`);
+  logger.info(`  Operational Failures: ${operationalFailureCount}`);
+  logger.info('--------------------------------------------------');
+  await appendToLogFile(`END_PROCESSING_SUMMARY: Total=${urlsToTest.length}, Success=${successCount}, OpFail=${operationalFailureCount}`);
 }
 
-// Ensure .env is loaded and then run the processing
-// This top-level await is available in ES modules
-try {
-  await fs.writeFile(LOG_FILE_PATH, ''); // Clear/create log file at start
-  logger.info(`Log file initialized at: ${LOG_FILE_PATH}`);
-  await processUrls();
-} catch (e) {
-  logger.error(`Critical error during script execution: ${e.message}`);
-  console.error(e); // Also log to console for immediate visibility
-  appendToLogFile(`CRITICAL_ERROR: ${e.message}\n${e.stack}`);
-}
+(async () => {
+  try {
+    await fs.writeFile(LOG_FILE_PATH, ''); 
+    logger.info(`Log file initialized at: ${LOG_FILE_PATH}`);
+    
+    // The first call to scrapeUrl() inside processUrls will trigger engine initialization.
+    // If that initialization fails (e.g., PuppeteerController constructor throws ConfigurationError),
+    // scrapeUrl should catch it and return a failure object. If scrapeUrl itself has an unhandled
+    // exception during init, it would be caught here.
+    await processUrls();
+    logger.info('All URLs processed or attempted.');
+    process.exit(0); 
+  } catch (e) {
+    // This top-level catch is for:
+    // 1. Truly critical errors during the initial setup of processUrls itself (e.g., file read for URLs if not handled).
+    // 2. Non-ScraperErrors re-thrown from the processUrls loop, indicating a bug.
+    // 3. ConfigurationErrors from engine initialization IF scrapeUrl failed to catch and return them as a result object.
+    logger.error(`[CRITICAL_SCRIPT_FAILURE_TOP_LEVEL] Unhandled error: ${e.message}`);
+    console.error("[CRITICAL_SCRIPT_FAILURE_TOP_LEVEL]", e); 
+    await appendToLogFile(`CRITICAL_SCRIPT_FAILURE_TOP_LEVEL: ${e.name} - ${e.message}\n${e.stack}`);
+
+    if (e instanceof ConfigurationError && e.details && e.details.reason && e.details.reason.includes('constructor')) {
+        logger.error(`[CRITICAL_CONFIG_ERROR] Engine initialization failed: ${e.message}. This is a fatal error. Check configurations (e.g., scraper-settings.js for viewport).`);
+    } else if (e instanceof ScraperError) {
+        // This case should ideally not be hit if scrapeUrl correctly returns failure objects for ScraperErrors.
+        logger.error("[OPERATIONAL_ERROR_ESCAPED_TOP_LEVEL] A ScraperError reached the top level unexpectedly. This indicates a flaw in scrapeUrl's error handling. Details:", e.details);
+    } else {
+        logger.error("[CRITICAL_INTERNAL_SCRIPT_ERROR_TOP_LEVEL] This was not a ScraperError. Exiting due to likely script bug.");
+    }
+    process.exit(1); 
+  }
+})();

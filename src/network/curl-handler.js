@@ -1,34 +1,37 @@
 // src/network/curl-handler.js
+// Enhanced debug logging for success paths.
+// HTML content removed from error details.
 import axios from 'axios';
-import https from 'https'; 
+import https from 'https';
+import { URL } from 'url';
 import { logger } from '../utils/logger.js';
+import { scraperSettings } from '../../config/index.js';
 import { NetworkError } from '../utils/error-handler.js';
-import { DEFAULT_USER_AGENT } from '../constants.js';
-
-const DEFAULT_TIMEOUT = 15000; 
 
 async function fetchWithCurl(
   url,
   proxyDetails = null,
-  customHeaders = null,
-  userAgentString = null,
-  timeout = DEFAULT_TIMEOUT,
-  ignoreHttpsErrors = true
+  headers = null,
+  userAgent = scraperSettings.defaultUserAgent
 ) {
-  const effectiveUserAgent = userAgentString || DEFAULT_USER_AGENT;
-  const headers = {
-    'User-Agent': effectiveUserAgent,
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br', 
-    ...(customHeaders || {}),
-  };
-
+  logger.debug(`[fetchWithCurl] Attempting cURL-like request to: ${url}`);
   const axiosConfig = {
-    headers,
-    timeout,
-    responseType: 'text',
+    timeout: scraperSettings.curlTimeout || 30000, // 30 seconds timeout
+    headers: {
+      'User-Agent': userAgent,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br', // Axios handles decompression
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      ...(headers || {}), // Spread any custom headers
+    },
     maxRedirects: 5,
+    // responseType: 'arraybuffer', // To handle different encodings better, then convert
   };
 
   if (proxyDetails && proxyDetails.server) {
@@ -38,66 +41,96 @@ async function fetchWithCurl(
         protocol: proxyUrl.protocol.replace(':', ''),
         host: proxyUrl.hostname,
         port: parseInt(proxyUrl.port, 10) || (proxyUrl.protocol === 'https:' ? 443 : 80),
-        auth: (proxyUrl.username || proxyUrl.password) ? {
-          username: decodeURIComponent(proxyUrl.username),
-          password: decodeURIComponent(proxyUrl.password),
-        } : undefined,
       };
-      logger.info(`Using proxy for cURL request: ${axiosConfig.proxy.host}:${axiosConfig.proxy.port}`);
+      if (proxyDetails.username && proxyDetails.password) {
+        axiosConfig.proxy.auth = {
+          username: decodeURIComponent(proxyDetails.username),
+          password: decodeURIComponent(proxyDetails.password),
+        };
+      }
+      logger.info(`[fetchWithCurl] Using proxy for cURL request: ${axiosConfig.proxy.host}:${axiosConfig.proxy.port}`);
     } catch (e) {
-      logger.error(`Invalid proxy server string for cURL: ${proxyDetails.server}. Error: ${e.message}`);
-      throw new NetworkError(`Invalid proxy server string format for cURL`, { proxyServer: proxyDetails.server, originalError: e.message });
+      logger.error(`[fetchWithCurl] Invalid proxy server string for cURL: ${proxyDetails.server}. Error: ${e.message}`);
+      throw new NetworkError(`Invalid proxy server string format for cURL`, { proxyServer: proxyDetails.server, originalErrorName: e.name, originalErrorMessage: e.message });
     }
   }
 
-  if (ignoreHttpsErrors) {
+  // For HTTPS requests, especially with proxies or specific TLS requirements
+  if (url.startsWith('https://')) {
     axiosConfig.httpsAgent = new https.Agent({
-      rejectUnauthorized: false,
+      rejectUnauthorized: scraperSettings.rejectUnauthorizedTLS !== undefined ? scraperSettings.rejectUnauthorizedTLS : true,
+      // ciphers: 'DEFAULT@SECLEVEL=1' // Example: If needed for older sites, but usually not recommended
     });
   }
 
-  logger.info(`Making cURL-like request to: ${url}`);
+
+  if (scraperSettings.debug) {
+    logger.debug(`[DEBUG_MODE] cURL Request Details for ${url}:`, {
+      method: 'GET',
+      url: url,
+      headers: axiosConfig.headers,
+      timeout: axiosConfig.timeout,
+      proxy: axiosConfig.proxy ? `${axiosConfig.proxy.host}:${axiosConfig.proxy.port}` : 'None',
+    });
+  }
+
   try {
+    logger.info(`Making cURL-like request to: ${url}`);
     const response = await axios.get(url, axiosConfig);
     logger.info(`cURL request to ${url} successful with status: ${response.status}`);
-    return {
-      success: true,
-      html: response.data,
-      status: response.status,
-      headers: response.headers,
-      error: null,
-    };
-  } catch (error) {
-    if (error instanceof NetworkError) throw error; 
 
+    // TODO: Handle character encoding more robustly if issues arise.
+    // For now, assume Axios handles common cases or response.data is string.
+    const htmlContent = typeof response.data === 'string' ? response.data : response.data.toString();
+
+    if (scraperSettings.debug) {
+      logger.debug(`[DEBUG_MODE] cURL response for ${url}: Status ${response.status}, Content-Type: ${response.headers['content-type']}, Length: ${htmlContent?.length}`);
+    }
+    return { html: htmlContent, status: response.status, error: null };
+  } catch (error) {
     logger.error(`cURL request to ${url} failed. Error: ${error.message}`);
+    const errorDetails = {
+      url: url,
+      proxyUsed: !!(proxyDetails && proxyDetails.server),
+      originalErrorName: error.name,
+      originalErrorMessage: error.message,
+    };
+
     if (error.response) {
-      logger.error(`Status: ${error.response.status}, Data: ${typeof error.response.data === 'string' ? error.response.data.substring(0, 200) : 'Non-string data'}`);
-      return {
-        success: false,
-        html: typeof error.response.data === 'string' ? error.response.data : null,
-        status: error.response.status,
-        headers: error.response.headers,
-        error: `HTTP Error ${error.response.status}: ${error.message}`,
-      };
+      // The request was made and the server responded with a status code
+      // that falls out of the range of 2xx
+      errorDetails.statusCode = error.response.status;
+      errorDetails.responseHeaders = error.response.headers;
+      const errorDataString = typeof error.response.data === 'string' ? error.response.data : (Buffer.isBuffer(error.response.data) ? error.response.data.toString('utf-8', 0, 500) : JSON.stringify(error.response.data));
+      
+      errorDetails.responseDataLength = errorDataString?.length;
+      errorDetails.responseDataType = typeof error.response.data;
+      // errorDetails.htmlContent is removed
+
+      if (scraperSettings.debug) {
+        logger.error(`[DEBUG_MODE] Full Axios error response for ${url}:`, {
+          status: error.response.status,
+          headers: error.response.headers,
+          dataPreview: errorDataString.substring(0, 200) + (errorDataString.length > 200 ? '...' : '')
+        });
+      }
+      throw new NetworkError(`cURL request to ${url} failed with status ${error.response.status}`, errorDetails);
     } else if (error.request) {
+      // The request was made but no response was received
       logger.error('No response received for cURL request.');
-      return {
-        success: false,
-        html: null,
-        status: null,
-        headers: null,
-        error: `No response received: ${error.message}`,
-      };
+      errorDetails.reason = 'no_response';
+      if (scraperSettings.debug) {
+        logger.error(`[DEBUG_MODE] Axios error request details for ${url}:`, error.request);
+      }
+      throw new NetworkError(`No response received for cURL request to ${url}`, errorDetails);
     } else {
+      // Something happened in setting up the request that triggered an Error
       logger.error(`Error setting up cURL request: ${error.message}`);
-      return {
-        success: false,
-        html: null,
-        status: null,
-        headers: null,
-        error: `Request setup error: ${error.message}`,
-      };
+      errorDetails.reason = 'request_setup_error';
+      if (scraperSettings.debug) {
+        logger.error(`[DEBUG_MODE] Full cURL error object for ${url}:`, error);
+      }
+      throw new NetworkError(`Error setting up cURL request for ${url}: ${error.message}`, errorDetails);
     }
   }
 }

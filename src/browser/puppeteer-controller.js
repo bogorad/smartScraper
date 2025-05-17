@@ -1,306 +1,420 @@
 // src/browser/puppeteer-controller.js
+// Enhanced debug logging for success paths and decision points.
+// HTML content removed from error details.
+// Added robust checks for viewport configuration and imported error classes.
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import { logger } from '../utils/logger.js';
-import { NetworkError, ScraperError } from '../utils/error-handler.js'; // Assuming ScraperError is a base or relevant error
 import { URL } from 'url';
+import { logger } from '../utils/logger.js';
+// Import necessary error classes
+import { NetworkError, ConfigurationError, ScraperError } from '../utils/error-handler.js';
 
 puppeteer.use(StealthPlugin());
 
 class PuppeteerController {
-  constructor(pluginManager, scraperConfig) {
+  constructor(pluginManager, scraperSettings) {
     this.pluginManager = pluginManager;
-    this.navigationTimeout = scraperConfig.puppeteerNavigationTimeout || 60000;
-    this.defaultTimeout = scraperConfig.puppeteerDefaultTimeout || 30000;
-    this.postLoadDelay = scraperConfig.puppeteerPostLoadDelay || 2000;
-    this.interactionDelay = scraperConfig.puppeteerInteractionDelay || 1000; // Time for each interaction substep
-    this.executablePath = scraperConfig.puppeteerExecutablePath;
-    this.headlessMode = scraperConfig.puppeteerHeadlessMode;
-    logger.debug('PuppeteerController initialized with timeouts:', {
-      nav: this.navigationTimeout,
-      default: this.defaultTimeout,
-      postLoad: this.postLoadDelay,
-      interaction: this.interactionDelay,
-      headless: this.headlessMode
-    });
+    this.scraperSettings = scraperSettings; // Passed from CoreScraperEngine
+
+    // Critical check: Ensure scraperSettings and puppeteerViewport are available at construction
+    if (!this.scraperSettings) {
+        const errMsg = '[PuppeteerController CONSTRUCTOR] scraperSettings is undefined. This is a critical initialization error.';
+        logger.error(errMsg);
+        throw new ConfigurationError(errMsg, { reason: 'constructor_settings_missing' });
+    }
+    if (!this.scraperSettings.puppeteerViewport) {
+        const errMsg = '[PuppeteerController CONSTRUCTOR] scraperSettings.puppeteerViewport is undefined. Viewport dimensions are required.';
+        logger.error(errMsg);
+        logger.debug('[DEBUG_MODE] scraperSettings at time of viewport error in constructor:', JSON.stringify(this.scraperSettings, null, 2));
+        throw new ConfigurationError(errMsg, { reason: 'constructor_viewport_missing' });
+    }
+    if (typeof this.scraperSettings.puppeteerViewport.width !== 'number' || typeof this.scraperSettings.puppeteerViewport.height !== 'number') {
+        const errMsg = `[PuppeteerController CONSTRUCTOR] scraperSettings.puppeteerViewport.width or .height is not a number. Viewport: ${JSON.stringify(this.scraperSettings.puppeteerViewport)}`;
+        logger.error(errMsg);
+        logger.debug('[DEBUG_MODE] scraperSettings at time of viewport type error in constructor:', JSON.stringify(this.scraperSettings, null, 2));
+        throw new ConfigurationError(errMsg, { reason: 'constructor_viewport_type_error' });
+    }
+
+    logger.debug('[PuppeteerController CONSTRUCTOR] Initialized with valid scraperSettings.');
   }
 
   async launchBrowser(proxyDetails = null) {
+    logger.debug(`[PuppeteerController launchBrowser] Launching browser. Proxy: ${proxyDetails ? 'Yes' : 'No'}`);
+
+    if (!this.scraperSettings || !this.scraperSettings.puppeteerViewport ||
+        typeof this.scraperSettings.puppeteerViewport.width !== 'number' ||
+        typeof this.scraperSettings.puppeteerViewport.height !== 'number') {
+      const errorMsg = `Puppeteer viewport configuration is missing or invalid in scraperSettings. Viewport: ${JSON.stringify(this.scraperSettings?.puppeteerViewport)}`;
+      logger.error(`[PuppeteerController launchBrowser] ${errorMsg}`);
+      logger.debug('[DEBUG_MODE] scraperSettings at time of viewport error in launchBrowser:', JSON.stringify(this.scraperSettings, null, 2));
+      throw new ConfigurationError(errorMsg, {
+          reason: "viewport_config_invalid_launch",
+          currentViewportConfig: this.scraperSettings?.puppeteerViewport
+      });
+    }
+
     const launchOptions = {
-      executablePath: this.executablePath,
-      headless: this.headlessMode,
+      headless: this.scraperSettings.puppeteerHeadless,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage', // Recommended for Docker/CI environments
+        '--disable-dev-shm-usage', 
         '--disable-accelerated-2d-canvas',
-        '--disable-gpu', // Often recommended for headless, can sometimes be removed if issues
-        '--window-size=1366,768', // A common desktop resolution
-        '--ignore-certificate-errors', // Handle potential SSL issues on some sites
-        // '--enable-features=NetworkService,NetworkServiceInProcess', // For newer Puppeteer versions
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        `--window-size=${this.scraperSettings.puppeteerViewport.width},${this.scraperSettings.puppeteerViewport.height}`,
       ],
-      dumpio: logger.level === 'debug', // If debug logging is enabled, dump browser IO
-      timeout: 90000, // Browser launch timeout
-      ignoreHTTPSErrors: true,
+      executablePath: this.scraperSettings.puppeteerExecutablePath || undefined,
+      timeout: this.scraperSettings.puppeteerLaunchTimeout || 60000, 
     };
 
     if (proxyDetails && proxyDetails.server) {
       try {
         const parsedProxyUrl = new URL(proxyDetails.server);
-        const defaultPort = parsedProxyUrl.protocol === 'https:' ? 443 : 80;
-        const port = parsedProxyUrl.port || defaultPort;
-        const proxyHostPort = `${parsedProxyUrl.hostname}:${port}`;
+        const proxyHostPort = `${parsedProxyUrl.hostname}:${parsedProxyUrl.port || (parsedProxyUrl.protocol === 'https:' ? '443' : '80')}`;
         launchOptions.args.push(`--proxy-server=${proxyHostPort}`);
-        logger.info(`Puppeteer: Using proxy server ${proxyHostPort}`);
-        // Store credentials on the browser context after launch if needed
-        if (parsedProxyUrl.username) {
-            // This will be applied to the default browser context later
-            launchOptions.proxyCredentials = {
-                username: decodeURIComponent(parsedProxyUrl.username),
-                password: decodeURIComponent(parsedProxyUrl.password || "")
-            };
-        }
+        logger.info(`[PuppeteerController launchBrowser] Using proxy for Puppeteer: ${proxyHostPort}`);
       } catch (e) {
-        logger.error(`Invalid proxy server string for Puppeteer: ${proxyDetails.server}. Error: ${e.message}`);
-        // Decide if to throw or continue without proxy
-        throw new NetworkError(`Invalid proxy server string format for Puppeteer`, { proxyServer: proxyDetails.server, originalError: e.message });
+        logger.error(`[PuppeteerController launchBrowser] Invalid proxy server string for Puppeteer: ${proxyDetails.server}. Error: ${e.message}`);
+        throw new ConfigurationError(`Invalid proxy server string format for Puppeteer`, { proxyServer: proxyDetails.server, originalErrorName: e.name, originalErrorMessage: e.message });
       }
     }
 
-    await this.pluginManager.configureLaunchOptions(launchOptions); // PluginManager modifies launchOptions.args
+    await this.pluginManager.configureLaunchOptions(launchOptions);
 
-    let browser;
+    if (this.scraperSettings.debug) {
+      logger.debug('[PuppeteerController launchBrowser] Effective launch options after PluginManager:', launchOptions);
+    }
+
     try {
-      logger.info('Launching Puppeteer browser with options:', launchOptions.args);
-      browser = await puppeteer.launch(launchOptions);
-      logger.info('Puppeteer browser launched successfully.');
-      // If proxy credentials were set in launchOptions, apply them to the default context
-      if (launchOptions.proxyCredentials) {
-          browser.defaultBrowserContext().proxyCredentials = launchOptions.proxyCredentials;
+      const browser = await puppeteer.launch(launchOptions);
+      logger.info('[PuppeteerController launchBrowser] Puppeteer browser launched successfully.');
+      if (this.scraperSettings.debug) {
+        logger.debug(`[PuppeteerController launchBrowser] Browser version: ${await browser.version()}, Endpoint: ${browser.wsEndpoint()}`);
       }
       return browser;
     } catch (error) {
-      logger.error(`Failed to launch Puppeteer browser: ${error.message}`);
-      throw new NetworkError('Failed to launch Puppeteer browser', {
-        launchOptions: JSON.stringify(launchOptions.args), // Log args for debugging
-        originalError: error.message
-      });
+      logger.error(`[PuppeteerController launchBrowser] Failed to launch Puppeteer browser: ${error.message}`);
+      if (this.scraperSettings.debug) {
+        logger.error('[DEBUG_MODE] Full error during Puppeteer browser launch:', error);
+      }
+      if (error instanceof ScraperError) throw error;
+      throw new NetworkError('Failed to launch Puppeteer browser', { originalErrorName: error.name, originalErrorMessage: error.message, stack: error.stack });
     }
   }
 
   async newPage(browser, userAgentString = null) {
+    logger.debug('[PuppeteerController newPage] Creating new page.');
     try {
       const page = await browser.newPage();
-      if (userAgentString) {
-        await page.setUserAgent(userAgentString);
+      
+      if (!this.scraperSettings || !this.scraperSettings.puppeteerViewport ||
+          typeof this.scraperSettings.puppeteerViewport.width !== 'number' ||
+          typeof this.scraperSettings.puppeteerViewport.height !== 'number') {
+            const errorMsg = `Puppeteer viewport configuration is missing or invalid in newPage. Viewport: ${JSON.stringify(this.scraperSettings?.puppeteerViewport)}`;
+            logger.error(`[PuppeteerController newPage] ${errorMsg}`);
+            throw new ConfigurationError(errorMsg, { reason: "viewport_config_invalid_newpage" });
       }
-      page.setDefaultNavigationTimeout(this.navigationTimeout);
-      page.setDefaultTimeout(this.defaultTimeout); // General timeout for operations like waitForSelector
+      await page.setViewport({
+        width: this.scraperSettings.puppeteerViewport.width,
+        height: this.scraperSettings.puppeteerViewport.height,
+      });
 
-      // Apply proxy authentication if stored on the context
-      const browserContext = page.browserContext();
-      if (browserContext.proxyCredentials) {
-          logger.debug('Puppeteer: Setting proxy authentication for new page.');
-          await page.authenticate(browserContext.proxyCredentials);
+      const uaToSet = userAgentString || this.scraperSettings.defaultUserAgent;
+      await page.setUserAgent(uaToSet);
+      logger.info(`[PuppeteerController newPage] New page created. User-Agent set to: ${uaToSet}`);
+      if (this.scraperSettings.debug) {
+        logger.debug(`[PuppeteerController newPage] Page target ID: ${page.target()._targetId}`);
       }
 
-      logger.debug('New Puppeteer page created.');
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        // @ts-ignore
+        // eslint-disable-next-line no-proto
+        delete navigator.__proto__.webdriver; 
+        // @ts-ignore
+        window.navigator.chrome = { runtime: {} }; 
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', mimeTypes: [{ type: 'application/x-google-chrome-pdf', suffixes: 'pdf' }] },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', mimeTypes: [{ type: 'application/pdf', suffixes: 'pdf' }] },
+            { name: 'Native Client', filename: 'internal-nacl-plugin', description: '', mimeTypes: [{ type: 'application/x-nacl', suffixes: ''},{ type: 'application/x-pnacl', suffixes: ''}] }
+          ],
+        });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      });
+      logger.debug('[PuppeteerController newPage] Anti-detection measures applied.');
+
       return page;
     } catch (error) {
-      logger.error(`Failed to create new Puppeteer page: ${error.message}`);
-      throw new NetworkError('Failed to create new Puppeteer page', {
-        originalError: error.message
-      });
+      logger.error(`[PuppeteerController newPage] Failed to create new Puppeteer page: ${error.message}`);
+      if (this.scraperSettings.debug) {
+        logger.error('[DEBUG_MODE] Full error during newPage creation:', error);
+      }
+      if (error instanceof ScraperError) throw error;
+      throw new NetworkError('Failed to create new Puppeteer page', { originalErrorName: error.name, originalErrorMessage: error.message, stack: error.stack });
     }
   }
 
   async launchAndNavigate(url, proxyDetails = null, userAgentString = null, waitConditions = null, isInitialProbe = false) {
-    let browser;
-    let page;
+    let browser = null;
+    let page = null;
+    logger.debug(`[PuppeteerController launchAndNavigate] Entry. URL: ${url}, isInitialProbe: ${isInitialProbe}`);
     try {
-      browser = await this.launchBrowser(proxyDetails);
-      page = await this.newPage(browser, userAgentString);
+      browser = await this.launchBrowser(proxyDetails); 
+      page = await this.newPage(browser, userAgentString); 
 
-      // Note: Proxy authentication is now handled in newPage if credentials are on browser context
-      // from launchBrowser.
+      if (proxyDetails && proxyDetails.username && proxyDetails.password) {
+        logger.debug('[PuppeteerController launchAndNavigate] Authenticating proxy...');
+        await page.authenticate({
+          username: decodeURIComponent(proxyDetails.username),
+          password: decodeURIComponent(proxyDetails.password),
+        });
+        logger.info('[PuppeteerController launchAndNavigate] Proxy authentication set.');
+      }
 
       await this.navigate(page, url, waitConditions, isInitialProbe);
-      return { browser, page }; // Return both for further operations or cleanup
-    } catch (error) {
-      logger.error(`Navigation failed in launchAndNavigate for ${url}: ${error.message}`);
-      if (browser) { // Ensure browser is cleaned up if launch was successful but navigation failed
-        await this.cleanupPuppeteer(browser).catch(e => logger.warn(`Error cleaning up browser during launchAndNavigate failure: ${e.message}`));
+      logger.info(`[PuppeteerController launchAndNavigate] Successfully launched and navigated to ${url}`);
+      return { browser, page };
+    } catch (error) { 
+      logger.error(`[PuppeteerController launchAndNavigate] Launch or navigation failed for ${url}: ${error.message} (Error Name: ${error.name})`);
+      if (this.scraperSettings.debug) {
+        logger.error(`[DEBUG_MODE] Full error in launchAndNavigate for ${url}:`, error);
+        if (error.stack) logger.debug(`[DEBUG_MODE] Stack: ${error.stack}`);
       }
-      // Re-throw the original error or a wrapped one
-      if (error instanceof ScraperError) throw error;
-      throw new NetworkError(`Navigation failed for ${url}`, {
-        url,
-        proxyUsed: !!proxyDetails,
-        originalError: error.message,
-        htmlContent: error.htmlContent // Propagate HTML if available from navigate
-      });
+      
+      if (page && !page.isClosed()) {
+        try { await page.close(); logger.debug('[PuppeteerController launchAndNavigate] Page closed during error handling.'); }
+        catch (closeError) { logger.warn(`[PuppeteerController launchAndNavigate] Error closing page during error handling: ${closeError.message}`); }
+      }
+      if (browser && browser.isConnected()) {
+        try { await browser.close(); logger.debug('[PuppeteerController launchAndNavigate] Browser closed during error handling.'); }
+        catch (browserCloseError) { logger.warn(`[PuppeteerController launchAndNavigate] Error closing browser during error handling: ${browserCloseError.message}`); }
+      }
+      
+      if (error instanceof ScraperError) {
+          throw error;
+      }
+      throw new NetworkError(`Unexpected error during launch and navigation for ${url}: ${error.message}`, { originalErrorName: error.name, originalErrorMessage: error.message, stack: error.stack });
     }
   }
 
   async navigate(page, url, waitConditions = null, isInitialProbe = false) {
-    logger.info(`Navigating to URL: ${url}`);
+    logger.debug(`[PuppeteerController navigate] Navigating to: ${url}. isInitialProbe: ${isInitialProbe}`);
     let htmlContentOnError = null;
     try {
-      const effectiveWaitUntil = waitConditions?.waitUntil || (isInitialProbe ? 'domcontentloaded' : 'networkidle0');
-      const timeout = waitConditions?.timeout || this.navigationTimeout;
+      const navigationOptions = {
+        waitUntil: waitConditions || (isInitialProbe ? 'domcontentloaded' : 'networkidle2'),
+        timeout: this.scraperSettings.puppeteerNavigationTimeout,
+      };
+      logger.debug(`[PuppeteerController navigate] Navigation options: ${JSON.stringify(navigationOptions)}`);
+      const response = await page.goto(url, navigationOptions);
+      logger.info(`[PuppeteerController navigate] Successfully navigated to ${url}. Status: ${response ? response.status() : 'N/A'}`);
+      if (this.scraperSettings.debug && response) {
+        logger.debug(`[PuppeteerController navigate] Final URL: ${page.url()}, Response headers (sample):`, response.headers()['content-type']);
+      }
 
-      await page.goto(url, {
-        waitUntil: effectiveWaitUntil,
-        timeout: timeout
-      });
-      logger.info(`Navigation successful to: ${url} (waited for ${effectiveWaitUntil})`);
-
-      // Apply plugin actions after navigation
       await this.pluginManager.applyToPageAfterNavigation(page);
+      logger.debug('[PuppeteerController navigate] Post-navigation plugins applied.');
 
-      // Perform interactions only if not an initial probe or if specifically requested
-      if (!isInitialProbe || waitConditions?.performInteractions) {
-        await this.performInteractions(page);
-        await page.waitForTimeout(this.postLoadDelay); // Wait after interactions
-      } else {
-        await page.waitForTimeout(500); // Brief pause even for probes
+      if (this.scraperSettings.puppeteerPostLoadDelay > 0) {
+        logger.debug(`[PuppeteerController navigate] Waiting for postLoadDelay: ${this.scraperSettings.puppeteerPostLoadDelay}ms`);
+        await page.waitForTimeout(this.scraperSettings.puppeteerPostLoadDelay);
       }
+
     } catch (error) {
-      logger.error(`Navigation to ${url} failed: ${error.message}`);
-      try {
-        htmlContentOnError = await page.content().catch(() => 'Could not retrieve HTML on error.');
-      } catch (contentError) {
-        htmlContentOnError = 'Failed to get content after navigation error.';
+      logger.error(`[PuppeteerController navigate] Navigation to ${url} failed: ${error.message}`);
+      if (page && !page.isClosed()) {
+        try {
+          htmlContentOnError = await page.content();
+        } catch (contentError) {
+          logger.warn(`[PuppeteerController navigate] Could not get page content after navigation error: ${contentError.message}`);
+        }
       }
-      throw new NetworkError(`Navigation to ${url} failed`, {
-        url,
-        originalError: error.message,
-        htmlContent: htmlContentOnError
+      if (this.scraperSettings.debug) {
+        logger.error(`[DEBUG_MODE] Full error during navigation to ${url}:`, error);
+        if (htmlContentOnError) logger.debug(`[DEBUG_MODE] HTML content on navigation error (first 500 chars): ${htmlContentOnError.substring(0,500)}...`);
+      }
+      if (error instanceof ScraperError) throw error;
+      throw new NetworkError(`Navigation to ${url} failed: ${error.message}`, {
+        originalErrorName: error.name,
+        originalErrorMessage: error.message,
+        stack: error.stack,
+        htmlContentLength: htmlContentOnError?.length, 
+        finalUrlAttempted: page.isClosed() ? url : (page.url() || url) 
       });
     }
   }
 
   async performInteractions(page) {
-    logger.debug('Performing generic page interactions (scroll, mouse move).');
+    logger.debug('[PuppeteerController performInteractions] Performing generic page interactions.');
     try {
-      if (page.isClosed()) {
-        logger.warn('Attempted interactions on a closed page.');
-        return;
-      }
-      // Simulate some mouse movement
-      await page.mouse.move(Math.random() * 500 + 100, Math.random() * 500 + 100, { steps: 5 });
-      await page.waitForTimeout(this.interactionDelay / 5);
+      await page.evaluate(async () => {
+        await new Promise((resolve) => {
+          let totalHeight = 0;
+          const distance = 100;
+          const timer = setInterval(() => {
+            const scrollHeight = document.body.scrollHeight;
+            window.scrollBy(0, distance);
+            totalHeight += distance;
+            if (totalHeight >= scrollHeight - window.innerHeight) {
+              clearInterval(timer);
+              resolve(true);
+            }
+          }, 100);
+        });
+      });
+      logger.debug('[PuppeteerController performInteractions] Scrolled to bottom.');
 
-      // Scroll down a bit, then up, then to a random position
-      const scrollAmount = Math.floor(Math.random() * 300 + 200);
-      await page.evaluate((amount) => window.scrollBy(0, amount), scrollAmount);
-      await page.waitForTimeout(this.interactionDelay / 4 + Math.random() * 50);
-      await page.evaluate((amount) => window.scrollBy(0, -amount / 2), scrollAmount);
-      await page.waitForTimeout(this.interactionDelay / 4 + Math.random() * 50);
-      await page.evaluate(() => window.scrollTo(0, Math.random() * document.body.scrollHeight / 3));
-      await page.waitForTimeout(this.interactionDelay / 4 + Math.random() * 50);
+      const interactionDelay = this.scraperSettings.puppeteerInteractionDelay || 2000;
+      await page.waitForTimeout(interactionDelay);
+      logger.debug(`[PuppeteerController performInteractions] Waited for interactionDelay: ${interactionDelay}ms`);
 
-
-      // Move mouse again
-      await page.mouse.move(Math.random() * 500 + 300, Math.random() * 500 + 300, { steps: 5 });
-      await page.waitForTimeout(this.interactionDelay / 5);
-
-      logger.debug('Generic interactions completed.');
+      logger.info('[PuppeteerController performInteractions] Generic page interactions completed.');
     } catch (error) {
-      if (!error.message.includes('Target closed')) { // Ignore errors if page closed during interaction
-        logger.warn(`Error during generic page interactions: ${error.message}`);
+      if (!error.message.includes('Target closed') && !error.message.includes('Navigation failed')) {
+        logger.warn(`[PuppeteerController performInteractions] Error during generic page interactions: ${error.message}`);
+        if (this.scraperSettings.debug) {
+          logger.warn('[DEBUG_MODE] Full error during performInteractions:', error);
+        }
+      } else {
+        logger.debug(`[PuppeteerController performInteractions] Interaction interrupted by navigation/closure: ${error.message}`);
       }
     }
   }
 
   async getPageContent(page) {
+    logger.debug('[PuppeteerController getPageContent] Getting page content.');
     try {
-      if (page.isClosed()) {
-        logger.warn('Attempted to get content from a closed page.');
-        return null;
-      }
       const content = await page.content();
-      logger.debug('Page content retrieved.');
+      logger.info(`[PuppeteerController getPageContent] Page content retrieved. Length: ${content?.length}`);
+      if (this.scraperSettings.debug && content) {
+        logger.debug(`[PuppeteerController getPageContent] Content snippet (first 200 chars): ${content.substring(0,200)}...`);
+      }
       return content;
     } catch (error) {
-      logger.error(`Failed to get page content: ${error.message}`);
-      throw new NetworkError('Failed to get page content', {
-        pageUrl: await page.url().catch(() => 'unknown_url'),
-        originalError: error.message
-      });
+      logger.error(`[PuppeteerController getPageContent] Failed to get page content: ${error.message}`);
+      if (this.scraperSettings.debug) {
+        logger.error('[DEBUG_MODE] Full error during getPageContent:', error);
+      }
+      if (error instanceof ScraperError) throw error;
+      throw new NetworkError('Failed to get page content', { originalErrorName: error.name, originalErrorMessage: error.message, stack: error.stack });
     }
   }
 
   async queryXPathWithDetails(page, xpath) {
-    logger.debug(`Querying XPath: ${xpath}`);
+    logger.debug(`[PuppeteerController queryXPathWithDetails] Querying XPath: ${xpath}`);
     const result = {
-      xpath: xpath, // Include the queried XPath in the result
+      xpath: xpath,
       element_found_count: 0,
-      tagName: null, id: null, className: null,
-      textContentLength: 0, innerHTMLSnippet: '', innerHTML: '',
-      paragraphCount: 0, linkCount: 0, imageCount: 0,
+      tagName: null,
+      id: null,
+      className: null,
+      textContentLength: 0,
+      innerHTMLSample: '', 
+      paragraphCount: 0,
+      linkCount: 0,
+      imageCount: 0,
+      videoCount: 0,
+      audioCount: 0,
+      pictureCount: 0,
+      unwantedTagCount: 0,
       totalDescendantElements: 0,
     };
 
-    if (page.isClosed()) {
-      logger.warn(`Attempted XPath query on a closed page: ${xpath}`);
-      return result; // Return empty result
-    }
-
-    let elements = [];
     try {
-      elements = await page.$x(xpath);
+      const elements = await page.$x(xpath);
       result.element_found_count = elements.length;
 
       if (elements.length > 0) {
-        const firstElement = elements[0];
-        // Ensure it's an ElementHandle and not some other type
-        if (firstElement && typeof firstElement.evaluate === 'function') {
-          result.tagName = await firstElement.evaluate(el => el.tagName.toLowerCase());
-          result.id = await firstElement.evaluate(el => el.id || null);
-          result.className = await firstElement.evaluate(el => el.className || null);
+        const mainElement = elements[0];
+        result.tagName = await page.evaluate(el => el.tagName.toLowerCase(), mainElement);
+        result.id = await page.evaluate(el => el.id, mainElement);
+        result.className = await page.evaluate(el => el.className, mainElement);
+        
+        const innerHTMLFull = await page.evaluate(el => el.innerHTML, mainElement);
+        result.innerHTMLSample = innerHTMLFull.substring(0, 200) + (innerHTMLFull.length > 200 ? '...' : '');
 
-          const textContent = await firstElement.evaluate(el => el.textContent || '');
-          result.textContentLength = textContent.trim().length;
+        const innerContentDetails = await page.evaluate(el => {
+          const unwantedTags = new Set(['nav', 'footer', 'aside', 'header', 'form', 'script', 'style', 'figcaption', 'figure', 'details', 'summary', 'menu', 'dialog']);
+          
+          const getTextLength = (node) => {
+            let len = 0;
+            if (node.nodeType === Node.TEXT_NODE) {
+              len += (node.textContent || '').trim().length;
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+              if (!['SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'OBJECT', 'EMBED'].includes(node.tagName.toUpperCase())) {
+                for (const child of Array.from(node.childNodes)) {
+                  len += getTextLength(child);
+                }
+              }
+            }
+            return len;
+          };
 
-          const innerHTML = await firstElement.evaluate(el => el.innerHTML || '');
-          result.innerHTML = innerHTML; // Store full innerHTML
-          result.innerHTMLSnippet = innerHTML.substring(0, 200) + (innerHTML.length > 200 ? '...' : '');
+          const countTags = (parentElement, tagNames) => {
+            let count = 0;
+            if (!parentElement || typeof parentElement.getElementsByTagName !== 'function') return 0;
+            tagNames.forEach(tagName => {
+              count += parentElement.getElementsByTagName(tagName).length;
+            });
+            return count;
+          };
+          
+          let unwantedCount = 0;
+          el.querySelectorAll('*').forEach(descendant => {
+            if (unwantedTags.has(descendant.tagName.toLowerCase())) {
+              unwantedCount++;
+            }
+          });
 
-          result.paragraphCount = (await firstElement.$$('p')).length;
-          result.linkCount = (await firstElement.$$('a')).length;
-          result.imageCount = (await firstElement.$$('img')).length;
-          // video, audio, picture can be added if needed for mediaPresence score
-          result.totalDescendantElements = (await firstElement.$$('*')).length;
-        } else {
-            logger.warn(`XPath "${xpath}" matched but first item is not a valid ElementHandle.`);
+          return {
+            textContentLength: getTextLength(el),
+            paragraphCount: el.getElementsByTagName('p').length,
+            linkCount: el.getElementsByTagName('a').length,
+            imageCount: el.getElementsByTagName('img').length,
+            videoCount: el.getElementsByTagName('video').length,
+            audioCount: el.getElementsByTagName('audio').length,
+            pictureCount: el.getElementsByTagName('picture').length,
+            unwantedTagCount: unwantedCount,
+            totalDescendantElements: el.getElementsByTagName('*').length,
+          };
+        }, mainElement);
+
+        Object.assign(result, innerContentDetails);
+
+        for (const el of elements) {
+          await el.dispose();
         }
+        logger.debug(`[PuppeteerController queryXPathWithDetails] XPath "${xpath}" details: found=${result.element_found_count}, tagName=${result.tagName}, pCount=${result.paragraphCount}, textLen=${result.textContentLength}`);
+      } else {
+        logger.debug(`[PuppeteerController queryXPathWithDetails] XPath "${xpath}" found 0 elements.`);
       }
     } catch (error) {
-      logger.warn(`Error querying XPath "${xpath}" on page: ${error.message}`);
-      // Return partial result, error will be handled by caller if critical
-    } finally {
-      // Dispose of element handles to free up resources
-      for (const el of elements) {
-        if (el && typeof el.dispose === 'function') {
-          await el.dispose().catch(e => logger.warn(`Error disposing element handle: ${e.message}`));
-        }
+      logger.warn(`[PuppeteerController queryXPathWithDetails] Error querying XPath "${xpath}" on page: ${error.message}`);
+      if (this.scraperSettings.debug) {
+        logger.warn('[DEBUG_MODE] Full error during queryXPathWithDetails:', error);
       }
     }
     return result;
   }
 
+
   async cleanupPuppeteer(browser) {
     if (browser && browser.isConnected()) {
+      logger.debug('[PuppeteerController cleanupPuppeteer] Closing Puppeteer browser.');
       try {
         await browser.close();
-        logger.info('Puppeteer browser closed successfully.');
+        logger.info('[PuppeteerController cleanupPuppeteer] Puppeteer browser closed successfully.');
       } catch (error) {
-        logger.error(`Failed to close Puppeteer browser: ${error.message}`);
-        // Don't re-throw, just log, as cleanup is best-effort
+        logger.error(`[PuppeteerController cleanupPuppeteer] Failed to close Puppeteer browser: ${error.message}`);
+        if (this.scraperSettings.debug) {
+          logger.error('[DEBUG_MODE] Full error during browser close:', error);
+        }
       }
     } else {
-      logger.debug('Puppeteer browser already closed or not connected.');
+      logger.debug('[PuppeteerController cleanupPuppeteer] Browser already closed or not provided.');
     }
   }
 }

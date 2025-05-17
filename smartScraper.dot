@@ -6,41 +6,41 @@ digraph SmartScraperFlow {
   // Start and End
   Start [shape=ellipse, fillcolor=lightgreen];
   EndSuccess [shape=ellipse, fillcolor=lightgreen, label="Return Data"];
-  EndError [shape=ellipse, fillcolor=salmon, label="Return Error"];
+  EndError [shape=ellipse, fillcolor=salmon, label="Return Error\n(Operational or Critical Script Error)"]; // Updated EndError
 
   // Input
   InputURL [label="Input: URL, Proxy (optional), UA (optional)"];
 
   // Core Engine Decisions
   CheckKnownSite [label="Known Site Check\n(KnownSitesTableManager)"];
-  IsConfigValid [label="Attempt Known Config", shape=box, fillcolor=lightyellow]; // Changed from diamond to reflect action
+  IsConfigValid [label="Attempt Known Config", shape=box, fillcolor=lightyellow]; 
   KnownConfigWorks [label="Known Config Worked?", shape=diamond, fillcolor=lightyellow];
   
   // Discovery Sub-System
   DiscoveryProcess [label="Unknown Site / Re-Discovery Process", shape= Mrecord, fillcolor=lightgoldenrodyellow,
     label="{Discovery Sub-system | \
       C.1 Initial Probing (cURL, Puppeteer-Stealth) | \
-      Detect CAPTCHA (HtmlAnalyser - now HtmlAnalyserFixed) | \
+      Detect CAPTCHA (HtmlAnalyserFixed) | \
       Compare DOMs (DomComparator) | \
       C.2 Page Prep for XPath Discovery (Puppeteer Interactions) | \
-      C.3 DOM Structure Extraction (HtmlAnalyser - Planned) & XPath Discovery (LLMInterface, ContentScoringEngine) | \
+      C.3 DOM Structure Extraction (HtmlAnalyserFixed) & XPath Discovery (LLMInterface, ContentScoringEngine) | \
       C.4 Outcome of Discovery\nStore New Config (KnownSitesTableManager)\
     }"
   ];
   
   InitialProbeCurl [label="Attempt cURL\n(CurlHandler)"];
   CurlResponse [label="cURL HTML Received?"];
-  CheckCaptchaCurl [label="CAPTCHA in cURL HTML?\n(HtmlAnalyser)", shape=diamond, fillcolor=lightyellow];
+  CheckCaptchaCurl [label="CAPTCHA in cURL HTML?\n(HtmlAnalyserFixed)", shape=diamond, fillcolor=lightyellow];
   
-  InitialProbePuppeteer [label="Attempt Puppeteer-Stealth\n(PuppeteerController, PluginManager from EXTENSION_PATHS)"];
+  InitialProbePuppeteer [label="Attempt Puppeteer-Stealth\n(PuppeteerController, PluginManager)"];
   PuppeteerResponse [label="Puppeteer HTML Received?"];
-  CheckCaptchaPuppeteer [label="CAPTCHA in Puppeteer HTML?\n(HtmlAnalyser)", shape=diamond, fillcolor=lightyellow];
+  CheckCaptchaPuppeteer [label="CAPTCHA in Puppeteer HTML?\n(HtmlAnalyserFixed)", shape=diamond, fillcolor=lightyellow];
   
   CompareDOMs [label="Compare cURL & Puppeteer DOMs\n(DomComparator)", shape=diamond, fillcolor=lightyellow];
   
   PreparePageForLLM [label="Prepare Page for LLM\n(Puppeteer Interactions if needed)"];
-  ExtractSnippets [label="Extract Snippets/DOM Structure\n(HtmlAnalyser)"]; // DOM Structure is planned
-  LLMXPathDiscovery [label="LLM XPath Discovery Loop\n(LLMInterface, HtmlAnalyser, ContentScoringEngine)\nUp to MAX_LLM_RETRIES"];
+  ExtractSnippets [label="Extract Snippets/DOM Structure\n(HtmlAnalyserFixed)"]; 
+  LLMXPathDiscovery [label="LLM XPath Discovery Loop\n(LLMInterface, HtmlAnalyserFixed, ContentScoringEngine)\nUp to MAX_LLM_RETRIES"];
   XPathFoundLLM [label="XPath Found by LLM?", shape=diamond, fillcolor=lightyellow];
   
   DetermineMethodToStore [label="Determine Method to Store\n(curl, puppeteer_stealth, puppeteer_captcha)"];
@@ -56,15 +56,11 @@ digraph SmartScraperFlow {
       Basic Validation\
     }"
   ];
-  // ExecuteStoredMethod node removed, integrated into IsConfigValid/KnownConfigWorks logic
 
-  // CAPTCHA Handling
   CaptchaHandling [label="CAPTCHA Handling\n(CaptchaSolver, DataDomeSolver)"];
-  CaptchaSolved [label="CAPTCHA Solved?", shape=diamond, fillcolor=lightyellow];
 
-  // HTML Saving (Debug)
-  SaveHtmlSuccess [label="Save HTML (Success)\n(if DEBUG=true & SAVE_HTML_ON_SUCCESS_NAV=true)", fillcolor=lightgrey, shape=note];
-  SaveHtmlFailure [label="Save HTML (Failure)\n(if DEBUG=true)", fillcolor=lightgrey, shape=note];
+  SaveHtmlSuccess [label="Save HTML (Success)\n(if LOG_LEVEL=DEBUG & SAVE_HTML_ON_SUCCESS_NAV=true)", fillcolor=lightgrey, shape=note];
+  SaveHtmlFailure [label="Save HTML (Failure)\n(if LOG_LEVEL=DEBUG)", fillcolor=lightgrey, shape=note];
 
   // Connections
   Start -> InputURL;
@@ -72,38 +68,32 @@ digraph SmartScraperFlow {
   CheckKnownSite -> IsConfigValid [label="Config Found"];
   CheckKnownSite -> DiscoveryProcess [label="Unknown Site"];
   
-  IsConfigValid -> KnownConfigWorks; // Attempting the known config
-  KnownConfigWorks -> UpdateSuccessStats [label="Yes"];
-  KnownConfigWorks -> IncrementFailureAndRediscover [label="No (Config Failed)"];
+  IsConfigValid -> KnownConfigWorks; 
+  KnownConfigWorks -> UpdateSuccessStats [label="Yes (Operational Success)"];
+  KnownConfigWorks -> IncrementFailureAndRediscover [label="No (Operational Failure with Known Config)"];
 
   UpdateSuccessStats [label="Update Success Stats\n(KnownSitesTableManager)"];
-  UpdateSuccessStats -> SaveHtmlSuccess;
-  SaveHtmlSuccess -> EndSuccess;
+  UpdateSuccessStats -> SaveHtmlSuccess; 
   
   IncrementFailureAndRediscover [label="Increment Failure Count\n(KnownSitesTableManager)"];
   IncrementFailureAndRediscover -> DiscoveryProcess [label="Trigger Re-Discovery"];
 
-
-  // Discovery Process Details
   DiscoveryProcess -> InitialProbeCurl;
   InitialProbeCurl -> CurlResponse;
   CurlResponse -> CheckCaptchaCurl [label="Success"];
-  CurlResponse -> InitialProbePuppeteer [label="Fail (or proceed to Puppeteer anyway)"];
+  CurlResponse -> InitialProbePuppeteer [label="Fail / Insufficient"]; 
   
-  CheckCaptchaCurl -> InitialProbePuppeteer [label="No CAPTCHA"]; 
-  CheckCaptchaCurl -> CaptchaHandling [label="Yes (DataDome?)\nSkip Puppeteer-Stealth"]; 
-  CaptchaHandling -> InitialProbePuppeteer [label="CAPTCHA Not Solved / Other CAPTCHA"]; 
-  CaptchaHandling -> PreparePageForLLM [label="DataDome Solved by Puppeteer"];
-
-
+  CheckCaptchaCurl -> InitialProbePuppeteer [label="No CAPTCHA (HTML may be insufficient)"]; 
+  CheckCaptchaCurl -> CaptchaHandling [label="Yes (e.g., DataDome)\nTo Puppeteer-Captcha"]; 
+  
   InitialProbePuppeteer -> PuppeteerResponse;
   PuppeteerResponse -> CheckCaptchaPuppeteer [label="Success"];
-  PuppeteerResponse -> CompareDOMs [label="Fail (use cURL if available)"]; 
+  PuppeteerResponse -> CompareDOMs [label="Fail (Fallback to cURL if clean & available)"]; 
 
   CheckCaptchaPuppeteer -> CompareDOMs [label="No CAPTCHA"];
-  CheckCaptchaPuppeteer -> CaptchaHandling [label="Yes (DataDome?)\nUse Puppeteer"];
+  CheckCaptchaPuppeteer -> CaptchaHandling [label="Yes (e.g., DataDome)\nTo Puppeteer-Captcha"];
   
-  CompareDOMs -> PreparePageForLLM [label="Choose HTML for Analysis\n(cURL or Puppeteer)"];
+  CompareDOMs -> PreparePageForLLM [label="Choose HTML for Analysis"];
   
   PreparePageForLLM -> ExtractSnippets;
   ExtractSnippets -> LLMXPathDiscovery;
@@ -113,21 +103,24 @@ digraph SmartScraperFlow {
   DetermineMethodToStore -> StoreNewConfig;
   StoreNewConfig -> ExtractionProcess [label="Proceed to Extract"];
   
-  XPathFoundLLM -> SaveHtmlFailure [label="No (Discovery Failed)"];
-  SaveHtmlFailure -> EndError [label="Discovery Failed"];
+  XPathFoundLLM -> SaveHtmlFailure [label="No (Discovery Failed Operationally)"];
+  
+  CaptchaHandling -> PreparePageForLLM [label="Solved (Discovery)"]; 
+  CaptchaHandling -> ExecuteExtractionMethod [label="Solved (Extraction)"]; 
+  CaptchaHandling -> SaveHtmlFailure [label="Not Solved (Operational CAPTCHA Failure)"]; 
 
   ExtractionProcess -> CaptchaHandling [label="If method=puppeteer_captcha"];
-  CaptchaHandling -> ExecuteExtractionMethod [label="Solved"];
-  CaptchaHandling -> SaveHtmlFailure [label="Not Solved"]; 
-
   ExtractionProcess -> ExecuteExtractionMethod [label="If method != puppeteer_captcha"];
+  
   ExecuteExtractionMethod [label="Execute Method & Extract Content"];
   ExecuteExtractionMethod -> ExtractionSuccessFromDiscovery [label="Content Extracted"];
   ExtractionSuccessFromDiscovery [label="Extraction Successful?", shape=diamond, fillcolor=lightyellow];
-  ExtractionSuccessFromDiscovery -> SaveHtmlSuccess [label="Yes"];
-  ExtractionSuccessFromDiscovery -> SaveHtmlFailure [label="No (Extraction Failed)"];
+  ExtractionSuccessFromDiscovery -> SaveHtmlSuccess [label="Yes (Operational Success)"];
+  ExtractionSuccessFromDiscovery -> SaveHtmlFailure [label="No (Operational Extraction Failed)"];
   
-  DiscoveryProcess -> SaveHtmlFailure [label="Critical Error During Discovery"];
-  ExtractionProcess -> SaveHtmlFailure [label="Critical Error During Extraction"];
+  SaveHtmlSuccess -> EndSuccess;
   SaveHtmlFailure -> EndError; 
+
+  DiscoveryProcess -> SaveHtmlFailure [label="Operational Error During Discovery"];
+  ExtractionProcess -> SaveHtmlFailure [label="Operational Error During Extraction"];
 }

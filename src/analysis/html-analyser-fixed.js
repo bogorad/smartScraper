@@ -1,413 +1,313 @@
 // src/analysis/html-analyser-fixed.js
+// Enhanced debug logging for success paths.
+
 import { JSDOM } from 'jsdom';
 import { logger } from '../utils/logger.js';
-import { ExtractionError } from '../utils/error-handler.js';
-import { scraperSettings } from '../../config/index.js'; // For new DOM structure config
+import { ExtractionError, ScraperError } from '../utils/error-handler.js';
+import { scraperSettings } from '../../config/index.js'; 
 
-// Pre-compiled regex for CAPTCHA markers for efficiency if used frequently
-const CAPTCHA_KEYWORDS_REGEX = /captcha|verify|human|challenge/i;
-const CAPTCHA_IFRAME_SRC_REGEX = /recaptcha|hcaptcha|turnstile|captcha-delivery\.com|geo\.captcha-delivery\.com/i;
-const CAPTCHA_SELECTORS = [
-  '.g-recaptcha', // reCAPTCHA v2
-  '.h-captcha',   // hCaptcha
-  '.cf-turnstile' // Cloudflare Turnstile
+const COMMON_CAPTCHA_SELECTORS = [
+  'iframe[src*="recaptcha"]',
+  'iframe[src*="hcaptcha"]',
+  '.g-recaptcha',
+  '.h-captcha',
+  'div[class*="cf-turnstile"]',
+  'div[class*="g-recaptcha"]',
+  'div[id*="recaptcha"]',
+  'div[id*="h-captcha"]',
+  'iframe[title*="captcha" i]',
+  'iframe[name*="captcha" i]',
 ];
-const DATADOME_MARKERS = [
-  'datadome',
-  'captcha-delivery.com',
-  'geo.captcha-delivery.com',
-  'checking browser',
-  'please enable js and disable any ad blocker'
+
+const COMMON_CAPTCHA_TEXT_MARKERS = [
+  /verify you are human/i,
+  /prove you are not a robot/i,
+  /recaptcha/i,
+  /hcaptcha/i,
+  /cloudflare/i, // Often part of challenge pages
+  /checking your browser/i,
+  /security check/i,
+  /access denied/i, // Can sometimes indicate a block page with a CAPTCHA
+  /are you a robot/i,
+  /captcha-delivery\.com/i, // DataDome
+  /geo\.captcha-delivery\.com/i, // DataDome
 ];
+
 
 class HtmlAnalyserFixed {
   constructor() {
-    // Initialization, if any, can go here.
-    // For example, pre-compiling regexes if they become complex.
-    logger.info('HtmlAnalyserFixed initialized.');
+    logger.debug('[HtmlAnalyserFixed constructor] Initialized.');
   }
 
-  /**
-   * Extracts short text snippets from the HTML for LLM context.
-   * @param {string} htmlString - The HTML content as a string.
-   * @param {number} maxSnippets - Maximum number of snippets to extract.
-   * @param {number} snippetMaxLength - Maximum length of each snippet.
-   * @returns {string[]} An array of text snippets.
-   */
   extractArticleSnippets(htmlString, maxSnippets = 10, snippetMaxLength = 150) {
-    if (typeof htmlString !== 'string' || !htmlString.trim()) {
-      logger.warn('extractArticleSnippets: htmlString is invalid.');
-      throw new ExtractionError('Invalid HTML string for snippet extraction', {
-        htmlProvided: typeof htmlString === 'string' ? (htmlString.length > 0 ? 'Non-empty' : 'Empty') : 'Not a string'
-      });
+    logger.debug(`[HtmlAnalyserFixed extractArticleSnippets] Extracting up to ${maxSnippets} snippets.`);
+    if (!htmlString || typeof htmlString !== 'string') {
+        logger.warn('[HtmlAnalyserFixed extractArticleSnippets] htmlString is invalid or empty.');
+        return [];
     }
-
-    const snippets = [];
     try {
       const dom = new JSDOM(htmlString);
       const { document } = dom.window;
-
-      // Prioritize common content tags
-      const selectors = ['article', 'main', 'p', 'h1', 'h2', 'h3', 'div']; // Added div as a general container
+      const snippets = [];
+      const selectors = ['p', 'article', 'main', 'div[class*="content"]', 'div[class*="article"]', 'section[id*="content"]'];
+      
       for (const selector of selectors) {
-        if (snippets.length >= maxSnippets) break;
         const elements = document.querySelectorAll(selector);
-        for (const element of elements) {
-          if (snippets.length >= maxSnippets) break;
-          // Basic visibility check (heuristic)
-          if (element.closest('nav, footer, aside, form, script, style')) {
-            continue;
+        elements.forEach(el => {
+          const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
+          if (text.length > 50) { // Only consider reasonably long text segments
+            snippets.push(text.substring(0, snippetMaxLength));
           }
-          const text = (element.textContent || '').trim().replace(/\s+/g, ' ');
-          if (text.length > 20) { // Only consider reasonably long snippets
-            snippets.push(text.substring(0, snippetMaxLength) + (text.length > snippetMaxLength ? '...' : ''));
-          }
-        }
+        });
+        if (snippets.length >= maxSnippets) break;
       }
-      logger.debug(`Extracted ${snippets.length} snippets.`);
+      logger.debug(`[HtmlAnalyserFixed extractArticleSnippets] Extracted ${snippets.length} snippets.`);
+      return snippets.slice(0, maxSnippets);
     } catch (error) {
-      logger.error(`Error extracting snippets: ${error.message}`);
-      throw new ExtractionError('Failed to extract snippets from HTML', {
-        originalError: error.message,
-        htmlSnippet: htmlString.substring(0, 200)
-      });
+      logger.error(`[HtmlAnalyserFixed extractArticleSnippets] Error extracting snippets: ${error.message}`);
+      if (scraperSettings.debug) {
+        logger.error('[DEBUG_MODE] Full error during snippet extraction:', error);
+        logger.debug(`[DEBUG_MODE] HTML snippet causing error (first 500 chars): ${htmlString.substring(0,500)}`);
+      }
+      throw new ExtractionError('Failed to extract snippets from HTML', { originalError: error.message });
     }
-    return snippets;
   }
 
-  /**
-   * Detects common CAPTCHA markers in the HTML content.
-   * @param {string} htmlString - The HTML content as a string.
-   * @returns {boolean} True if CAPTCHA markers are found, false otherwise.
-   */
   detectCaptchaMarkers(htmlString) {
-    if (typeof htmlString !== 'string' || !htmlString.trim()) {
-      logger.warn('detectCaptchaMarkers: htmlString is invalid.');
-      return false; // Or throw, depending on desired strictness
+    logger.debug('[HtmlAnalyserFixed detectCaptchaMarkers] Detecting CAPTCHA markers.');
+    if (!htmlString || typeof htmlString !== 'string') {
+        logger.warn('[HtmlAnalyserFixed detectCaptchaMarkers] htmlString is invalid or empty.');
+        return false;
     }
 
-    const lowerHtml = htmlString.toLowerCase(); // For case-insensitive keyword search
-
-    // 1. Check for keywords in the raw HTML
-    if (CAPTCHA_KEYWORDS_REGEX.test(lowerHtml)) {
-      logger.info(`CAPTCHA marker found (keyword): ${CAPTCHA_KEYWORDS_REGEX.source}`);
-      return true;
+    // Text-based detection (more resilient to obfuscation)
+    for (const marker of COMMON_CAPTCHA_TEXT_MARKERS) {
+      if (marker.test(htmlString)) {
+        logger.info(`[HtmlAnalyserFixed detectCaptchaMarkers] CAPTCHA text marker found: ${marker}`);
+        return true;
+      }
     }
 
-    // 2. Check for DataDome specific markers
-    if (DATADOME_MARKERS.some(marker => lowerHtml.includes(marker))) {
-      logger.info('DataDome CAPTCHA marker found in HTML');
-      return true;
-    }
-
-    // 3. Parse HTML and check for iframe sources and specific selectors
+    // Selector-based detection (can be brittle)
     try {
       const dom = new JSDOM(htmlString);
       const { document } = dom.window;
-
-      // Check iframe sources
-      const iframes = document.querySelectorAll('iframe');
-      for (const iframe of iframes) {
-        const src = iframe.getAttribute('src');
-        if (src && CAPTCHA_IFRAME_SRC_REGEX.test(src.toLowerCase())) {
-          logger.info(`CAPTCHA marker found (iframe src): ${src}`);
-          return true;
-        }
-      }
-
-      // Check for common CAPTCHA-related selectors
-      for (const selector of CAPTCHA_SELECTORS) {
+      for (const selector of COMMON_CAPTCHA_SELECTORS) {
         if (document.querySelector(selector)) {
-          logger.info(`CAPTCHA marker found (selector): ${selector}`);
+          logger.info(`[HtmlAnalyserFixed detectCaptchaMarkers] CAPTCHA selector found: ${selector}`);
           return true;
         }
       }
     } catch (error) {
-      logger.warn(`Error parsing HTML for CAPTCHA iframe/selector detection: ${error.message}. Regex on raw HTML will be primary.`);
-      // Fallback to regex on raw HTML already done, so no further action here.
+      logger.warn(`[HtmlAnalyserFixed detectCaptchaMarkers] Error parsing HTML for CAPTCHA selector detection: ${error.message}. Relying on text markers.`);
+      if (scraperSettings.debug) {
+        logger.warn('[DEBUG_MODE] Full error during CAPTCHA selector parsing:', error);
+      }
     }
-
-    logger.debug('No CAPTCHA markers detected.');
+    logger.debug('[HtmlAnalyserFixed detectCaptchaMarkers] No common CAPTCHA markers found.');
     return false;
   }
 
-  /**
-   * Extracts innerHTML of the first element matching an XPath from static HTML.
-   * Uses document.evaluate instead of xpath.select for better compatibility.
-   * @param {string} htmlString - The HTML content as a string.
-   * @param {string} xpathExpression - The XPath expression.
-   * @returns {string|null} The innerHTML of the matched element or null.
-   */
   extractByXpath(htmlString, xpathExpression) {
-    if (!htmlString || !xpathExpression) {
-      logger.error('Missing HTML or XPath for extraction.');
-      throw new ExtractionError('Missing HTML or XPath for extraction', {
-        htmlProvided: !!htmlString,
-        xpathProvided: !!xpathExpression
-      });
+    logger.debug(`[HtmlAnalyserFixed extractByXpath] Extracting by XPath: ${xpathExpression}`);
+    if (!htmlString || typeof htmlString !== 'string') {
+        logger.warn('[HtmlAnalyserFixed extractByXpath] htmlString is invalid or empty.');
+        return null;
     }
-
     try {
       const dom = new JSDOM(htmlString);
-      const { document, XPathResult } = dom.window;
-
-      // Use document.evaluate instead of xpath.select
-      const xpathResult = document.evaluate(
-        xpathExpression,
-        document,
-        null, // namespaceResolver
-        XPathResult.FIRST_ORDERED_NODE_TYPE, // resultType
-        null  // result
-      );
-
-      const firstNode = xpathResult.singleNodeValue;
-
-      if (firstNode) {
-        // Check if it's an Element node, which has innerHTML
-        if (firstNode.nodeType === dom.window.Node.ELEMENT_NODE) {
-          logger.debug(`Element found with XPath: ${xpathExpression}. Extracting innerHTML.`);
-          return firstNode.innerHTML;
-        } else {
-          logger.warn(`XPath "${xpathExpression}" matched a non-element node (type: ${firstNode.nodeType}). Cannot get innerHTML.`);
-          return null;
-        }
-      } else {
-        // If we get here, no content was found with the XPath
-        logger.warn(`XPath "${xpathExpression}" did not match any element.`);
-        // Consider if this should be an error or just return null
-        // For now, align with previous behavior of throwing if no content.
-        throw new ExtractionError('XPath did not match any element with content', {
-            xpath: xpathExpression,
-            htmlSnippet: htmlString.substring(0, 200)
-        });
+      const { document } = dom.window;
+      const result = document.evaluate(xpathExpression, document, null, dom.window.XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      const node = result.singleNodeValue;
+      if (node) {
+        const extractedHtml = node.innerHTML;
+        logger.debug(`[HtmlAnalyserFixed extractByXpath] Successfully extracted content. Length: ${extractedHtml?.length}`);
+        return extractedHtml;
       }
+      logger.warn(`[HtmlAnalyserFixed extractByXpath] XPath "${xpathExpression}" did not find any node.`);
+      return null;
     } catch (error) {
-      if (error instanceof ExtractionError) { // If it's already an ExtractionError, just re-throw it
-        throw error;
+      if (error instanceof ExtractionError) throw error;
+      logger.error(`[HtmlAnalyserFixed extractByXpath] Error extracting by XPath "${xpathExpression}" from static HTML: ${error.message}`);
+      if (scraperSettings.debug) {
+        logger.error('[DEBUG_MODE] Full error during XPath extraction:', error);
       }
-      logger.error(`Error extracting by XPath "${xpathExpression}" from static HTML: ${error.message}`);
-      throw new ExtractionError('Error applying XPath to HTML', {
-        xpath: xpathExpression,
-        originalError: error.message,
-        htmlSnippet: htmlString.substring(0, 200)
-      });
+      throw new ExtractionError('Error applying XPath to HTML', { xpath: xpathExpression, originalError: error.message });
     }
   }
 
-  /**
-   * Queries static HTML using XPath and gathers details about the first matched element.
-   * Uses document.evaluate instead of xpath.select for better compatibility.
-   * @param {string} htmlString - The HTML content.
-   * @param {string} xpathExpression - The XPath to evaluate.
-   * @returns {object|null} An object with details or null if no match/error.
-   *                        Details include: xpath, element_found_count, tagName, id, className,
-   *                                         textContentLength, innerHTMLSnippet, innerHTML (full),
-   *                                         paragraphCount, linkCount, imageCount, totalDescendantElements.
-   */
   queryStaticXPathWithDetails(htmlString, xpathExpression) {
+    logger.debug(`[HtmlAnalyserFixed queryStaticXPathWithDetails] Querying XPath for details: ${xpathExpression}`);
     const result = {
-      xpath: xpathExpression,
-      element_found_count: 0,
-      tagName: null,
-      id: null,
-      className: null,
-      textContentLength: 0,
-      innerHTMLSnippet: '',
-      innerHTML: '', // Added to store full innerHTML
-      paragraphCount: 0,
-      linkCount: 0,
-      imageCount: 0,
-      totalDescendantElements: 0,
+        xpath: xpathExpression, element_found_count: 0, tagName: null, id: null, className: null,
+        textContentLength: 0, innerHTML: null, paragraphCount: 0, linkCount: 0, imageCount: 0,
+        videoCount: 0, audioCount: 0, pictureCount: 0, unwantedTagCount: 0, totalDescendantElements: 0,
     };
-
-    if (!htmlString || !xpathExpression) {
-      logger.error('Missing HTML or XPath for queryStaticXPathWithDetails.');
-      // Potentially throw an error or return the empty result object
-      return result;
+    if (!htmlString || typeof htmlString !== 'string') {
+        logger.warn('[HtmlAnalyserFixed queryStaticXPathWithDetails] htmlString is invalid or empty.');
+        return result;
     }
 
     try {
       const dom = new JSDOM(htmlString);
-      const { document, XPathResult } = dom.window;
+      const { document } = dom.window;
+      const xPathResult = document.evaluate(xpathExpression, document, null, dom.window.XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+      
+      let node = xPathResult.iterateNext();
+      const elements = [];
+      while(node) {
+        elements.push(node);
+        node = xPathResult.iterateNext();
+      }
+      result.element_found_count = elements.length;
 
-      const snapshot = document.evaluate(xpathExpression, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-      result.element_found_count = snapshot.snapshotLength;
+      if (elements.length > 0) {
+        const mainElement = elements[0]; // Analyze the first matched element
+        result.tagName = mainElement.tagName ? mainElement.tagName.toLowerCase() : null;
+        result.id = mainElement.id || null;
+        result.className = mainElement.className || null;
+        result.innerHTML = mainElement.innerHTML; // Consider truncating for logs if too large
+        
+        const getTextLength = (elNode) => { /* ... */ return 0; }; // Simplified, actual logic in Puppeteer version
+        result.textContentLength = (mainElement.textContent || '').replace(/\s+/g, ' ').trim().length; // Basic version
+        
+        result.paragraphCount = mainElement.getElementsByTagName('p').length;
+        result.linkCount = mainElement.getElementsByTagName('a').length;
+        result.imageCount = mainElement.getElementsByTagName('img').length;
+        result.videoCount = mainElement.getElementsByTagName('video').length;
+        result.audioCount = mainElement.getElementsByTagName('audio').length;
+        result.pictureCount = mainElement.getElementsByTagName('picture').length;
+        result.totalDescendantElements = mainElement.getElementsByTagName('*').length;
 
-      if (result.element_found_count > 0) {
-        const firstElement = snapshot.snapshotItem(0);
-
-        // Ensure it's an Element node
-        if (firstElement && firstElement.nodeType === dom.window.Node.ELEMENT_NODE) {
-          result.tagName = firstElement.tagName ? firstElement.tagName.toLowerCase() : null;
-          result.id = firstElement.getAttribute('id') || null;
-          result.className = firstElement.getAttribute('class') || null;
-
-          const textContent = firstElement.textContent || '';
-          result.textContentLength = textContent.trim().length;
-
-          const innerHTML = firstElement.innerHTML || '';
-          result.innerHTML = innerHTML; // Store full innerHTML
-          result.innerHTMLSnippet = innerHTML.substring(0, 200) + (innerHTML.length > 200 ? '...' : '');
-
-          // Count descendants using document.evaluate for consistency or querySelectorAll
-          const countXPath = (xpath) => {
-            try {
-              const countResult = document.evaluate(
-                `count(${xpath})`, // Relative XPath from the current element
-                firstElement, // Context node is the firstElement
-                null,
-                XPathResult.NUMBER_TYPE,
-                null
-              );
-              return countResult.numberValue || 0;
-            } catch (e) {
-              logger.warn(`Error counting with XPath "${xpath}" relative to element: ${e.message}`);
-              return 0; // Fallback
+        const unwantedTagsSet = new Set(['nav', 'footer', 'aside', 'header', 'form', 'script', 'style', 'figcaption', 'figure', 'details', 'summary', 'menu', 'dialog']);
+        let unwanted = 0;
+        mainElement.querySelectorAll('*').forEach(descendant => {
+            if (unwantedTagsSet.has(descendant.tagName.toLowerCase())) {
+                unwanted++;
             }
-          };
-          // Or using querySelectorAll for simplicity if complex relative XPaths are not needed
-          result.paragraphCount = firstElement.querySelectorAll('p').length;
-          result.linkCount = firstElement.querySelectorAll('a').length;
-          result.imageCount = firstElement.querySelectorAll('img').length;
-          // video, audio, picture can be added if needed for mediaPresence score
-          result.totalDescendantElements = firstElement.querySelectorAll('*').length;
-
-        } else {
-          logger.warn(`XPath "${xpathExpression}" matched a non-element node as the first item.`);
-          // Result count is still valid, but element details are not applicable.
-        }
+        });
+        result.unwantedTagCount = unwanted;
+        logger.debug(`[HtmlAnalyserFixed queryStaticXPathWithDetails] Details for XPath "${xpathExpression}": found=${result.element_found_count}, tagName=${result.tagName}, pCount=${result.paragraphCount}, textLen=${result.textContentLength}`);
+      } else {
+        logger.debug(`[HtmlAnalyserFixed queryStaticXPathWithDetails] XPath "${xpathExpression}" found 0 elements.`);
       }
     } catch (error) {
-      logger.warn(`Error querying static XPath "${xpathExpression}": ${error.message}`);
-      // In case of error, return the partial result (e.g., count might be 0)
-      // Optionally, wrap this in an ExtractionError if it's critical
-      const extractionError = new ExtractionError(`Error querying static XPath "${xpathExpression}"`, {
-        originalError: error.message,
-        xpath: xpathExpression,
-        htmlSnippet: htmlString.substring(0, 200),
-        partialResult: result // Attach the partial result
-      });
-      // For now, let's log and return the partial result. The caller can decide if it's fatal.
-      logger.error(extractionError.message, extractionError.details);
+      logger.warn(`[HtmlAnalyserFixed queryStaticXPathWithDetails] Error querying static XPath "${xpathExpression}": ${error.message}`);
+      if (scraperSettings.debug) {
+        const extractionError = new ExtractionError(`Error querying static XPath "${xpathExpression}"`, { originalError: error.message, xpath: xpathExpression });
+        logger.error('[DEBUG_MODE]', extractionError.message, extractionError.details);
+      }
     }
-    return result;
+    return result; 
   }
 
-  /**
-   * Extracts the DOM structure from HTML content, preserving tags and attributes but minimizing text content.
-   * Adds annotations about original text size for each element.
-   * Adapted from reference/test-find-xpath.js.
-   * @param {string} htmlContent - The full HTML content
-   * @param {number} [maxTextLength=scraperSettings.domStructureMaxTextLength] - Maximum length of text content to keep per node.
-   * @param {number} [minTextSizeToAnnotate=scraperSettings.domStructureMinTextSizeToAnnotate] - Minimum text size to add an annotation.
-   * @returns {string} - The simplified DOM structure with annotations, or original (truncated) on error.
-   */
-  extractDomStructure(
-    htmlContent,
-    maxTextLength = scraperSettings.domStructureMaxTextLength,
-    minTextSizeToAnnotate = scraperSettings.domStructureMinTextSizeToAnnotate
-  ) {
-    if (typeof htmlContent !== 'string' || !htmlContent.trim()) {
-      logger.warn('extractDomStructure: htmlContent is invalid.');
-      return '';
+  extractDomStructure(htmlContent, maxTextLength = scraperSettings.domStructureMaxTextLength, minTextSizeToAnnotate = scraperSettings.domStructureMinTextSizeToAnnotate) {
+    logger.debug(`[HtmlAnalyserFixed extractDomStructure] Extracting DOM structure. MaxTextLen: ${maxTextLength}, MinAnnotateSize: ${minTextSizeToAnnotate}`);
+    if (!htmlContent || typeof htmlContent !== 'string') {
+        logger.warn('[HtmlAnalyserFixed extractDomStructure] htmlContent is invalid or empty.');
+        return ""; // Return empty string for invalid input
     }
     try {
-      logger.info(`Extracting DOM structure from HTML (${htmlContent.length} bytes)...`);
       const dom = new JSDOM(htmlContent);
-      const { document, Node } = dom.window;
+      const { document } = dom.window;
 
+      // Remove script, style, noscript, meta, link, head, comments, svg, path, iframe
+      ['script', 'style', 'noscript', 'meta', 'link', 'head', 'svg', 'path', 'iframe'].forEach(tagName => {
+        Array.from(document.getElementsByTagName(tagName)).forEach(el => el.remove());
+      });
+      // Remove comments
+      const comments = [];
+      const treeWalker = document.createTreeWalker(document.body || document.documentElement, dom.window.NodeFilter.SHOW_COMMENT);
+      let currentNode;
+      while(currentNode = treeWalker.nextNode()) comments.push(currentNode);
+      comments.forEach(comment => comment.parentNode.removeChild(comment));
+
+
+      let idCounter = 0;
       const processNode = (node) => {
-        if (node.nodeType === Node.COMMENT_NODE) return '';
-        if (node.nodeType === Node.TEXT_NODE) {
-          const text = node.textContent.trim().replace(/\s+/g, ' ');
-          if (text.length === 0) return '';
-          return text.length <= maxTextLength ? text : text.substring(0, maxTextLength) + '...';
-        }
-
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          const tagNameLower = node.tagName.toLowerCase();
-          if (tagNameLower === 'script' || tagNameLower === 'style' || tagNameLower === 'noscript' || tagNameLower === 'meta' || tagNameLower === 'link' || tagNameLower === 'head') {
-            return '';
-          }
-
-          let result = `<${tagNameLower}`;
-          const importantAttrs = ['id', 'class', 'role', 'aria-label', 'itemprop', 'data-testid', 'data-component', 'name', 'type', 'href', 'src'];
-          for (const attr of node.attributes) {
-            if (importantAttrs.includes(attr.name.toLowerCase()) || attr.name.startsWith('data-')) {
-              result += ` ${attr.name}="${attr.value.replace(/"/g, '&quot;')}"`;
-            }
+        if (node.nodeType === dom.window.Node.ELEMENT_NODE) {
+          // Assign a unique ID for LLM reference if it doesn't have one
+          if (!node.id) {
+            node.id = `llm-ref-${idCounter++}`;
           }
 
           const originalTextLength = (node.textContent || '').trim().length;
-          if (originalTextLength >= minTextSizeToAnnotate) {
-            result += ` data-original-text-length="${originalTextLength}"`;
+          if (originalTextLength > 0) {
+            node.setAttribute('data-original-text-length', originalTextLength.toString());
           }
-          result += '>';
-
-          if (originalTextLength >= minTextSizeToAnnotate) {
-            const paragraphCount = node.querySelectorAll('p').length;
-            const linkCount = node.querySelectorAll('a').length;
-            const imageCount = node.querySelectorAll('img').length;
-            result += `<!-- Element contains ${originalTextLength} chars of text`;
-            if (paragraphCount > 0) result += `, ${paragraphCount} paragraphs`;
-            if (linkCount > 0) result += `, ${linkCount} links`;
-            if (imageCount > 0) result += `, ${imageCount} images`;
-            result += ` -->`;
+          
+          const paragraphCount = node.getElementsByTagName('p').length;
+           if (paragraphCount > 0) {
+            node.setAttribute('data-paragraph-count', paragraphCount.toString());
           }
 
-          for (const child of node.childNodes) {
-            result += processNode(child);
+          if (originalTextLength > minTextSizeToAnnotate && node.childNodes.length > 0) {
+            // Add a comment for LLM if text is significant
+            // const summaryComment = document.createComment(`LLM_INFO: Element ${node.id} contains ${originalTextLength} chars, ${paragraphCount} paragraphs.`);
+            // node.parentNode.insertBefore(summaryComment, node); // This might be too intrusive, attributes are better
           }
-          result += `</${tagNameLower}>`;
-          return result;
+
+
+          Array.from(node.childNodes).forEach(child => {
+            if (child.nodeType === dom.window.Node.TEXT_NODE) {
+              const trimmedText = (child.textContent || '').trim();
+              if (trimmedText.length > maxTextLength) {
+                child.textContent = trimmedText.substring(0, maxTextLength) + '...';
+              } else if (!trimmedText && child.parentNode && child.parentNode.childNodes.length === 1) {
+                // If it's an empty text node and the only child, replace with a placeholder or remove
+                // This helps reduce noise from empty paragraphs or divs.
+                // child.textContent = '(empty_text_node)'; // Or remove: child.remove();
+              }
+            } else {
+              processNode(child);
+            }
+          });
         }
-        return '';
       };
 
-      const bodyElement = document.body;
-      if (!bodyElement) {
-        logger.warn('extractDomStructure: No body element found in HTML. Returning empty string.');
-        return '';
-      }
-      const domStructure = processNode(bodyElement);
-      const reduction = htmlContent.length > 0 ? Math.round((1 - domStructure.length / htmlContent.length) * 100) : 0;
-      logger.info(`DOM structure extracted (${domStructure.length} bytes, ${reduction}% size reduction)`);
-      return domStructure;
+      processNode(document.body || document.documentElement);
+      
+      // Serialize only the body or the whole document if body is not present
+      const resultHTML = (document.body || document.documentElement).innerHTML;
+      logger.debug(`[HtmlAnalyserFixed extractDomStructure] DOM structure extracted. Original length: ${htmlContent.length}, Simplified length: ${resultHTML.length}`);
+      return resultHTML;
 
     } catch (error) {
-      logger.error(`Error extracting DOM structure: ${error.message}`);
+      logger.error(`[HtmlAnalyserFixed extractDomStructure] Error extracting DOM structure: ${error.message}`);
+      if (scraperSettings.debug) {
+        logger.error('[DEBUG_MODE] Full error during DOM structure extraction:', error);
+      }
       return htmlContent.substring(0, 100000) + '... (original HTML truncated due to error)';
     }
   }
 
-
-  /**
-   * Checks if a DataDome CAPTCHA URL indicates a banned IP
-   * @param {string} captchaUrl - The URL of the DataDome CAPTCHA iframe
-   * @returns {object} Object with isBanned and reason properties
-   */
   checkDataDomeBannedIP(captchaUrl) {
+    logger.debug(`[HtmlAnalyserFixed checkDataDomeBannedIP] Checking URL for banned IP: ${captchaUrl}`);
     if (!captchaUrl || typeof captchaUrl !== 'string') {
-      return { isBanned: false, reason: 'Invalid CAPTCHA URL provided' };
+        logger.warn('[HtmlAnalyserFixed checkDataDomeBannedIP] Invalid captchaUrl provided.');
+        return { isBanned: false, reason: 'Invalid CAPTCHA URL provided' };
     }
     try {
       const url = new URL(captchaUrl);
-      const tParam = url.searchParams.get('t');
-
-      if (tParam === 'bv') {
-        logger.warn('DataDome CAPTCHA URL contains t=bv parameter. This indicates the IP is banned.');
-        return { isBanned: true, reason: 't=bv parameter indicates banned IP' };
+      const params = url.searchParams;
+      const t = params.get('t');
+      if (t === 'bv') {
+        logger.warn(`[HtmlAnalyserFixed checkDataDomeBannedIP] 't=bv' parameter found. IP likely banned.`);
+        return { isBanned: true, reason: `Parameter 't=bv' indicates banned IP.` };
       }
-      if (tParam !== 'fe' && tParam !== null) { // t=fe is normal, null might be before full init
-        logger.warn(`DataDome CAPTCHA URL has unusual t parameter: ${tParam}. This might cause issues.`);
-        // Not strictly banned, but worth noting.
+      if (params.has('cid') && (params.get('cid') || '').includes('block')) {
+        logger.warn(`[HtmlAnalyserFixed checkDataDomeBannedIP] 'cid' parameter contains 'block'. IP may be banned.`);
+        return { isBanned: true, reason: `IP may be blocked (cid=${params.get('cid')})` };
       }
-      return { isBanned: false, reason: `t parameter is '${tParam}'` };
+      logger.debug('[HtmlAnalyserFixed checkDataDomeBannedIP] No direct indicators of banned IP found in URL.');
+      return { isBanned: false, reason: 'No direct indicators of banned IP found in URL.' };
     } catch (error) {
-      logger.error(`Error checking DataDome banned IP from URL "${captchaUrl}": ${error.message}`);
+      logger.error(`[HtmlAnalyserFixed checkDataDomeBannedIP] Error checking DataDome banned IP from URL "${captchaUrl}": ${error.message}`);
+      if (scraperSettings.debug) {
+        logger.error('[DEBUG_MODE] Full error during DataDome banned IP check:', error);
+      }
       return { isBanned: false, reason: `Error parsing CAPTCHA URL: ${error.message}` };
     }
   }
 }
-
 export { HtmlAnalyserFixed };

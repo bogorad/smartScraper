@@ -1,3 +1,15 @@
+#!/bin/sh
+# This is a shell archive (shar).
+# To extract, save this file as e.g. fix_bug_1.shar,
+# make it executable (chmod +x fix_bug_1.shar),
+# and run it from your project's root directory (./fix_bug_1.shar).
+# This will overwrite src/core/engine.js. PLEASE BACK UP YOUR WORK.
+
+echo "x - Creating directories (if they don't exist)"
+mkdir -p src/core || exit 1
+
+echo "x - Fixing src/core/engine.js (Critical Bug #1: Incorrect config key)"
+cat > src/core/engine.js << 'SHAR_EOF'
 // src/core/engine.js
 // Enhanced debug logging for success paths and decision points.
 // HTML content removed from error details.
@@ -654,3 +666,8 @@ class CoreScraperEngine {
 }
 
 export { CoreScraperEngine };
+SHAR_EOF
+
+echo "x - Finished extracting files."
+echo "Critical Bug #1 has been addressed in src/core/engine.js."
+exit 0

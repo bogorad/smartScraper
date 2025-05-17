@@ -1,360 +1,322 @@
 // src/services/captcha-solver.js
-
 import axios from 'axios';
 import { logger } from '../utils/logger.js';
 import { CaptchaError, ConfigurationError } from '../utils/error-handler.js';
 import { DataDomeSolver } from './datadome-solver.js';
-// No need to import captchaSolverConfig directly here if passed in constructor
+import { KnownSitesManager } from '../storage/known-sites-manager.js';
+// Corrected import path
+import { captchaSolverConfig as importedCaptchaConfig } from '../../config/index.js'; 
 
 class CaptchaSolver {
-    constructor(captchaConfig, knownSitesManager = null) {
-        if (!captchaConfig || !captchaConfig.apiKey || !captchaConfig.service) {
-            throw new ConfigurationError('CaptchaSolver: Missing required CAPTCHA configuration', {
-                missing: ['apiKey', 'service'].filter(key => !captchaConfig || !captchaConfig[key])
-            });
-        }
-        this.config = captchaConfig;
-        this.serviceName = captchaConfig.service.toLowerCase();
-        this.knownSitesManager = knownSitesManager;
+  constructor(captchaConfig, knownSitesManager) {
+    this.config = captchaConfig || importedCaptchaConfig; 
+    this.knownSitesManager = knownSitesManager;
 
-        // Set up API endpoints based on the service
+    if (!this.config || !this.config.service || !this.config.apiKey) {
+      throw new ConfigurationError('CaptchaSolver: Missing required CAPTCHA configuration', {
+        missing: ['apiKey', 'service'].filter(key => !this.config || !this.config[key])
+      });
+    }
+    this.serviceName = this.config.service.toLowerCase();
+
+    if (this.serviceName === '2captcha' || (this.config.dataDomeDomains && this.config.dataDomeDomains.length > 0)) {
+        this.dataDomeSolver = new DataDomeSolver(this.config, this.knownSitesManager);
+        logger.info('DataDomeSolver initialized within CaptchaSolver.');
+    } else {
+        logger.warn(`DataDomeSolver not initialized; service is ${this.serviceName} and no specific DataDome domains configured.`);
+        this.dataDomeSolver = null;
+    }
+    
+    this.twoCaptchaInUrl = this.config.twoCaptchaInUrl || 'https://2captcha.com/in.php';
+    this.twoCaptchaResUrl = this.config.twoCaptchaResUrl || 'https://2captcha.com/res.php';
+
+    logger.info(`CaptchaSolver initialized for service: ${this.serviceName}`);
+  }
+
+  async solveIfPresent(page, currentUrl) {
+    // ... (method content as provided in your dump)
+    logger.info(`[CaptchaSolver solveIfPresent] Checking for CAPTCHAs on ${currentUrl}`);
+    if (this.dataDomeSolver) {
+        logger.debug(`[CaptchaSolver solveIfPresent] Current page URL: ${page.url()}`);
+        logger.debug('[CaptchaSolver solveIfPresent] Attempting DataDome specialized solver first.');
+        try {
+            const dataDomeResult = await this.dataDomeSolver.solveIfPresent(page);
+            if (dataDomeResult) { 
+                logger.info('[CaptchaSolver solveIfPresent] DataDome check completed successfully (either no DD CAPTCHA or solved/bypassed).');
+                return true; 
+            } else {
+                logger.warn('[CaptchaSolver solveIfPresent] DataDome CAPTCHA detected but could not be solved by specialized solver.');
+                return false; 
+            }
+        } catch (dataDomeError) {
+            if (dataDomeError instanceof CaptchaError && dataDomeError.details?.reason === 'banned_ip') {
+                 logger.error(`[CaptchaSolver solveIfPresent] DataDome indicates banned IP for ${currentUrl}. Aborting CAPTCHA solve. Error: ${dataDomeError.message}`);
+                 throw dataDomeError; 
+            }
+            logger.warn(`[CaptchaSolver solveIfPresent] DataDome solver error: ${dataDomeError.message}, continuing with general CAPTCHA detection.`);
+            // Check a debug flag from the config that CaptchaSolver holds
+            const debugEnabled = this.config.debug || (importedCaptchaConfig && importedCaptchaConfig.debug);
+            if (debugEnabled) { 
+                logger.error(`[DEBUG_MODE] Full error from DataDomeSolver:`, dataDomeError);
+            }
+        }
+    }
+
+    let captchaDetails = null;
+    try {
+        if (this.dataDomeSolver && await this.dataDomeSolver.detectCaptcha(page)) {
+            logger.info("[CaptchaSolver solveIfPresent] DataDome CAPTCHA still present or re-appeared after initial attempt. Relying on DataDomeSolver's outcome.");
+            const finalDDSolve = await this.dataDomeSolver.solveIfPresent(page);
+            return finalDDSolve; 
+        }
+        captchaDetails = await this._detectCaptchaType(page, currentUrl);
+    } catch (detectionError) {
+        logger.error(`[CaptchaSolver solveIfPresent] Error during general CAPTCHA detection: ${detectionError.message}`);
+        const debugEnabled = this.config.debug || (importedCaptchaConfig && importedCaptchaConfig.debug);
+        if (debugEnabled) {
+            logger.error(`[DEBUG_MODE] Full error during _detectCaptchaType:`, detectionError);
+        }
+        throw new CaptchaError('Error during general CAPTCHA detection', { originalError: detectionError.message, url: currentUrl });
+    }
+    
+
+    if (!captchaDetails) {
+      logger.info('[CaptchaSolver solveIfPresent] No known solvable general CAPTCHA detected on the page.');
+      return true; 
+    }
+
+    if (captchaDetails.type === 'DataDome') {
+        logger.warn('[CaptchaSolver solveIfPresent] DataDome CAPTCHA detected by general detection but not handled by specialized solver. This is unexpected.');
+        if (this.dataDomeSolver) return this.dataDomeSolver.solve(page, captchaDetails);
+        throw new CaptchaError('DataDome detected but no specialized solver available/triggered.', { captchaDetails });
+    }
+
+    logger.info(`[CaptchaSolver solveIfPresent] Detected general CAPTCHA: ${captchaDetails.type} with sitekey: ${captchaDetails.sitekey}`);
+    let solutionToken = null;
+
+    try {
         if (this.serviceName === '2captcha') {
-            // For standard 2Captcha API (reCAPTCHA, hCaptcha, etc.)
-            this.twoCaptchaInUrl = this.config.twoCaptcha?.inUrl || 'https://2captcha.com/in.php';
-            this.twoCaptchaResUrl = this.config.twoCaptcha?.resUrl || 'https://2captcha.com/res.php';
-
-            // For DataDome and other modern CAPTCHA types that use the new API
-            this.twoCaptchaCreateTaskUrl = this.config.twoCaptcha?.createTaskUrl || 'https://api.2captcha.com/createTask';
-            this.twoCaptchaGetResultUrl = this.config.twoCaptcha?.getResultUrl || 'https://api.2captcha.com/getTaskResult';
-
-            // Create specialized solvers
-            if (this.knownSitesManager) {
-                this.dataDomeSolver = new DataDomeSolver(captchaConfig, knownSitesManager);
-                logger.info('DataDomeSolver initialized with KnownSitesManager');
-            } else {
-                this.dataDomeSolver = new DataDomeSolver(captchaConfig, null);
-                logger.warn('DataDomeSolver initialized without KnownSitesManager - cookie storage disabled');
-            }
+          solutionToken = await this._solveWith2Captcha(captchaDetails, currentUrl);
+        } else {
+          logger.error(`[CaptchaSolver solveIfPresent] Unsupported CAPTCHA solving service: ${this.serviceName}`);
+          throw new CaptchaError('Unsupported CAPTCHA solving service', { service: this.serviceName });
         }
+    } catch (solvingError) {
+        logger.error(`[CaptchaSolver solveIfPresent] Error solving general CAPTCHA: ${solvingError.message}`);
+        const debugEnabled = this.config.debug || (importedCaptchaConfig && importedCaptchaConfig.debug);
+        if (debugEnabled) {
+            logger.error(`[DEBUG_MODE] Full error during general CAPTCHA solving call:`, solvingError);
+        }
+        throw new CaptchaError('Error solving general CAPTCHA', { originalError: solvingError.message, type: captchaDetails.type });
+    }
+    
 
-        logger.info(`CaptchaSolver initialized for service: ${this.serviceName}`);
+    if (!solutionToken) {
+      logger.error('[CaptchaSolver solveIfPresent] Failed to obtain general CAPTCHA solution token.');
+      throw new CaptchaError('Failed to obtain general CAPTCHA solution token', { type: captchaDetails.type });
+    }
+    logger.info(`[CaptchaSolver solveIfPresent] Successfully obtained general CAPTCHA solution token: ${solutionToken.substring(0,30)}...`);
+
+    try {
+        const submissionSuccess = await this._submitCaptchaSolution(page, captchaDetails, solutionToken);
+        if (submissionSuccess) {
+          logger.info('[CaptchaSolver solveIfPresent] General CAPTCHA solution submitted successfully.');
+          await page.waitForTimeout(this.config.postCaptchaSubmitDelay || 5000);
+          logger.debug(`[CaptchaSolver solveIfPresent] Waited for postCaptchaSubmitDelay.`);
+          return true;
+        } else {
+          logger.error('[CaptchaSolver solveIfPresent] Failed to submit general CAPTCHA solution to the page.');
+          throw new CaptchaError('Failed to submit general CAPTCHA solution to the page', { type: captchaDetails.type });
+        }
+    } catch (submissionError) {
+        logger.error(`[CaptchaSolver solveIfPresent] Error submitting general CAPTCHA solution: ${submissionError.message}`);
+        const debugEnabled = this.config.debug || (importedCaptchaConfig && importedCaptchaConfig.debug);
+        if (debugEnabled) {
+            logger.error(`[DEBUG_MODE] Full error during general CAPTCHA solution submission:`, submissionError);
+        }
+        throw new CaptchaError('Error submitting general CAPTCHA solution', { originalError: submissionError.message, type: captchaDetails.type });
+    }
+  }
+
+  async _detectCaptchaType(page, currentUrl) {
+    logger.debug(`[CaptchaSolver _detectCaptchaType] Detecting general CAPTCHA types on ${currentUrl}`);
+    const recaptchaV2Sitekey = await page.evaluate(() => {
+        const el = document.querySelector('.g-recaptcha[data-sitekey]');
+        return el ? el.getAttribute('data-sitekey') : null;
+    });
+    if (recaptchaV2Sitekey) {
+        logger.debug(`[CaptchaSolver _detectCaptchaType] Found reCAPTCHA v2 with sitekey: ${recaptchaV2Sitekey}`);
+        return { type: 'reCAPTCHAv2', sitekey: recaptchaV2Sitekey, pageUrl: currentUrl };
     }
 
-    /**
-     * Detects if a known CAPTCHA is present on the page and attempts to solve it.
-     * This is a high-level conceptual method. Implementation details are crucial.
-     * @param {object} page - The Puppeteer page object.
-     * @param {string} currentUrl - The URL of the page being checked.
-     * @returns {Promise<boolean>} True if a CAPTCHA was detected and successfully solved (or no CAPTCHA found), false otherwise.
-     */
-    async solveIfPresent(page, currentUrl) {
-        logger.info(`Checking for CAPTCHAs on ${currentUrl}`);
-
-        // First, check for DataDome CAPTCHA using the specialized solver
-        if (this.dataDomeSolver) {
-            try {
-                // Try to solve with DataDomeSolver first
-                const dataDomeResult = await this.dataDomeSolver.solveIfPresent(page);
-                if (dataDomeResult === true) {
-                    // Either no DataDome CAPTCHA was found, or it was successfully solved
-                    logger.info('DataDome check completed successfully');
-                    return true;
-                }
-                // If we get here, DataDome was detected but couldn't be solved
-                // We'll fall through to the general CAPTCHA detection
-                logger.warn('DataDome CAPTCHA could not be solved, continuing with general detection');
-            } catch (dataDomeError) {
-                // If it's a banned IP or other critical error, we should stop
-                if (dataDomeError instanceof CaptchaError && dataDomeError.details?.isBanned) {
-                    throw dataDomeError;
-                }
-                logger.warn(`DataDome solver error: ${dataDomeError.message}, continuing with general detection`);
-            }
+    const hcaptchaSitekey = await page.evaluate(() => {
+        const el = document.querySelector('.h-captcha[data-sitekey]');
+        if (el) return el.getAttribute('data-sitekey');
+        const iframe = document.querySelector('iframe[src*="hcaptcha.com"]');
+        if (iframe) {
+            // @ts-ignore
+            const src = iframe.getAttribute('src');
+            const match = src ? src.match(/sitekey=([A-Za-z0-9_-]+)/) : null;
+            return match ? match[1] : null;
         }
-
-        // 1. Detect other CAPTCHA types (reCAPTCHA v2, hCaptcha, etc.)
-        let captchaDetails = null;
-        try {
-            captchaDetails = await this._detectCaptchaType(page, currentUrl);
-        } catch (detectionError) {
-            logger.error(`Error during CAPTCHA detection: ${detectionError.message}`);
-            throw new CaptchaError('Error during CAPTCHA detection', {
-                url: currentUrl
-            }, detectionError);
-        }
-
-        if (!captchaDetails) {
-            logger.info('No known solvable CAPTCHA detected on the page.');
-            return true; // No CAPTCHA to solve, so "success" in this context
-        }
-
-        // Skip DataDome CAPTCHA as it's already handled by the specialized solver
-        if (captchaDetails.type === 'DataDome') {
-            logger.warn('DataDome CAPTCHA detected but not solved by specialized solver, this is unexpected');
-            return false;
-        }
-
-        logger.info(`Detected CAPTCHA: ${captchaDetails.type} with sitekey: ${captchaDetails.sitekey}`);
-
-        // 2. Send CAPTCHA to solving service
-        let solutionToken;
-        try {
-            if (this.serviceName === '2captcha') {
-                solutionToken = await this._solveWith2Captcha(captchaDetails, currentUrl);
-            } else if (this.serviceName === 'anticaptcha') {
-                // solutionToken = await this._solveWithAntiCaptcha(captchaDetails, currentUrl);
-                logger.warn('AntiCaptcha solver not yet implemented.');
-                throw new CaptchaError('AntiCaptcha solver not yet implemented', {
-                    captchaType: captchaDetails.type,
-                    url: currentUrl
-                });
-            } else {
-                logger.error(`Unsupported CAPTCHA solving service: ${this.serviceName}`);
-                throw new CaptchaError('Unsupported CAPTCHA solving service', {
-                    service: this.serviceName,
-                    captchaType: captchaDetails.type,
-                    url: currentUrl
-                });
-            }
-        } catch (solvingError) {
-            // If it's already a CaptchaError, just re-throw it
-            if (solvingError instanceof CaptchaError) {
-                throw solvingError;
-            }
-
-            logger.error(`Error solving CAPTCHA: ${solvingError.message}`);
-            throw new CaptchaError('Error solving CAPTCHA', {
-                captchaType: captchaDetails.type,
-                url: currentUrl
-            }, solvingError);
-        }
-
-        if (!solutionToken) {
-            logger.error('Failed to obtain CAPTCHA solution token.');
-            throw new CaptchaError('Failed to obtain CAPTCHA solution token', {
-                captchaType: captchaDetails.type,
-                url: currentUrl
-            });
-        }
-
-        logger.info('Successfully obtained CAPTCHA solution token.');
-
-        // 3. Submit solution token back to the page
-        try {
-            const submissionSuccess = await this._submitCaptchaSolution(page, captchaDetails, solutionToken);
-            if (submissionSuccess) {
-                logger.info('CAPTCHA solution submitted successfully.');
-                // It's crucial to wait for the page to react to the CAPTCHA solution
-                // This might involve waiting for navigation, an element to disappear/appear, or network activity.
-                await page.waitForTimeout(this.config.postCaptchaSubmitDelay || 5000); // Configurable delay
-                return true;
-            } else {
-                logger.error('Failed to submit CAPTCHA solution to the page.');
-                throw new CaptchaError('Failed to submit CAPTCHA solution to the page', {
-                    captchaType: captchaDetails.type,
-                    url: currentUrl
-                });
-            }
-        } catch (submissionError) {
-            // If it's already a CaptchaError, just re-throw it
-            if (submissionError instanceof CaptchaError) {
-                throw submissionError;
-            }
-
-            logger.error(`Error submitting CAPTCHA solution: ${submissionError.message}`);
-            throw new CaptchaError('Error submitting CAPTCHA solution', {
-                captchaType: captchaDetails.type,
-                url: currentUrl
-            }, submissionError);
-        }
+        return null;
+    });
+    if (hcaptchaSitekey) {
+        logger.debug(`[CaptchaSolver _detectCaptchaType] Found hCaptcha with sitekey: ${hcaptchaSitekey}`);
+        return { type: 'hCaptcha', sitekey: hcaptchaSitekey, pageUrl: currentUrl };
+    }
+    
+    const turnstileSitekey = await page.evaluate(() => {
+        const el = document.querySelector('.cf-turnstile[data-sitekey]');
+        return el ? el.getAttribute('data-sitekey') : null;
+    });
+    if (turnstileSitekey) {
+        logger.debug(`[CaptchaSolver _detectCaptchaType] Found Cloudflare Turnstile with sitekey: ${turnstileSitekey}`);
+        return { type: 'Turnstile', sitekey: turnstileSitekey, pageUrl: currentUrl };
     }
 
-    async _detectCaptchaType(page, currentUrl) {
-        // Check for reCAPTCHA v2
-        const recaptchaV2Sitekey = await page.evaluate(() => {
-            const el = document.querySelector('.g-recaptcha[data-sitekey]');
-            return el ? el.getAttribute('data-sitekey') : null;
+    logger.debug(`[CaptchaSolver _detectCaptchaType] No common general CAPTCHA types found.`);
+    return null;
+  }
+
+  async _solveWith2Captcha(captchaDetails, pageUrl) {
+    logger.debug(`[CaptchaSolver _solveWith2Captcha] Solving ${captchaDetails.type} for ${pageUrl} with 2Captcha.`);
+    if (captchaDetails.type === 'DataDome') {
+        logger.warn('[CaptchaSolver _solveWith2Captcha] _solveWith2Captcha called for DataDome, but should be handled by DataDomeSolver.');
+        return null; 
+    }
+
+    const params = {
+      key: this.config.apiKey,
+      method: captchaDetails.type === 'reCAPTCHAv2' ? 'userrecaptcha' : captchaDetails.type.toLowerCase(),
+      googlekey: captchaDetails.sitekey,
+      pageurl: pageUrl,
+      json: 1,
+      soft_id: 'YOUR_SOFT_ID' 
+    };
+
+    if (captchaDetails.type === 'Turnstile') {
+        params.method = 'turnstile';
+        params.sitekey = captchaDetails.sitekey; 
+        delete params.googlekey; 
+    }
+
+    const debugEnabled = this.config.debug || (importedCaptchaConfig && importedCaptchaConfig.debug);
+    if (debugEnabled) {
+        logger.debug('[DEBUG_MODE] Sending general CAPTCHA to 2Captcha with params:', params);
+    }
+    
+    let initialResponse;
+    try {
+        initialResponse = await axios.post(this.twoCaptchaInUrl, null, { params, timeout: 20000 });
+    } catch (error) {
+        logger.error(`[CaptchaSolver _solveWith2Captcha] Error on initial submission to 2Captcha: ${error.message}`);
+        if (debugEnabled) {
+            logger.error(`[DEBUG_MODE] Full error during 2Captcha initial submission:`, error);
+        }
+        throw new CaptchaError('Error submitting to 2Captcha service', { originalError: error.message, details: error.response?.data });
+    }
+    
+
+    if (initialResponse.data.status !== 1) {
+      logger.error(`[CaptchaSolver _solveWith2Captcha] 2Captcha submission error: ${initialResponse.data.request}`);
+      throw new CaptchaError(\`2Captcha submission error\`, { details: initialResponse.data.request });
+    }
+
+    const captchaId = initialResponse.data.request;
+    logger.info(\`[CaptchaSolver _solveWith2Captcha] CAPTCHA submitted to 2Captcha, ID: \${captchaId}. Polling for solution...\`);
+
+    const pollingInterval = this.config.pollingInterval || 5000;
+    const pollingTimeout = Date.now() + (this.config.defaultTimeout || 120) * 1000;
+
+    while (Date.now() < pollingTimeout) {
+      await new Promise(resolve => setTimeout(resolve, pollingInterval));
+      logger.debug(\`[CaptchaSolver _solveWith2Captcha] Polling 2Captcha for ID: \${captchaId}...\`);
+      try {
+        const resultResponse = await axios.get(this.twoCaptchaResUrl, {
+          params: { key: this.config.apiKey, action: 'get', id: captchaId, json: 1 },
+          timeout: 10000
         });
-        if (recaptchaV2Sitekey) {
-            return { type: 'reCAPTCHA_v2', sitekey: recaptchaV2Sitekey, url: currentUrl };
+
+        if (resultResponse.data.status === 1) {
+          logger.info(\`[CaptchaSolver _solveWith2Captcha] 2Captcha solution received for ID: \${captchaId}. Token: \${resultResponse.data.request.substring(0,30)}...\`);
+          return resultResponse.data.request; 
+        } else if (resultResponse.data.request === 'CAPCHA_NOT_READY') {
+          logger.debug('[CaptchaSolver _solveWith2Captcha] 2Captcha: CAPCHA_NOT_READY, continuing to poll.');
+        } else {
+          logger.error(\`[CaptchaSolver _solveWith2Captcha] 2Captcha polling error: \${resultResponse.data.request || 'Unknown error'}\`);
+          throw new CaptchaError('2Captcha polling error', { details: resultResponse.data.request });
         }
-
-        // Check for hCaptcha
-        const hcaptchaSitekey = await page.evaluate(() => {
-            const el = document.querySelector('.h-captcha[data-sitekey]');
-            if (el) return el.getAttribute('data-sitekey');
-            // hCaptcha can also be in an iframe
-            const iframe = document.querySelector('iframe[src*="hcaptcha.com"]');
-            if (iframe) {
-                const src = iframe.getAttribute('src');
-                const match = src.match(/sitekey=([A-Za-z0-9_-]+)/);
-                return match ? match[1] : null;
-            }
-            return null;
-        });
-        if (hcaptchaSitekey) {
-            return { type: 'hCaptcha', sitekey: hcaptchaSitekey, url: currentUrl };
+      } catch (pollError) {
+        logger.warn(\`[CaptchaSolver _solveWith2Captcha] 2Captcha polling attempt failed: \${pollError.message}. Retrying...\`);
+        if (debugEnabled) {
+            logger.warn(\`[DEBUG_MODE] Full error during 2Captcha polling:\`, pollError);
         }
+      }
+    }
+    logger.error(\`[CaptchaSolver _solveWith2Captcha] 2Captcha solution timed out for ID: \${captchaId}.\`);
+    throw new CaptchaError('2Captcha solution timed out.', { captchaId });
+  }
 
-        // Add detection for other CAPTCHA types (e.g., FunCAPTCHA, Cloudflare Turnstile)
-        // Cloudflare Turnstile often uses a div with class 'cf-turnstile' and a data-sitekey
-        const turnstileSitekey = await page.evaluate(() => {
-            const el = document.querySelector('.cf-turnstile[data-sitekey]');
-            return el ? el.getAttribute('data-sitekey') : null;
-        });
-        if (turnstileSitekey) {
-            return { type: 'CloudflareTurnstile', sitekey: turnstileSitekey, url: currentUrl };
-        }
-
-        // DataDome CAPTCHA detection is now handled by the specialized DataDomeSolver
-
-        return null; // No known CAPTCHA found
+  async _submitCaptchaSolution(page, captchaDetails, solutionToken) {
+    logger.info(\`[CaptchaSolver _submitCaptchaSolution] Attempting to submit CAPTCHA token for type: \${captchaDetails.type}\`);
+    const debugEnabled = this.config.debug || (importedCaptchaConfig && importedCaptchaConfig.debug);
+    if (debugEnabled) {
+        logger.debug(\`[CaptchaSolver _submitCaptchaSolution] Token: \${solutionToken.substring(0,30)}...\`);
     }
 
-    async _solveWith2Captcha(captchaDetails, pageUrl) {
-        // DataDome CAPTCHA is now handled by the specialized DataDomeSolver
+    const success = await page.evaluate((token, type) => {
+        let textarea;
+        let callbackFunctionName;
 
-        // Standard 2Captcha API for other CAPTCHA types
-        const params = {
-            key: this.config.apiKey,
-            method: captchaDetails.type === 'hCaptcha' ? 'hcaptcha' : 'userrecaptcha', // Differentiate for hCaptcha
-            googlekey: captchaDetails.sitekey,
-            pageurl: pageUrl,
-            json: 1,
-            // soft_id: 'YOUR_SOFTWARE_ID', // Optional: Your software ID from 2Captcha
-        };
-
-        if (captchaDetails.type === 'CloudflareTurnstile') {
-            params.method = 'turnstile';
-            // 'data-action' and 'data-cdata' might be needed for Turnstile if available on page
-            // params.action = captchaDetails.action;
-            // params.data = captchaDetails.cdata;
+        if (type === 'reCAPTCHAv2') {
+            textarea = document.getElementById('g-recaptcha-response') || document.querySelector('textarea[name="g-recaptcha-response"]');
+            const recaptchaDiv = document.querySelector('.g-recaptcha');
+            if (recaptchaDiv) callbackFunctionName = recaptchaDiv.getAttribute('data-callback');
+        } else if (type === 'hCaptcha') {
+            textarea = document.querySelector('textarea[name="h-captcha-response"]') || document.querySelector('textarea[name="g-recaptcha-response"]');
+            const hcaptchaDiv = document.querySelector('.h-captcha');
+            if (hcaptchaDiv) callbackFunctionName = hcaptchaDiv.getAttribute('data-callback');
+        } else if (type === 'Turnstile') {
+            textarea = document.querySelector('input[name="cf-turnstile-response"]'); 
+            const turnstileDiv = document.querySelector('.cf-turnstile');
+            if (turnstileDiv) callbackFunctionName = turnstileDiv.getAttribute('data-callback');
         }
 
-        logger.debug('Sending CAPTCHA to 2Captcha:', params);
-        let captchaId;
-        try {
-            const initialResponse = await axios.post(this.twoCaptchaInUrl, null, { params, timeout: 20000 });
+        if (textarea) {
+            // @ts-ignore
+            textarea.value = token;
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            textarea.dispatchEvent(new Event('change', { bubbles: true }));
 
-            if (initialResponse.data.status !== 1) {
-                throw new CaptchaError(`2Captcha submission error`, {
-                    errorCode: initialResponse.data.request || 'Unknown error',
-                    captchaType: captchaDetails.type,
-                    url: pageUrl
-                });
-            }
-
-            captchaId = initialResponse.data.request;
-        } catch (error) {
-            // If it's not already a CaptchaError, wrap it
-            if (!(error instanceof CaptchaError)) {
-                throw new CaptchaError('Error submitting to 2Captcha service', {
-                    captchaType: captchaDetails.type,
-                    url: pageUrl
-                }, error);
-            }
-            throw error;
-        }
-        logger.info(`CAPTCHA submitted to 2Captcha, ID: ${captchaId}. Polling for solution...`);
-
-        const pollingTimeout = Date.now() + (this.config.defaultTimeout || 120) * 1000;
-        const pollingInterval = (this.config.pollingInterval || 5) * 1000;
-
-        while (Date.now() < pollingTimeout) {
-            await new Promise(resolve => setTimeout(resolve, pollingInterval));
-            try {
-                const resultResponse = await axios.get(this.twoCaptchaResUrl, {
-                    params: { key: this.config.apiKey, action: 'get', id: captchaId, json: 1 },
-                    timeout: 10000
-                });
-                if (resultResponse.data.status === 1) {
-                    return resultResponse.data.request; // This is the solution token
-                } else if (resultResponse.data.request === 'CAPCHA_NOT_READY') {
-                    logger.debug('2Captcha: CAPCHA_NOT_READY, continuing to poll.');
-                } else {
-                    throw new Error(`2Captcha polling error: ${resultResponse.data.request || 'Unknown error'}`);
-                }
-            } catch (pollError) {
-                // Handle network errors during polling, but don't necessarily give up immediately
-                logger.warn(`2Captcha polling attempt failed: ${pollError.message}. Retrying...`);
-            }
-        }
-        throw new Error('2Captcha solution timed out.');
-    }
-
-    // DataDome CAPTCHA handling has been moved to the DataDomeSolver class
-
-    async _submitCaptchaSolution(page, captchaDetails, solutionToken) {
-        // This is highly dependent on how the specific CAPTCHA is implemented on the page.
-        // For reCAPTCHA v2, it's often setting the value of a hidden textarea and then triggering a callback or submit.
-        // For hCaptcha, similar. For Turnstile, it might also involve a callback.
-        // DataDome CAPTCHA is now handled by the specialized DataDomeSolver
-
-        if (captchaDetails.type === 'reCAPTCHA_v2' || captchaDetails.type === 'hCaptcha' || captchaDetails.type === 'CloudflareTurnstile') {
-            // Common pattern: find the textarea (often g-recaptcha-response or h-captcha-response)
-            // and set its value. Then, find the associated callback function or submit button.
-            const success = await page.evaluate((token, type) => {
-                let textarea;
-                if (type === 'reCAPTCHA_v2') {
-                    textarea = document.getElementById('g-recaptcha-response') || document.querySelector('textarea[name="g-recaptcha-response"]');
-                } else if (type === 'hCaptcha') {
-                    textarea = document.querySelector('textarea[name="h-captcha-response"]') || document.querySelector('textarea[name="g-recaptcha-response"]'); // Some sites reuse name
-                } else if (type === 'CloudflareTurnstile') {
-                    // Turnstile often uses a hidden input with name 'cf-turnstile-response'
-                    textarea = document.querySelector('input[name="cf-turnstile-response"]');
-                }
-
-
-                if (textarea) {
-                    textarea.value = token;
-                    textarea.innerHTML = token; // Sometimes needed
-                    textarea.dispatchEvent(new Event('input', { bubbles: true })); // Trigger input event
-                    textarea.dispatchEvent(new Event('change', { bubbles: true }));// Trigger change event
-
-
-                    // Attempt to find and call a callback function or click a submit button
-                    // This is the trickiest part and highly site-specific.
-                    // 1. Look for a JavaScript callback function (e.g., data-callback attribute on .g-recaptcha)
-                    let callbackFunctionName = null;
-                    if (type === 'reCAPTCHA_v2') {
-                        const recaptchaDiv = document.querySelector('.g-recaptcha');
-                        if (recaptchaDiv) callbackFunctionName = recaptchaDiv.getAttribute('data-callback');
-                    } else if (type === 'hCaptcha') {
-                        const hcaptchaDiv = document.querySelector('.h-captcha');
-                        if (hcaptchaDiv) callbackFunctionName = hcaptchaDiv.getAttribute('data-callback');
+            if (callbackFunctionName && typeof window[callbackFunctionName] === 'function') {
+                try {
+                    // @ts-ignore
+                    window[callbackFunctionName](token);
+                } catch (e) { console.error('Error calling CAPTCHA callback:', e); }
+            } else {
+                // @ts-ignore
+                let form = textarea.closest('form');
+                if (form) {
+                    const submitButton = form.querySelector('input[type="submit"], button[type="submit"], button:not([type])');
+                    if (submitButton) {
+                        // @ts-ignore
+                        submitButton.click();
                     }
-                    // Turnstile might also have a callback in data-callback or data-expired-callback
-
-                    if (callbackFunctionName && typeof window[callbackFunctionName] === 'function') {
-                        try {
-                            window[callbackFunctionName](token);
-                            return true;
-                        } catch (e) { console.error('Error calling CAPTCHA callback:', e); /* continue to try submit */ }
-                    }
-
-                    // 2. Try to find a submit button associated with the form containing the CAPTCHA
-                    let form = textarea.closest('form');
-                    if (form) {
-                        const submitButton = form.querySelector('input[type="submit"], button[type="submit"], button:not([type])');
-                        if (submitButton) {
-                            submitButton.click();
-                            return true;
-                        }
-                    }
-                    // If no form, maybe the CAPTCHA itself has a submit mechanism or is part of a larger JS flow
-                    // This indicates that the token was set, but automatic submission might not have occurred.
-                    // The calling code might need to wait for other page changes.
-                    return true; // Token was set, consider this a partial success for submission
                 }
-                return false; // Textarea not found
-            }, solutionToken, captchaDetails.type);
-            return success;
+            }
+            return true;
         }
-        logger.warn(`Submission logic for CAPTCHA type ${captchaDetails.type} not fully implemented.`);
         return false;
-    }
+    }, solutionToken, captchaDetails.type);
 
-    // DataDome cookie handling has been moved to the DataDomeSolver class
+    if (!success) {
+        logger.warn(\`[CaptchaSolver _submitCaptchaSolution] Failed to find standard textarea for \${captchaDetails.type} or execute standard submission mechanism.\`);
+    } else {
+        logger.debug(\`[CaptchaSolver _submitCaptchaSolution] Token set for \${captchaDetails.type}. Further page interaction/navigation might be needed.\`);
+    }
+    return success;
+  }
 }
 
 export { CaptchaSolver };

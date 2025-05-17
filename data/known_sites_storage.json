@@ -157,15 +157,15 @@
   },
   "foreignaffairs.com": {
     "domain_pattern": "foreignaffairs.com",
-    "method": "puppeteer_stealth",
-    "xpath_main_content": "//*[@class='article-dropcap--inner paywall-content']",
-    "last_successful_scrape_timestamp": null,
-    "failure_count_since_last_success": 0,
+    "method": "puppeteer_captcha",
+    "xpath_main_content": "//main[@id='content']/article",
+    "last_successful_scrape_timestamp": "2025-05-17T17:00:06.350Z",
+    "failure_count_since_last_success": 7,
     "site_specific_headers": null,
-    "user_agent_to_use": null,
-    "needs_captcha_solver": false,
+    "user_agent_to_use": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "needs_captcha_solver": true,
     "puppeteer_wait_conditions": null,
-    "discovered_by_llm": false
+    "discovered_by_llm": true
   },
   "foxnews.com": {
     "domain_pattern": "foxnews.com",
@@ -193,15 +193,15 @@
   },
   "ft.com": {
     "domain_pattern": "ft.com",
-    "method": "puppeteer_stealth",
-    "xpath_main_content": "//article[@id='article-body']",
-    "last_successful_scrape_timestamp": null,
+    "method": "curl",
+    "xpath_main_content": "//div[@class='article-content']",
+    "last_successful_scrape_timestamp": "2025-05-17T20:03:21.141Z",
     "failure_count_since_last_success": 0,
     "site_specific_headers": null,
-    "user_agent_to_use": null,
+    "user_agent_to_use": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "needs_captcha_solver": false,
     "puppeteer_wait_conditions": null,
-    "discovered_by_llm": false
+    "discovered_by_llm": true
   },
   "gizmodo.com": {
     "domain_pattern": "gizmodo.com",
@@ -304,7 +304,7 @@
     "method": "puppeteer_stealth",
     "xpath_main_content": "//article",
     "last_successful_scrape_timestamp": null,
-    "failure_count_since_last_success": 0,
+    "failure_count_since_last_success": 3,
     "site_specific_headers": null,
     "user_agent_to_use": null,
     "needs_captcha_solver": false,
@@ -565,15 +565,15 @@
   },
   "unherd.com": {
     "domain_pattern": "unherd.com",
-    "method": "puppeteer_stealth",
-    "xpath_main_content": "//article",
-    "last_successful_scrape_timestamp": null,
-    "failure_count_since_last_success": 0,
+    "method": "puppeteer_captcha",
+    "xpath_main_content": "//article[contains(@class, 'post-')]",
+    "last_successful_scrape_timestamp": "2025-05-17T17:02:35.546Z",
+    "failure_count_since_last_success": 1,
     "site_specific_headers": null,
-    "user_agent_to_use": null,
-    "needs_captcha_solver": false,
+    "user_agent_to_use": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "needs_captcha_solver": true,
     "puppeteer_wait_conditions": null,
-    "discovered_by_llm": false
+    "discovered_by_llm": true
   },
   "universetoday.com": {
     "domain_pattern": "universetoday.com",
@@ -640,7 +640,7 @@
     "method": "puppeteer_stealth",
     "xpath_main_content": "//section[contains(@class,'Container')]",
     "last_successful_scrape_timestamp": null,
-    "failure_count_since_last_success": 0,
+    "failure_count_since_last_success": 2,
     "site_specific_headers": null,
     "user_agent_to_use": null,
     "needs_captcha_solver": false,
@@ -658,5 +658,77 @@
     "needs_captcha_solver": false,
     "puppeteer_wait_conditions": null,
     "discovered_by_llm": false
+  },
+  "nzz.ch": {
+    "domain_pattern": "nzz.ch",
+    "method": "curl",
+    "xpath_main_content": "//div[@class='nzz-page-transition']/div/div[@class='article']",
+    "last_successful_scrape_timestamp": "2025-05-17T20:03:27.978Z",
+    "failure_count_since_last_success": 0,
+    "site_specific_headers": null,
+    "user_agent_to_use": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "needs_captcha_solver": false,
+    "puppeteer_wait_conditions": null,
+    "discovered_by_llm": true
+  },
+  "spiegel.de": {
+    "domain_pattern": "spiegel.de",
+    "method": "curl",
+    "xpath_main_content": "//main[@id='Inhalt']/article",
+    "last_successful_scrape_timestamp": "2025-05-17T20:03:31.320Z",
+    "failure_count_since_last_success": 0,
+    "site_specific_headers": null,
+    "user_agent_to_use": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "needs_captcha_solver": false,
+    "puppeteer_wait_conditions": null,
+    "discovered_by_llm": true
+  },
+  "thelocal.es": {
+    "domain_pattern": "thelocal.es",
+    "method": "curl",
+    "xpath_main_content": "//div[@class='col-xl-8 mobile-full-width']/main",
+    "last_successful_scrape_timestamp": "2025-05-17T20:03:36.784Z",
+    "failure_count_since_last_success": 0,
+    "site_specific_headers": null,
+    "user_agent_to_use": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "needs_captcha_solver": false,
+    "puppeteer_wait_conditions": null,
+    "discovered_by_llm": true
+  },
+  "cjr.org": {
+    "domain_pattern": "cjr.org",
+    "method": "curl",
+    "xpath_main_content": "//div[@class='container-lg']/div[@class='row']/div[@class='col-sm-8 entry-content']",
+    "last_successful_scrape_timestamp": "2025-05-17T20:03:39.961Z",
+    "failure_count_since_last_success": 0,
+    "site_specific_headers": null,
+    "user_agent_to_use": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "needs_captcha_solver": false,
+    "puppeteer_wait_conditions": null,
+    "discovered_by_llm": true
+  },
+  "thetimes.com": {
+    "domain_pattern": "thetimes.com",
+    "method": "curl",
+    "xpath_main_content": "//section[contains(@class, 'MainContainer') and contains(@class, 'MainContainer--noPadding')]",
+    "last_successful_scrape_timestamp": "2025-05-17T20:03:44.486Z",
+    "failure_count_since_last_success": 0,
+    "site_specific_headers": null,
+    "user_agent_to_use": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "needs_captcha_solver": false,
+    "puppeteer_wait_conditions": null,
+    "discovered_by_llm": true
+  },
+  "variety.com": {
+    "domain_pattern": "variety.com",
+    "method": "puppeteer_captcha",
+    "xpath_main_content": "//article[@class='u-border-r-1@tablet u-border-color-medium-grey u-padding-lr-4@tablet lrv-a-grid-item@tablet lrv-a-span6@tablet lrv-u-width-100p u-margin-b-1']",
+    "last_successful_scrape_timestamp": "2025-05-17T17:01:26.424Z",
+    "failure_count_since_last_success": 1,
+    "site_specific_headers": null,
+    "user_agent_to_use": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "needs_captcha_solver": true,
+    "puppeteer_wait_conditions": null,
+    "discovered_by_llm": true
   }
 }

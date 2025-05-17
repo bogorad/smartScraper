@@ -1,101 +1,74 @@
 // config/scraper-settings.js
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-export const scraperSettings = {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') }); // Ensure .env is loaded relative to project root
+
+const scraperSettings = {
   // General settings
-  maxLlmRetries: process.env.MAX_LLM_RETRIES ? parseInt(process.env.MAX_LLM_RETRIES, 10) : 2, // Max LLM retries for XPath discovery
-  minXpathScoreThreshold: 10, // Minimum score for an XPath to be considered valid
-  minParagraphThreshold: 3, // Minimum paragraphs for content to be considered valid
-  domComparisonThreshold: process.env.DOM_COMPARISON_THRESHOLD ? parseFloat(process.env.DOM_COMPARISON_THRESHOLD) : 0.60, // For cURL vs Puppeteer DOM similarity (0.0 to 1.0)
+  maxLlmRetries: process.env.MAX_LLM_RETRIES ? parseInt(process.env.MAX_LLM_RETRIES, 10) : 2,
+  minXpathScoreThreshold: process.env.MIN_XPATH_SCORE_THRESHOLD ? parseFloat(process.env.MIN_XPATH_SCORE_THRESHOLD) : 10,
+  domComparisonThreshold: process.env.DOM_COMPARISON_THRESHOLD ? parseFloat(process.env.DOM_COMPARISON_THRESHOLD) : 0.60,
+  knownSitesStoragePath: process.env.KNOWN_SITES_STORAGE_PATH || './data/known_sites_storage.json', // Default path
 
   // Puppeteer settings
-  puppeteerDefaultTimeout: process.env.PUPPETEER_TIMEOUT ? parseInt(process.env.PUPPETEER_TIMEOUT, 10) : 30000, // 30 seconds
-  puppeteerNavigationTimeout: process.env.PUPPETEER_NAV_TIMEOUT ? parseInt(process.env.PUPPETEER_NAV_TIMEOUT, 10) : 60000, // 60 seconds
-  puppeteerNetworkIdleTimeout: 5000, // Wait 5s after network becomes idle
-  puppeteerPostLoadDelay: 2000, // 2 seconds delay after page load for dynamic content/plugins
-  puppeteerInteractionDelay: 2000, // 2 seconds for mouse/scroll interactions
-  puppeteerExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium', // Path to Chromium executable
-  puppeteerHeadlessMode: process.env.PUPPETEER_HEADLESS === 'false' ? false : (process.env.PUPPETEER_HEADLESS === 'new' ? 'new' : true), // true, false, or 'new'
-
-  // Debugging and HTML saving
-  debug: process.env.DEBUG === 'true' || false, // For enabling debug features like saving HTML
-  saveHtmlOnSuccessNav: process.env.SAVE_HTML_ON_SUCCESS_NAV === 'true' || false, // Save HTML on successful navigation (if debug is true)
-  failedHtmlDumpsPath: './failed_html_dumps', // Relative to project root
-  successHtmlDumpsPath: './success_html_dumps', // Relative to project root for successful scrapes
-  knownSitesStoragePath: './data/known_sites_storage.json', // Relative to project root (Note: data/ is in .gitignore by default)
-
-  // DOM Structure Extraction for LLM settings
-  domStructureMaxTextLength: process.env.DOM_STRUCTURE_MAX_TEXT_LENGTH ? parseInt(process.env.DOM_STRUCTURE_MAX_TEXT_LENGTH, 10) : 15, // Max text length to keep per node in simplified DOM
-  domStructureMinTextSizeToAnnotate: process.env.DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE ? parseInt(process.env.DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE, 10) : 100, // Min text size in an element to add data-original-text-length attribute
-
-  // Weights for scoring XPath candidates (adjust these based on testing)
-  scoreWeights: {
-    isSingleElement: 20,        // Bonus if XPath uniquely identifies one element
-    paragraphCount: 2,          // Points per <p> tag
-    unwantedPenaltyRatio: -75,  // Penalty proportional to ratio of unwanted tags to total descendants
-    isSemanticTag: 15,          // Bonus for <article> or <main>
-    hasDescriptiveIdOrClass: 10,// Bonus for general descriptive IDs/classes (e.g., "content", "article")
-    textDensity: 30,            // Bonus for high text-to-HTML ratio (e.g., 30 * text_density_score)
-    linkDensityPenalty: -40,    // Penalty for too many links (e.g., -40 * link_density_score)
-    mediaPresence: 5,           // Small bonus for <img> or <video>
-    xpathComplexityPenalty: -0.5, // Small penalty per XPath segment length (e.g., -0.5 * (xpath.length / 10))
-
-    // New/Enhanced weights from reference/test-find-xpath.js and discussion
-    contentSpecificIdBonus: 60,     // Bonus for highly specific content IDs (e.g., "article-content")
-    contentSpecificClassBonus: 50,  // Bonus for highly specific content classes (e.g., "entry-content")
-    classNameIncludesContentBonus: 30, // Bonus if 'content' is part of a class name
-    attributeNameArticleBodyBonus: 70, // Bonus for specific attributes like name="articleBody"
-    shallowHierarchyPenalty: -20,   // Penalty for very shallow XPaths (e.g., //main)
+  puppeteerHeadless: process.env.PUPPETEER_HEADLESS ? (process.env.PUPPETEER_HEADLESS === 'true' ? true : process.env.PUPPETEER_HEADLESS === 'false' ? false : 'new') : 'new',
+  puppeteerDefaultTimeout: process.env.PUPPETEER_TIMEOUT ? parseInt(process.env.PUPPETEER_TIMEOUT, 10) : 30000,
+  puppeteerNavigationTimeout: process.env.PUPPETEER_NAV_TIMEOUT ? parseInt(process.env.PUPPETEER_NAV_TIMEOUT, 10) : 60000,
+  puppeteerLaunchTimeout: process.env.PUPPETEER_LAUNCH_TIMEOUT ? parseInt(process.env.PUPPETEER_LAUNCH_TIMEOUT, 10) : 60000,
+  puppeteerPostLoadDelay: process.env.PUPPETEER_POST_LOAD_DELAY ? parseInt(process.env.PUPPETEER_POST_LOAD_DELAY, 10) : 2000,
+  puppeteerInteractionDelay: process.env.PUPPETEER_INTERACTION_DELAY ? parseInt(process.env.PUPPETEER_INTERACTION_DELAY, 10) : 1000,
+  puppeteerExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null, 
+  extensionPaths: process.env.EXTENSION_PATHS ? process.env.EXTENSION_PATHS.split(',') : [],
+  puppeteerViewport: {
+    width: process.env.PUPPETEER_VIEWPORT_WIDTH ? parseInt(process.env.PUPPETEER_VIEWPORT_WIDTH, 10) : 1920,
+    height: process.env.PUPPETEER_VIEWPORT_HEIGHT ? parseInt(process.env.PUPPETEER_VIEWPORT_HEIGHT, 10) : 1080,
   },
 
-  // Keywords for specific scoring bonuses
-  // General descriptive keywords (already used)
-  descriptiveKeywords: ['article', 'content', 'main', 'body', 'story', 'post', 'entry', 'text', 'copy', 'primary', 'container'],
-  // Keywords for contentSpecificIdBonus (can be regex or array)
-  contentIdKeywordsRegex: /article-content|content|article-body|main-content|story-content|post-content/i,
-  // Keywords for contentSpecificClassBonus (can be regex or array)
-  contentClassKeywordsRegex: /article__content|article-content|entry-content|post-body|story-body|content-body|article-body|article__body|article-dropcap|paywall-content/i,
+  // HTTP Proxy settings
+  httpProxy: process.env.HTTP_PROXY || null, 
 
+  // Debugging and HTML saving
+  debug: (process.env.LOG_LEVEL || 'INFO').toUpperCase() === 'DEBUG',
+  saveHtmlOnSuccessNav: process.env.SAVE_HTML_ON_SUCCESS_NAV === 'true', 
+  htmlSuccessDumpPath: process.env.HTML_SUCCESS_DUMP_PATH || './success_html_dumps',
+  htmlFailureDumpPath: process.env.HTML_FAILURE_DUMP_PATH || './failed_html_dumps',
 
-  // Tags considered important for content scoring
-  // (ContentScoringEngine defines its own, but this could be centralized if needed)
-  // importantContentTags: ['p', 'h1', 'h2', 'h3', 'img', 'video', 'ul', 'ol', 'blockquote', 'figure', 'figcaption'],
+  // DOM Structure Extraction for LLM settings
+  domStructureMaxTextLength: process.env.DOM_STRUCTURE_MAX_TEXT_LENGTH ? parseInt(process.env.DOM_STRUCTURE_MAX_TEXT_LENGTH, 10) : 15,
+  domStructureMinTextSizeToAnnotate: process.env.DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE ? parseInt(process.env.DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE, 10) : 100,
 
-  // Tags often indicating non-main content, used for penalty calculation
-  // (ContentScoringEngine defines its own)
-  // unwantedContentTags: ['nav', 'footer', 'aside', 'header', 'form', 'script', 'style', 'figcaption', 'figure', 'details', 'summary', 'menu', 'dialog'],
+  // Default User Agent
+  defaultUserAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+
+  // Content Scoring Weights
+  scoreWeights: {
+    isSingleElement: 20,
+    paragraphCount: 2,
+    contentSpecificIdBonus: 50,
+    contentSpecificClassBonus: 40,
+    classNameIncludesContentBonus: 20,
+    attributeNameBonus: 15, 
+    shallowHierarchyPenalty: -30, 
+    textDensity: 30,
+    linkDensityPenaltyFactor: -40, 
+    mediaPresenceBonus: 5, 
+    unwantedTagPenalty: -10, 
+    xpathDepthBonus: 1, 
+    hasDescriptiveIdOrClass: 25, 
+  },
+  minParagraphThreshold: 3,
+  descriptiveKeywords: [ 
+    'article', 'content', 'main', 'story', 'post', 'body', 'text', 'entry', 'blog', 'news', 'paywall'
+  ],
+  contentIdKeywordsRegex: /(article|content|main|story|post|blog|body|container)/i,
+  contentClassKeywordsRegex: /(article|content|main|story|post|body|text|entry|blog|news|paywall|wrap|inner|container)/i,
+  rejectUnauthorizedTLS: process.env.REJECT_UNAUTHORIZED_TLS !== 'false', 
+  curlTimeout: process.env.CURL_TIMEOUT ? parseInt(process.env.CURL_TIMEOUT, 10) : 30000,
 };
 
-export const llmConfig = {
-  apiKey: process.env.OPENROUTER_API_KEY,
-  model: process.env.LLM_MODEL || 'meta-llama/llama-3-8b-instruct:free', // Default if not set
-  chatCompletionsEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
-  temperature: process.env.LLM_TEMPERATURE ? parseFloat(process.env.LLM_TEMPERATURE) : 0, // Default to 0 for deterministic output
-};
-
-export const captchaSolverConfig = {
-  apiKey: process.env.TWOCAPTCHA_API_KEY,
-  service: process.env.CAPTCHA_SERVICE_NAME || '2captcha', // Default service
-  // dataDomeDomains: (process.env.DATADOME_DOMAINS || '').split(',').map(d => d.trim()).filter(d => d),
-  // Endpoints for 2Captcha
-  twoCaptchaInUrl: 'https://2captcha.com/in.php',
-  twoCaptchaResUrl: 'https://2captcha.com/res.php',
-  // Endpoints for DataDome specific tasks (if different, usually same as above for 2captcha)
-  dataDomeCreateTaskUrl: 'https://api.2captcha.com/createTask',
-  dataDomeGetResultUrl: 'https://api.2captcha.com/getTaskResult',
-  defaultTimeout: 120, // Default timeout for polling CAPTCHA solution in seconds
-  pollingInterval: 5000, // Interval in ms to poll for CAPTCHA solution
-  postCaptchaSubmitDelay: 5000, // ms to wait after submitting a CAPTCHA solution
-};
-
-export const proxyConfig = {
-  httpProxy: process.env.HTTP_PROXY || null, // e.g., http://username:password@proxy.example.com:8080
-};
-
-export const allConfigs = {
-  scraper: scraperSettings,
-  llm: llmConfig,
-  captchaSolver: captchaSolverConfig,
-  proxy: proxyConfig,
-};
+export default scraperSettings;
