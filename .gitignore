@@ -1,0 +1,14 @@
+.aider*
+.aider/
+.env
+.git/
+.gitconfig
+.vscode/
+chat_history/
+debug_dumps/
+failed_html_dumps/
+success_html_dumps/
+node_modules/
+plugins/
+repomix-output.xml
+dist/
