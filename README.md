@@ -175,6 +175,4 @@ Refer to `smartScraper.dot` (Graphviz DOT file) and `smartScraper.svg` for a vis
 dot -Tsvg smartScraper.dot -o smartScraper.svg
 ```
 
-## Flowchart
-
 ![Smart Scraper](smartScraper.svg)
