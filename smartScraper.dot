@@ -1,0 +1,146 @@
+digraph SmartScraperFlow {
+  rankdir=TB;
+  node [shape=box, style="rounded,filled", fillcolor=lightblue, fontname="Helvetica"];
+  edge [fontname="Helvetica"];
+
+  // Start and End
+  Start [shape=ellipse, fillcolor=lightgreen];
+  EndSuccess [shape=ellipse, fillcolor=lightgreen, label="Return Data (Success)"];
+  EndError [shape=ellipse, fillcolor=salmon, label="Return Data (Failure)\n(Operational Error for URL)"];
+  EndCriticalError [shape=ellipse, fillcolor=darkred, fontcolor=white, label="SCRIPT HALT\n(Critical Internal Error or\nFail-Fast Operational Error)"];
+
+
+  // Input
+  InputURL [label="Input: URL, Proxy (opt), UA (opt)"];
+
+  // Core Engine Decisions
+  CheckKnownSite [label="Known Site Check\n(KnownSitesManager)"];
+  
+  AttemptKnownConfig [label="Attempt Known Config\n(_scrapeWithKnownConfig)", shape=Mrecord, fillcolor=lightyellow,
+    label="{Attempt Known Config | \
+      Fetch Page (Method: Stored) | \
+      Got Non-2xx HTTP Status? (Puppeteer) | \
+      Check Page for CAPTCHA (if Non-2xx or XPath Fail) | \
+      Extract Content (Stored XPath) \
+    }"
+  ];
+
+  IsPageContentValid [label="Page Content OK?\n(2xx Status, Content Present)", shape=diamond, fillcolor=lightgoldenrodyellow];
+  CaptchaOnKnownConfigPage [label="CAPTCHA on Page?\n(After Fetch/XPath Fail)", shape=diamond, fillcolor=lightgoldenrodyellow];
+  SolveCaptchaKnown [label="Solve CAPTCHA\n(CaptchaSolver)", fillcolor=moccasin];
+  CaptchaSolvedKnown [label="CAPTCHA Solved?", shape=diamond, fillcolor=lightgoldenrodyellow];
+  ReExtractAfterKnownSolve [label="Re-Fetch & Re-Try XPath\n(Known Config)", fillcolor=moccasin];
+  KnownConfigExtractionOK [label="Known XPath OK?", shape=diamond, fillcolor=lightgoldenrodyellow];
+  UpdateSiteConfigWithCaptcha [label="Update Site Config\n(Mark needs_captcha_solver=true,\nmethod=puppeteer_captcha)", fillcolor=palegreen];
+
+
+  KnownConfigFailedOperational [label="Known Config Failed Operationally\n(Increment Failure Count)"];
+  
+  // Discovery Sub-System
+  StartDiscovery [label="Start Discovery Process\n(_discoverAndScrape)", shape=septagon, fillcolor=lightgoldenrodyellow];
+  
+  ProbeCurl [label="Probe with cURL\n(CurlHandler)"];
+  CurlResponseOK [label="cURL Response OK?\n(2xx, Has HTML)", shape=diamond, fillcolor=lightgoldenrodyellow];
+  CaptchaInCurlHTML [label="CAPTCHA in cURL HTML?", shape=diamond, fillcolor=lightgoldenrodyellow];
+  
+  ProbePuppeteer [label="Probe with Puppeteer\n(Launch/Navigate, Initial)", fillcolor=moccasin];
+  PuppeteerResponseOK [label="Puppeteer Response OK?\n(2xx, Has HTML)", shape=diamond, fillcolor=lightgoldenrodyellow];
+  CaptchaInPuppeteerHTML [label="CAPTCHA in Puppeteer HTML?", shape=diamond, fillcolor=lightgoldenrodyellow];
+  SolveCaptchaDiscovery [label="Solve CAPTCHA (Discovery)\n(CaptchaSolver)", fillcolor=moccasin];
+  CaptchaSolvedDiscovery [label="CAPTCHA Solved?", shape=diamond, fillcolor=lightgoldenrodyellow];
+  
+  SelectHTMLForAnalysis [label="Select HTML for Analysis\n(Prefer Clean Puppeteer if available,\nelse Clean cURL)", shape= Mrecord, fillcolor=lightgoldenrodyellow,
+    label="{Select HTML for Analysis | \
+      Compare DOMs (if both clean cURL & Puppeteer) | \
+      Perform Full Puppeteer Interactions (if using Puppeteer HTML) | \
+      Re-Check/Solve CAPTCHA after Interactions\
+    }"
+  ];
+  NoUsableHTML [label="No Usable HTML\nfor Discovery", fillcolor=lightpink];
+
+  LLMXPathDiscovery [label="LLM XPath Discovery Loop\n(LLMInterface, HtmlAnalyserFixed, ContentScoringEngine)\nUp to MAX_LLM_RETRIES"];
+  XPathFoundLLM [label="XPath Found by LLM\n& Score > Threshold?", shape=diamond, fillcolor=lightgoldenrodyellow];
+  
+  DetermineMethodToStore [label="Determine Method to Store\n(curl, puppeteer_stealth, puppeteer_captcha)"];
+  StoreNewConfig [label="Store New Config\n(KnownSitesManager)"];
+
+  // Final Extraction with New/Validated Config (reuses AttemptKnownConfig logic)
+  // This node is conceptually the same as AttemptKnownConfig but for newly discovered one.
+  
+  SaveHtmlSuccess [label="Save HTML (Success)\n(if DEBUG)", fillcolor=lightgrey, shape=note];
+  SaveHtmlFailure [label="Save HTML (Failure)\n(if DEBUG)", fillcolor=lightgrey, shape=note];
+  UpdateSuccessStats [label="Update Success Stats\n(KnownSitesManager)"];
+
+
+  // Connections
+  Start -> InputURL;
+  InputURL -> CheckKnownSite;
+
+  CheckKnownSite -> AttemptKnownConfig [label="Config Found"];
+  CheckKnownSite -> StartDiscovery [label="No Config / Unknown Site"];
+
+  AttemptKnownConfig -> IsPageContentValid;
+  IsPageContentValid -> KnownConfigExtractionOK [label="Yes (2xx, Content Present)"];
+  IsPageContentValid -> CaptchaOnKnownConfigPage [label="No (Non-2xx or No Content)"];
+  
+  KnownConfigExtractionOK -> URL_PROCESSING_SUCCESSFUL [label="Yes (XPath Works)"];
+  KnownConfigExtractionOK -> CaptchaOnKnownConfigPage [label="No (XPath Failed)"];
+
+  CaptchaOnKnownConfigPage -> SolveCaptchaKnown [label="Yes (CAPTCHA Found)"];
+  CaptchaOnKnownConfigPage -> KnownConfigFailedOperational [label="No (No CAPTCHA, True Fail)"];
+
+  SolveCaptchaKnown -> CaptchaSolvedKnown;
+  CaptchaSolvedKnown -> ReExtractAfterKnownSolve [label="Yes (Solved)"];
+  CaptchaSolvedKnown -> KnownConfigFailedOperational [label="No (Solve Failed)"];
+  
+  ReExtractAfterKnownSolve -> UpdateSiteConfigWithCaptcha [label="XPath Now Works"];
+  UpdateSiteConfigWithCaptcha -> URL_PROCESSING_SUCCESSFUL;
+  ReExtractAfterKnownSolve -> KnownConfigFailedOperational [label="XPath Still Fails"];
+
+  KnownConfigFailedOperational -> StartDiscovery [label="Trigger Re-Discovery"];
+
+  StartDiscovery -> ProbeCurl;
+  ProbeCurl -> CurlResponseOK;
+  CurlResponseOK -> CaptchaInCurlHTML [label="Yes (HTML OK)"];
+  CurlResponseOK -> ProbePuppeteer [label="No (cURL Failed/No HTML)\n[Primary Path if cURL Unusable]"]; // Path if cURL fails to get HTML
+
+  CaptchaInCurlHTML -> ProbePuppeteer [label="Yes (CAPTCHA in cURL)\n[Must Try Puppeteer]"];
+  CaptchaInCurlHTML -> SelectHTMLForAnalysis [label="No (cURL HTML is Clean)\n[htmlForAnalysis = curlHtml,\ntentativeMethodIsCurl = true]"];
+  
+  ProbePuppeteer -> PuppeteerResponseOK;
+  PuppeteerResponseOK -> CaptchaInPuppeteerHTML [label="Yes (HTML OK)"];
+  PuppeteerResponseOK -> NoUsableHTML [label="No (Puppeteer Failed)\n[If cURL also unusable]"]; // If cURL was also bad
+
+  CaptchaInPuppeteerHTML -> SolveCaptchaDiscovery [label="Yes (CAPTCHA Found)"];
+  CaptchaInPuppeteerHTML -> SelectHTMLForAnalysis [label="No (Puppeteer HTML is Clean)\n[htmlForAnalysis = puppeteerHtml]"];
+
+  SolveCaptchaDiscovery -> CaptchaSolvedDiscovery;
+  CaptchaSolvedDiscovery -> SelectHTMLForAnalysis [label="Yes (Solved)\n[htmlForAnalysis = new puppeteerHtml]"];
+  CaptchaSolvedDiscovery -> NoUsableHTML [label="No (Solve Failed)\n[If cURL also unusable]"];
+  
+  NoUsableHTML -> EndError; // Operational failure for this URL
+
+  SelectHTMLForAnalysis -> LLMXPathDiscovery [label="Usable HTML Selected"];
+  
+  LLMXPathDiscovery -> XPathFoundLLM;
+  XPathFoundLLM -> DetermineMethodToStore [label="Yes (XPath Good)"];
+  XPathFoundLLM -> EndError [label="No (LLM Failed)\n[Operational Failure]"];
+  
+  DetermineMethodToStore -> StoreNewConfig;
+  StoreNewConfig -> AttemptKnownConfig [label="Scrape with New Config\n(Effectively re-enters 'AttemptKnownConfig' logic\nwith the new config)"];
+
+  URL_PROCESSING_SUCCESSFUL [shape=ellipse, fillcolor=lightgreen, label="URL Processing Successful\n(Return Data)"];
+  URL_PROCESSING_SUCCESSFUL -> UpdateSuccessStats;
+  UpdateSuccessStats -> SaveHtmlSuccess;
+  SaveHtmlSuccess -> EndSuccess; // Final success for this URL
+
+  EndError -> SaveHtmlFailure; // Save HTML on operational failure
+  // The script tools/process_url_list.ts will then decide to HALT or continue
+  // Based on current "MUST FAIL" logic, this leads to EndCriticalError for the script.
+  SaveHtmlFailure -> EndCriticalError [label="Fail-Fast Triggered"];
+
+
+  // Global error path for unhandled exceptions in engine
+  // (Conceptual, as specific errors are caught and re-thrown as ScraperError)
+  // CoreScraperEngine -> EndCriticalError [style=dashed, color=red, label="Unhandled Critical Error"];
+}
