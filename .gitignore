@@ -1,5 +1,6 @@
 .aider*
 .aider/
+.direnv/
 .env
 .git/
 .gitconfig
