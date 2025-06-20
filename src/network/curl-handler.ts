@@ -30,6 +30,12 @@ async function fetchWithCurl(
     logger.debug(`[fetchWithCurl] Attempting cURL-like request to: ${url}`);
   }
 
+  // FAIL HARD if proxy not configured
+  if (!proxyDetails || !proxyDetails.server) {
+    logger.error(`[fetchWithCurl] Proxy is required but not configured for URL: ${url}`);
+    throw new NetworkError('Proxy configuration is mandatory for all requests', { url });
+  }
+
   const axiosConfig: AxiosRequestConfig = {
     timeout: scraperSettings.curlTimeout || 30000, // 30 seconds timeout
     headers: {
@@ -39,29 +45,27 @@ async function fetchWithCurl(
       'Connection': 'keep-alive',
       ...(headers || {}), // Spread any custom headers
     },
-    // responseType: 'arraybuffer', // To handle different encodings better, then convert
     maxRedirects: 5,
   };
 
-  if (proxyDetails && proxyDetails.server) {
-    try {
-      const proxyUrl = new URL(proxyDetails.server);
-      axiosConfig.proxy = {
-        protocol: proxyUrl.protocol.replace(':', ''),
-        host: proxyUrl.hostname,
-        port: parseInt(proxyUrl.port, 10) || (proxyUrl.protocol === 'https:' ? 443 : 80),
-        auth: (proxyDetails.username && proxyDetails.password) ? {
-          username: decodeURIComponent(proxyDetails.username),
-          password: decodeURIComponent(proxyDetails.password),
-        } : undefined,
-      };
-      if (scraperSettings.debug) {
-        logger.info(`[fetchWithCurl] Using proxy for cURL request: ${axiosConfig.proxy.host}:${axiosConfig.proxy.port}`);
-      }
-    } catch (e: any) {
-      logger.error(`[fetchWithCurl] Invalid proxy server string for cURL: ${proxyDetails.server}. Error: ${e.message}`);
-      throw new NetworkError(`Invalid proxy server string format for cURL`, { proxyServer: proxyDetails.server, originalErrorName: e.name, originalErrorMessage: e.message });
+  // ALWAYS configure proxy (mandatory)
+  try {
+    const proxyUrl = new URL(proxyDetails.server);
+    axiosConfig.proxy = {
+      protocol: proxyUrl.protocol.replace(':', ''),
+      host: proxyUrl.hostname,
+      port: parseInt(proxyUrl.port, 10) || (proxyUrl.protocol === 'https:' ? 443 : 80),
+      auth: (proxyDetails.username && proxyDetails.password) ? {
+        username: decodeURIComponent(proxyDetails.username),
+        password: decodeURIComponent(proxyDetails.password),
+      } : undefined,
+    };
+    if (scraperSettings.debug) {
+      logger.info(`[fetchWithCurl] Using proxy for cURL request: ${axiosConfig.proxy.host}:${axiosConfig.proxy.port}`);
     }
+  } catch (e: any) {
+    logger.error(`[fetchWithCurl] Invalid proxy server string for cURL: ${proxyDetails.server}. Error: ${e.message}`);
+    throw new NetworkError(`Invalid proxy server string format for cURL`, { proxyServer: proxyDetails.server, originalErrorName: e.name, originalErrorMessage: e.message });
   }
 
   // For HTTPS requests, especially with proxies or specific TLS requirements
@@ -81,76 +85,90 @@ async function fetchWithCurl(
     });
   }
 
-  try {
-    logger.info(`Making cURL-like request to: ${url}`);
-    const response: AxiosResponse = await axios.get(url, axiosConfig);
-    logger.info(`cURL request to ${url} successful with status: ${response.status}`);
+  // Retry logic with IP rotation (up to 5 attempts)
+  const maxRetries = 5;
+  let lastError: any = null;
 
-    // TODO: Handle character encoding more robustly if issues arise.
-    // For now, assume Axios handles common cases or response.data is string.
-    const htmlContent: string = typeof response.data === 'string' ? response.data : response.data.toString();
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      logger.info(`Making cURL-like request to: ${url} (attempt ${attempt}/${maxRetries})`);
+      const response: AxiosResponse = await axios.get(url, axiosConfig);
+      logger.info(`cURL request to ${url} successful with status: ${response.status} on attempt ${attempt}`);
 
-    if (scraperSettings.debug) {
-        logger.debug(`[DEBUG_MODE] cURL response for ${url}: Status ${response.status}, Content-Type: ${response.headers['content-type']}, Length: ${htmlContent?.length}`);
-    }
-
-    return {
-      success: true,
-      html: htmlContent,
-      statusCode: response.status,
-      finalUrl: response.request?.res?.responseUrl || url, // Get final URL after redirects
-    };
-  } catch (error: any) {
-    const axiosError = error as AxiosError;
-    logger.error(`cURL request to ${url} failed. Error: ${axiosError.message}`);
-
-    const errorDetails: any = {
-      url,
-      method: 'cURL',
-      originalErrorName: axiosError.name,
-      originalErrorMessage: axiosError.message,
-      // htmlContent is removed
-    };
-
-    if (axiosError.response) {
-      // The request was made and the server responded with a status code
-      // that falls out of the range of 2xx
-      errorDetails.statusCode = axiosError.response.status;
-      const errorDataString = typeof axiosError.response.data === 'string' ? axiosError.response.data : (Buffer.isBuffer(axiosError.response.data) ? axiosError.response.data.toString('utf-8', 0, 500) : JSON.stringify(axiosError.response.data));
+      // Get HTML at all costs - extract from response regardless of status
+      const htmlContent: string = typeof response.data === 'string' ? response.data : response.data.toString();
 
       if (scraperSettings.debug) {
-        logger.error(`[DEBUG_MODE] Full Axios error response for ${url}:`, {
-            status: axiosError.response.status,
-            headers: axiosError.response.headers,
-            dataPreview: errorDataString.substring(0, 200) + (errorDataString.length > 200 ? '...' : '')
-        });
+          logger.debug(`[DEBUG_MODE] cURL response for ${url}: Status ${response.status}, Content-Type: ${response.headers['content-type']}, Length: ${htmlContent?.length}`);
       }
-      // Return a CurlResponse object for operational errors
+
       return {
-        success: false,
-        error: `cURL request to ${url} failed with status ${axiosError.response.status}`,
-        html: typeof axiosError.response.data === 'string' ? axiosError.response.data : undefined, // Provide HTML if it's string
-        statusCode: axiosError.response.status,
-        finalUrl: url,
+        success: true,
+        html: htmlContent,
+        statusCode: response.status,
+        finalUrl: response.request?.res?.responseUrl || url,
       };
-      // throw new NetworkError(`cURL request to ${url} failed with status ${axiosError.response.status}`, errorDetails);
-    } else if (axiosError.request) {
-      // The request was made but no response was received
-      logger.error('No response received for cURL request.');
-      if (scraperSettings.debug) {
-        logger.error(`[DEBUG_MODE] Axios error request details for ${url}:`, axiosError.request);
+    } catch (error: any) {
+      const axiosError = error as AxiosError;
+      lastError = axiosError;
+
+      logger.warn(`cURL request to ${url} failed on attempt ${attempt}/${maxRetries}. Error: ${axiosError.message}`);
+
+      // Get HTML from error response if available (at all costs)
+      if (axiosError.response) {
+        const htmlContent = typeof axiosError.response.data === 'string' ? axiosError.response.data : undefined;
+
+        if (scraperSettings.debug) {
+          logger.debug(`[DEBUG_MODE] Axios error response details for ${url} (attempt ${attempt}):`, {
+            status: axiosError.response.status,
+            statusText: axiosError.response.statusText,
+            headers: axiosError.response.headers,
+            dataType: typeof axiosError.response.data,
+            dataLength: htmlContent?.length || 'N/A'
+          });
+        }
+
+        // If we have HTML content, return it regardless of status code
+        if (htmlContent && htmlContent.length > 0) {
+          logger.info(`Got HTML content from error response (status ${axiosError.response.status}) on attempt ${attempt}`);
+          return {
+            success: false, // Mark as false due to error status, but provide HTML
+            error: `cURL request to ${url} failed with status ${axiosError.response.status}`,
+            html: htmlContent,
+            statusCode: axiosError.response.status,
+            finalUrl: url,
+          };
+        }
       }
-      errorDetails.reason = 'no_response';
-      throw new NetworkError(`No response received for cURL request to ${url}`, errorDetails);
-    } else {
-      // Something happened in setting up the request that triggered an Error
-      logger.error(`Error setting up cURL request: ${axiosError.message}`);
-      if (scraperSettings.debug) {
-        logger.error(`[DEBUG_MODE] Full cURL error object for ${url}:`, axiosError);
+
+      // If this is not the last attempt, wait and retry with new IP
+      if (attempt < maxRetries) {
+        logger.info(`Retrying request to ${url} with new proxy IP (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+        // Proxy will automatically rotate IP on next request
+        continue;
       }
-      errorDetails.reason = 'request_setup_error';
-      throw new NetworkError(`Error setting up cURL request for ${url}: ${axiosError.message}`, errorDetails);
     }
+  }
+
+  // All retries exhausted
+  const axiosError = lastError as AxiosError;
+  logger.error(`All ${maxRetries} attempts failed for cURL request to ${url}. Final error: ${axiosError.message}`);
+
+  const errorDetails: any = {
+    url,
+    method: 'cURL',
+    originalErrorName: axiosError.name,
+    originalErrorMessage: axiosError.message,
+    attemptsExhausted: maxRetries
+  };
+
+  if (axiosError.request) {
+    errorDetails.reason = 'no_response';
+    throw new NetworkError(`No response received for cURL request to ${url} after ${maxRetries} attempts`, errorDetails);
+  } else {
+    errorDetails.reason = 'request_setup_error';
+    throw new NetworkError(`Error setting up cURL request for ${url} after ${maxRetries} attempts: ${axiosError.message}`, errorDetails);
   }
 }
 

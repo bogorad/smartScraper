@@ -1,5 +1,3 @@
-.aider*
-.aider/
 .direnv/
 .env
 .git/

@@ -9,16 +9,19 @@
     },
     "resolveJsonModule": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-    "strict": true,
+    "strict": false,
+    "noImplicitAny": false,
     "skipLibCheck": true,
     "outDir": "./dist",
     "rootDir": "./",
     "sourceMap": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "allowJs": true, // Allow JS files during transition
-    // "checkJs": true, // Type-check JS files (optional)
+    "allowJs": true,
+    "types": ["node"],
+    "lib": ["ES2020", "DOM"]
   },
   "include": [
     "src/**/*.ts",

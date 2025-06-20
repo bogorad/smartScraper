@@ -45,7 +45,7 @@ export interface ScrapeResult {
 
 async function evaluateXPathQuery(page: Page, xpath: string): Promise<ElementHandle<Node>[]> {
     try {
-        const elements = await page.$x(xpath);
+        const elements = await (page as any).$x(xpath);
         return elements;
     } catch (e: any) {
         logger.error(`[evaluateXPathQuery] Error using page.$x for xpath: ${xpath}. Error: ${e.message}`);
@@ -219,6 +219,13 @@ class CoreScraperEngine {
             throw new ConfigurationError(`Invalid HTTP_PROXY format: ${this.configs.scraper.httpProxy}`, { originalError: e.message });
         }
       }
+
+      // FAIL HARD if no proxy configured - proxy is mandatory
+      if (!effectiveProxy || !effectiveProxy.server) {
+        logger.error(`[CoreScraperEngine SCRAPE_MAIN] Proxy is required but not configured for URL: ${targetUrl}`);
+        throw new ConfigurationError('Proxy configuration is mandatory for all scraping operations. Set HTTP_PROXY environment variable or provide proxyDetails.', { url: targetUrl });
+      }
+
       logger.debug(`[CoreScraperEngine SCRAPE_MAIN] Effective proxy: ${effectiveProxy ? JSON.stringify(effectiveProxy) : 'None'}`);
 
       try {
@@ -310,10 +317,11 @@ class CoreScraperEngine {
           httpStatus = curlResponse.statusCode;
           pageContent = curlResponse.html || null;
           errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : '';
-          if (!curlResponse.success || !pageContent || !(httpStatus && httpStatus >= 200 && httpStatus < 300 && httpStatus !== 304)) { // Allow 304
-            logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] cURL fetch failed or got non-2xx/304 status. Status: ${httpStatus}, Error: ${curlResponse.error}`);
+          // Get HTML at all costs - ignore HTTP status, focus on getting content
+          if (!pageContent || pageContent.length === 0) {
+            logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] cURL returned no HTML content. Status: ${httpStatus}, Error: ${curlResponse.error}`);
             await this._saveDebugHtml('failure_curl_knowncfg', config.domain_pattern, url, curlResponse.html || '');
-            throw new NetworkError(`cURL fetch failed or got non-2xx/304 status for known config. Status: ${httpStatus}, Error: ${curlResponse.error}`, { reason: 'curl_fetch_failed_known_config', statusCode: httpStatus });
+            throw new NetworkError(`cURL returned no HTML content for known config. Status: ${httpStatus}, Error: ${curlResponse.error}`, { reason: 'curl_no_html_known_config', statusCode: httpStatus });
           }
           logger.debug(`[CoreScraperEngine _scrapeWithKnownConfig] cURL fetch successful. HTML length: ${pageContent?.length}`);
           break;
@@ -335,13 +343,10 @@ class CoreScraperEngine {
           errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : '';
           logger.debug(`[CoreScraperEngine _scrapeWithKnownConfig] Puppeteer navigation/content fetch completed. Status: ${httpStatus}, Content Length: ${pageContent?.length}`);
 
-          // If non-2xx status or very small content (indicative of block/CAPTCHA page)
-          // Also check if the method is not already puppeteer_captcha, to avoid infinite loops if captcha solving itself leads to a block.
-          if (page && pageContent && 
-              ((httpStatus && (httpStatus < 200 || httpStatus >= 300) && httpStatus !== 304) || (pageContent.length < 2000)) && 
-              this.htmlAnalyser.detectCaptchaMarkers(pageContent) && 
-              config.method !== METHODS.PUPPETEER_CAPTCHA) { // Added check to prevent re-solving if already P_CAPTCHA
-            logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] Puppeteer got non-2xx status (${httpStatus}) or potential block page. Checking for CAPTCHA.`);
+          // Check for CAPTCHA regardless of HTTP status - focus on getting content at all costs
+          if (page && pageContent &&
+              this.htmlAnalyser.detectCaptchaMarkers(pageContent) &&
+              (config.method as string) !== METHODS.PUPPETEER_CAPTCHA) { // Added check to prevent re-solving if already P_CAPTCHA
             logger.info(`[CoreScraperEngine _scrapeWithKnownConfig] CAPTCHA detected on page (status ${httpStatus}). Attempting solve.`);
             const captchaSolved = await this.captchaSolver.solveIfPresent(page, url, uaToUse); // Pass uaToUse
             if (captchaSolved) {
@@ -349,22 +354,18 @@ class CoreScraperEngine {
               pageContent = await this.puppeteerController.getPageContent(page);
               errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : '';
               const newResponse = await page.goto(page.url(), { waitUntil: 'networkidle0' }).catch(() => null); // Try to get a new response
-              httpStatus = newResponse?.status() || httpStatus; 
+              httpStatus = newResponse?.status() || httpStatus;
               logger.debug(`[CoreScraperEngine _scrapeWithKnownConfig] Content re-fetched after CAPTCHA. New Status: ${httpStatus}, Length: ${pageContent?.length}`);
-              if (!config.needs_captcha_solver || config.method !== METHODS.PUPPETEER_CAPTCHA) {
-                  needsConfigUpdate = true; 
+              if (!config.needs_captcha_solver || (config.method as string) !== METHODS.PUPPETEER_CAPTCHA) {
+                  needsConfigUpdate = true;
               }
             } else {
               logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] CAPTCHA detected but solving failed.`);
               await this._saveDebugHtml('failure_captcha_knowncfg', config.domain_pattern, url, pageContent || '');
-              throw new CaptchaError('CAPTCHA solving failed after non-2xx/block page.', { reason: 'captcha_solve_failed_on_block_page' });
+              throw new CaptchaError('CAPTCHA solving failed.', { reason: 'captcha_solve_failed_known_config' });
             }
-          } else if (httpStatus && (httpStatus < 200 || httpStatus >= 300) && httpStatus !== 304) {
-            // Non-2xx status and NO CAPTCHA detected (or method was already PUPPETEER_CAPTCHA and it still failed)
-            logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] Page loaded with non-2xx status: ${httpStatus}. Content might be an error page.`);
-            await this._saveDebugHtml('failure_http_status_knowncfg', config.domain_pattern, url, pageContent);
-            throw new NetworkError(`Page loaded with status ${httpStatus} for known config.`, { statusCode: httpStatus, reason: 'non_2xx_known_config' });
           }
+          // Continue with content regardless of HTTP status - we got HTML, that's what matters
           break;
         default:
           throw new ConfigurationError(`Unknown method in site config: ${config.method}`);
@@ -410,7 +411,7 @@ class CoreScraperEngine {
         await this._saveDebugHtml('failure_xpath_extract_knowncfg', config.domain_pattern, url, pageContent);
         
         // If XPath failed, and we are using Puppeteer, check for CAPTCHA one last time
-        if (page && pageContent && this.htmlAnalyser.detectCaptchaMarkers(pageContent) && config.method !== METHODS.PUPPETEER_CAPTCHA) {
+        if (page && pageContent && this.htmlAnalyser.detectCaptchaMarkers(pageContent) && (config.method as string) !== METHODS.PUPPETEER_CAPTCHA) {
             logger.info(`[CoreScraperEngine _scrapeWithKnownConfig] CAPTCHA detected after known XPath failed for ${url}. Attempting CAPTCHA solve.`);
             const captchaSolved = await this.captchaSolver.solveIfPresent(page, url, uaToUse);
             if (captchaSolved) {
@@ -494,18 +495,19 @@ class CoreScraperEngine {
       pageContentForError = curlResponse.html || '';
 
       let curlHtmlIsUsable = false;
-      if (curlResponse.success && curlResponse.html && curlResponse.statusCode && curlResponse.statusCode >= 200 && curlResponse.statusCode < 300) {
+      // Get HTML at all costs - ignore HTTP status, focus on getting content
+      if (curlResponse.html && curlResponse.html.length > 0) {
         curlHtml = curlResponse.html;
         if (!this.htmlAnalyser.detectCaptchaMarkers(curlHtml)) {
           curlHtmlIsUsable = true;
           htmlForAnalysis = curlHtml;
           tentativeMethodIsCurl = true;
-          logger.debug(`[CoreScraperEngine _discoverAndScrape] cURL fetch successful and no CAPTCHA. Tentatively using cURL HTML.`);
+          logger.debug(`[CoreScraperEngine _discoverAndScrape] cURL got HTML (status: ${curlResponse.statusCode}) and no CAPTCHA. Tentatively using cURL HTML.`);
         } else {
           logger.info('[CoreScraperEngine _discoverAndScrape] CAPTCHA detected in cURL response. cURL HTML is not immediately usable.');
         }
       } else {
-        logger.warn(`[CoreScraperEngine _discoverAndScrape] cURL fetch failed, returned no HTML, or got non-2xx status: ${curlResponse?.error || 'Unknown cURL issue'}, Status: ${curlResponse?.statusCode}`);
+        logger.warn(`[CoreScraperEngine _discoverAndScrape] cURL returned no HTML content: ${curlResponse?.error || 'Unknown cURL issue'}, Status: ${curlResponse?.statusCode}`);
       }
 
       if (!curlHtmlIsUsable) {

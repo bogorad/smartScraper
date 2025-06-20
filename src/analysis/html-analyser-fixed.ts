@@ -5,12 +5,7 @@ import { ExtractionError } from '../utils/error-handler.js';
 import { scraperSettings } from '../../config/index.js';
 import { ElementDetails } from './content-scoring-engine.js';
 
-const CAPTCHA_TEXT_MARKERS: RegExp[] = [
-  /captcha/i, /verify you are human/i, /are you a robot/i, /recaptcha/i, /hcaptcha/i,
-  /turnstile/i, /human verification/i, /security check/i, /challenge/i, /cloudflare/i,
-  /access denied/i, /checking your browser/i, /datadome/i, /captcha-delivery\.com/i,
-  /geo\.captcha-delivery\.com/i,
-];
+// Removed text-based CAPTCHA detection to avoid false positives
 
 const CAPTCHA_SELECTOR_MARKERS: string[] = [
   '.g-recaptcha', '.h-captcha', 'iframe[src*="hcaptcha.com"]', 'iframe[src*="recaptcha.net"]',
@@ -65,17 +60,13 @@ class HtmlAnalyserFixed {
   }
 
   detectCaptchaMarkers(htmlString: string | null | undefined): boolean {
-    logger.debug('[HtmlAnalyserFixed detectCaptchaMarkers] Detecting CAPTCHA markers.');
+    logger.debug('[HtmlAnalyserFixed detectCaptchaMarkers] Detecting CAPTCHA markers (element-based only).');
     if (!htmlString || typeof htmlString !== 'string') {
       logger.warn('[HtmlAnalyserFixed detectCaptchaMarkers] htmlString is invalid or empty.');
       return false;
     }
-    for (const marker of CAPTCHA_TEXT_MARKERS) {
-      if (marker.test(htmlString)) {
-        logger.info(`[HtmlAnalyserFixed detectCaptchaMarkers] CAPTCHA text marker found: ${marker}`);
-        return true;
-      }
-    }
+
+    // Only element-based CAPTCHA detection to avoid false positives from keyword scanning
     try {
       const virtualConsole = new VirtualConsole();
       const dom = new JSDOM(htmlString, { virtualConsole });
@@ -87,12 +78,12 @@ class HtmlAnalyserFixed {
         }
       }
     } catch (error: any) {
-      logger.warn(`[HtmlAnalyserFixed detectCaptchaMarkers] Error parsing HTML for CAPTCHA selector detection: ${error.message}. Relying on text markers.`);
+      logger.warn(`[HtmlAnalyserFixed detectCaptchaMarkers] Error parsing HTML for CAPTCHA selector detection: ${error.message}.`);
       if (logger.isDebugging()) {
         logger.warn('[DEBUG_MODE] Full error during CAPTCHA selector parsing:', error);
       }
     }
-    logger.debug('[HtmlAnalyserFixed detectCaptchaMarkers] No common CAPTCHA markers found.');
+    logger.debug('[HtmlAnalyserFixed detectCaptchaMarkers] No CAPTCHA selectors found.');
     return false;
   }
 

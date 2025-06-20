@@ -88,7 +88,13 @@ class PuppeteerController {
 
   async launchBrowser(proxyDetails: ProxyDetails | null = null): Promise<Browser> {
     logger.debug(`[PuppeteerController launchBrowser] Launching browser. Proxy: ${proxyDetails ? 'Yes' : 'No'}`);
-    
+
+    // FAIL HARD if proxy not configured - proxy is mandatory
+    if (!proxyDetails || !proxyDetails.server) {
+      logger.error(`[PuppeteerController launchBrowser] Proxy is required but not configured for Puppeteer browser launch`);
+      throw new ConfigurationError('Proxy configuration is mandatory for Puppeteer browser launch', { reason: 'proxy_required_puppeteer' });
+    }
+
     if (!this.scraperSettings?.puppeteerViewport?.width || !this.scraperSettings?.puppeteerViewport?.height) {
         const errorMsg = `Puppeteer viewport configuration is missing or invalid in scraperSettings. Viewport: ${JSON.stringify(this.scraperSettings?.puppeteerViewport)}`;
         logger.error(`[PuppeteerController launchBrowser] ${errorMsg}`);
@@ -119,18 +125,17 @@ class PuppeteerController {
       ],
     };
 
-    if (proxyDetails && proxyDetails.server) {
-      try {
-        const parsedProxyUrl = new URL(proxyDetails.server);
-        const proxyHostPort = `${parsedProxyUrl.hostname}:${parsedProxyUrl.port || (parsedProxyUrl.protocol === 'https:' ? '443' : '80')}`;
-        if (launchOptions.args) {
-            launchOptions.args.push(`--proxy-server=${proxyHostPort}`);
-        }
-        logger.info(`[PuppeteerController launchBrowser] Using proxy for Puppeteer: ${proxyHostPort}`);
-      } catch (e: any) {
-        logger.error(`[PuppeteerController launchBrowser] Invalid proxy server string for Puppeteer: ${proxyDetails.server}. Error: ${e.message}`);
-        throw new ConfigurationError(`Invalid proxy server string format for Puppeteer`, { proxyServer: proxyDetails.server, originalErrorName: e.name, originalErrorMessage: e.message });
+    // Configure proxy (mandatory - already validated above)
+    try {
+      const parsedProxyUrl = new URL(proxyDetails.server);
+      const proxyHostPort = `${parsedProxyUrl.hostname}:${parsedProxyUrl.port || (parsedProxyUrl.protocol === 'https:' ? '443' : '80')}`;
+      if (launchOptions.args) {
+          launchOptions.args.push(`--proxy-server=${proxyHostPort}`);
       }
+      logger.info(`[PuppeteerController launchBrowser] Using proxy for Puppeteer: ${proxyHostPort}`);
+    } catch (e: any) {
+      logger.error(`[PuppeteerController launchBrowser] Invalid proxy server string for Puppeteer: ${proxyDetails.server}. Error: ${e.message}`);
+      throw new ConfigurationError(`Invalid proxy server string format for Puppeteer`, { proxyServer: proxyDetails.server, originalErrorName: e.name, originalErrorMessage: e.message });
     }
 
     await this.pluginManager.configureLaunchOptions(launchOptions as DefaultPuppeteerLaunchOptions);

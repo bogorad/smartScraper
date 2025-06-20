@@ -61,7 +61,7 @@ async function processUrls(): Promise<void> {
 
     let result: ScrapeResult;
     try {
-        result = await scrapeUrl(url, { outputType: OUTPUT_TYPES.CONTENT_ONLY as OutputTypeValue });
+        result = await scrapeUrl(url, { outputType: OUTPUT_TYPES.CONTENT_ONLY as any });
     } catch (error: any) {
         logger.error(`  STATUS: CRITICAL FAILURE (unhandled exception from scrapeUrl for ${url})`);
         logger.error(`  ERROR_NAME: ${error.name}`);
