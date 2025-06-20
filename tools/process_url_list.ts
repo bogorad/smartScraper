@@ -12,9 +12,26 @@ const __dirname = path.dirname(__filename);
 const projectRootDir = path.resolve(__dirname, '..');
 dotenv.config({ path: path.join(projectRootDir, '.env') });
 
-const DELAY_MS = 5000; 
-const URL_FILE_PATH = path.join(projectRootDir, 'urls_for_testing.txt');
+const DELAY_MS = 5000;
 const LOG_FILE_PATH = path.join(projectRootDir, 'tools_processing_log.txt');
+
+// Get URL file path from command line argument
+function getUrlFilePath(): string {
+  const args = process.argv.slice(2);
+  if (args.length === 0) {
+    console.error('Usage: node dist/tools/process_url_list.js <url_file_path>');
+    console.error('Example: node dist/tools/process_url_list.js urls_for_testing.txt');
+    console.error('Example: node dist/tools/process_url_list.js /path/to/my_urls.txt');
+    process.exit(1);
+  }
+
+  const urlFilePath = args[0];
+  // If relative path, resolve from project root
+  if (!path.isAbsolute(urlFilePath)) {
+    return path.join(projectRootDir, urlFilePath);
+  }
+  return urlFilePath;
+}
 
 async function appendToLogFile(message: string): Promise<void> {
   try {
@@ -24,18 +41,18 @@ async function appendToLogFile(message: string): Promise<void> {
   }
 }
 
-async function processUrls(): Promise<void> {
-  let urlsToTest: string[] = ['https://www.example.com']; 
-  let successCount = 0; 
-  let operationalFailureCount = 0; 
+async function processUrls(urlFilePath: string): Promise<void> {
+  let urlsToTest: string[] = ['https://www.example.com'];
+  let successCount = 0;
+  let operationalFailureCount = 0;
 
   try {
-    const fileContent = await fs.readFile(URL_FILE_PATH, 'utf-8');
+    const fileContent = await fs.readFile(urlFilePath, 'utf-8');
     urlsToTest = fileContent.split('\n').map(url => url.trim()).filter(url => url.length > 0);
   } catch (error: any) {
-    logger.error(`Failed to read URL file: ${URL_FILE_PATH}. Error: ${error.message}`);
+    logger.error(`Failed to read URL file: ${urlFilePath}. Error: ${error.message}`);
     await appendToLogFile(`ERROR_READING_URL_FILE: ${error.message}. Script will now exit.`);
-    throw new ConfigurationError(`Failed to read URL file: ${URL_FILE_PATH}`, { originalError: error });
+    throw new ConfigurationError(`Failed to read URL file: ${urlFilePath}`, { originalError: error });
   }
 
   if (urlsToTest.length === 0) {
@@ -107,9 +124,12 @@ async function processUrls(): Promise<void> {
 
 (async () => {
   try {
-    await fs.writeFile(LOG_FILE_PATH, ''); 
+    const urlFilePath = getUrlFilePath();
+    logger.info(`Using URL file: ${urlFilePath}`);
+
+    await fs.writeFile(LOG_FILE_PATH, '');
     logger.info(`Log file initialized at: ${LOG_FILE_PATH}`);
-    await processUrls();
+    await processUrls(urlFilePath);
     logger.info('All URLs processed successfully.');
     process.exit(0);
   } catch (e: any) {
