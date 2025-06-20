@@ -75,25 +75,39 @@ class DataDomeSolver {
   private _parseProxyFor2Captcha(proxyString?: string): TwoCaptchaProxyInfo | null {
     if (!proxyString) return null;
     try {
-        const url = new URL(proxyString);
+        // Remove trailing slash if present
+        const cleanProxyString = proxyString.replace(/\/$/, '');
+        const url = new URL(cleanProxyString);
         const type = url.protocol.replace(":", "").toUpperCase();
         if (!['HTTP', 'HTTPS', 'SOCKS4', 'SOCKS5'].includes(type)) {
             logger.warn(`[DataDomeSolver] Unsupported proxy protocol for 2Captcha: ${type}`);
             return null;
         }
         const address = url.hostname;
-        const port = parseInt(url.port, 10);
+        // Handle default ports if not specified
+        let port = parseInt(url.port, 10);
+        if (!url.port) {
+            // Use default ports based on protocol
+            if (type === 'HTTP') port = 80;
+            else if (type === 'HTTPS') port = 443;
+            else if (type === 'SOCKS4' || type === 'SOCKS5') port = 1080;
+        }
+
         if (!address || !port || isNaN(port)) {
-            logger.warn(`[DataDomeSolver] Invalid proxy address/port for 2Captcha: ${proxyString}`);
+            logger.warn(`[DataDomeSolver] Invalid proxy address/port for 2Captcha: ${proxyString} (parsed: ${address}:${port})`);
             return null;
         }
-        return {
+
+        const result = {
             type,
             address,
             port,
             login: url.username ? decodeURIComponent(url.username) : undefined,
             password: url.password ? decodeURIComponent(url.password) : undefined,
         };
+
+        logger.debug(`[DataDomeSolver] Parsed proxy for 2Captcha: ${type}://${address}:${port} (login: ${result.login ? 'YES' : 'NO'})`);
+        return result;
     } catch (error: any) {
         logger.warn(`[DataDomeSolver] Error parsing proxy string for 2Captcha: ${proxyString}. Error: ${error.message}`);
         return null;

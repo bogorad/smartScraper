@@ -121,19 +121,52 @@ If the HTML contains elements with attributes like 'data-content-score' or 'data
       temperature: this.temperature,
     };
 
+    logger.info(`[DEBUG] === LLM API CALL DEBUG INFO ===`);
+    logger.info(`[DEBUG] API Key: ${this.apiKey ? `${this.apiKey.substring(0, 8)}...${this.apiKey.substring(this.apiKey.length - 4)}` : 'NOT SET'}`);
+    logger.info(`[DEBUG] Endpoint: ${this.endpoint}`);
+    logger.info(`[DEBUG] Model: ${this.model}`);
+    logger.info(`[DEBUG] Temperature: ${this.temperature}`);
+    logger.info(`[DEBUG] Request Headers:`);
+    logger.info(`[DEBUG]   Authorization: Bearer ${this.apiKey ? `${this.apiKey.substring(0, 8)}...${this.apiKey.substring(this.apiKey.length - 4)}` : 'NOT SET'}`);
+    logger.info(`[DEBUG]   Content-Type: ${this.axiosInstance.defaults.headers['Content-Type']}`);
+    logger.info(`[DEBUG]   HTTP-Referer: ${this.axiosInstance.defaults.headers['HTTP-Referer']}`);
+    logger.info(`[DEBUG]   X-Title: ${this.axiosInstance.defaults.headers['X-Title']}`);
+    logger.info(`[DEBUG] Request Body:`);
+    logger.info(`[DEBUG]   model: ${requestBody.model}`);
+    logger.info(`[DEBUG]   temperature: ${requestBody.temperature}`);
+    logger.info(`[DEBUG]   messages.length: ${requestBody.messages.length}`);
+    logger.info(`[DEBUG]   system message: ${requestBody.messages[0].content}`);
+    logger.info(`[DEBUG]   user prompt length: ${requestBody.messages[1].content.length} chars`);
+    logger.info(`[DEBUG] Simplified DOM length: ${simplifiedDom.length} chars`);
+    logger.info(`[DEBUG] Snippets count: ${snippets.length}`);
+    logger.info(`[DEBUG] Feedback context items: ${feedbackContext.length}`);
+    logger.info(`[DEBUG] === END LLM DEBUG INFO ===`);
+
     logger.info(`Sending request to LLM. Prompt length (approx): ${prompt.length} chars. Simplified DOM length: ${simplifiedDom.length} chars.`);
-    
+
     if (logger.isDebugging()) {
         const promptSnippet = prompt.length > 1000 ? prompt.substring(0, 500) + "..." + prompt.substring(prompt.length - 500) : prompt;
         logger.debug('[DEBUG_MODE] LLM Request Body (prompt snippet):', { ...requestBody, messages: [{...requestBody.messages[0]}, {...requestBody.messages[1], content: promptSnippet}] });
     }
 
     try {
+      const requestPath = this.endpoint.substring(this.endpoint.lastIndexOf('/'));
+      logger.info(`[DEBUG] Making HTTP POST request to: ${this.axiosInstance.defaults.baseURL}${requestPath}`);
+      logger.info(`[DEBUG] Full URL: ${this.endpoint}`);
+      logger.info(`[DEBUG] Request timeout: 60000ms`);
+
       const response = await this.axiosInstance.post<LLMResponseData>(
-        this.endpoint.substring(this.endpoint.lastIndexOf('/')), 
+        requestPath,
         requestBody,
         { timeout: 60000 }
       );
+
+      logger.info(`[DEBUG] HTTP Response received - Status: ${response.status}, Status Text: ${response.statusText}`);
+      logger.info(`[DEBUG] Response headers: ${JSON.stringify(response.headers, null, 2)}`);
+      logger.info(`[DEBUG] Response data keys: ${Object.keys(response.data || {}).join(', ')}`);
+      if (response.data?.usage) {
+        logger.info(`[DEBUG] Token usage: ${JSON.stringify(response.data.usage)}`);
+      }
 
       if (!response.data || !response.data.choices || response.data.choices.length === 0) {
         logger.warn('LLM response missing choices or data.', { responseData: response.data });
@@ -208,6 +241,16 @@ If the HTML contains elements with attributes like 'data-content-score' or 'data
       }
       
       if (error.response) {
+        logger.error(`[DEBUG] === LLM API ERROR DEBUG ===`);
+        logger.error(`[DEBUG] HTTP Status: ${error.response.status}`);
+        logger.error(`[DEBUG] HTTP Status Text: ${error.response.statusText}`);
+        logger.error(`[DEBUG] Response Headers: ${JSON.stringify(error.response.headers, null, 2)}`);
+        logger.error(`[DEBUG] Response Data: ${JSON.stringify(error.response.data, null, 2)}`);
+        logger.error(`[DEBUG] Request URL: ${error.config?.url || 'Unknown'}`);
+        logger.error(`[DEBUG] Request Method: ${error.config?.method || 'Unknown'}`);
+        logger.error(`[DEBUG] Request Headers: ${JSON.stringify(error.config?.headers || {}, null, 2)}`);
+        logger.error(`[DEBUG] === END LLM ERROR DEBUG ===`);
+
         logger.error(`LLM API request failed with status ${error.response.status}: ${JSON.stringify(error.response.data)}`);
         throw new LLMError(`LLM API request failed with status ${error.response.status}`, {
           statusCode: error.response.status,

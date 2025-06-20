@@ -19,7 +19,7 @@ import { DomComparator } from '../analysis/dom-comparator.js';
 import { ContentScoringEngine, ElementDetails } from '../analysis/content-scoring-engine.js';
 import { LLMInterface } from '../services/llm-interface.js';
 import { CaptchaSolver } from '../services/captcha-solver.js';
-import { fetchWithCurl, CurlResponse, ProxyDetails as CurlProxyDetails } from '../network/curl-handler.js';
+
 import { logger } from '../utils/logger.js';
 import { normalizeDomain } from '../utils/url-helpers.js';
 import { OUTPUT_TYPES, METHODS, OutputTypeValue, MethodValue } from '../constants.js';
@@ -44,36 +44,33 @@ export interface ScrapeResult {
 }
 
 async function evaluateXPathQuery(page: Page, xpath: string): Promise<ElementHandle<Node>[]> {
+    logger.debug(`[evaluateXPathQuery] Evaluating XPath: ${xpath}`);
     try {
-        const elements = await (page as any).$x(xpath);
-        return elements;
-    } catch (e: any) {
-        logger.error(`[evaluateXPathQuery] Error using page.$x for xpath: ${xpath}. Error: ${e.message}`);
-        logger.info(`[evaluateXPathQuery] Falling back to page.evaluateHandle for xpath: ${xpath}`);
-        try {
-            const jsHandle: JSHandle<Node[]> = await page.evaluateHandle((xpathSelector) => {
-                const results: Node[] = [];
-                const query = document.evaluate(xpathSelector, document, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
-                let node = query.iterateNext();
-                while (node) {
-                    results.push(node);
-                    node = query.iterateNext();
-                }
-                return results;
-            }, xpath);
-
-            const properties = await jsHandle.getProperties();
-            const children: ElementHandle<Node>[] = [];
-            for (const property of properties.values()) {
-                const element = property.asElement();
-                if (element) children.push(element as ElementHandle<Node>);
+        // Use page.evaluateHandle with document.evaluate (modern Puppeteer compatible method)
+        const jsHandle: JSHandle<Node[]> = await page.evaluateHandle((xpathSelector) => {
+            const results: Node[] = [];
+            const query = document.evaluate(xpathSelector, document, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+            let node = query.iterateNext();
+            while (node) {
+                results.push(node);
+                node = query.iterateNext();
             }
-            await jsHandle.dispose();
-            return children;
-        } catch (evalError: any) {
-            logger.error(`[evaluateXPathQuery] Error during fallback page.evaluateHandle for XPath: ${xpath}. Error: ${evalError.message}`);
-            throw new ExtractionError(`Error evaluating XPath (both $x and evaluateHandle failed): ${xpath}`, { originalError: evalError });
+            return results;
+        }, xpath);
+
+        const properties = await jsHandle.getProperties();
+        const children: ElementHandle<Node>[] = [];
+        for (const property of properties.values()) {
+            const element = property.asElement();
+            if (element) children.push(element as ElementHandle<Node>);
         }
+        await jsHandle.dispose();
+
+        logger.debug(`[evaluateXPathQuery] XPath "${xpath}" found ${children.length} elements`);
+        return children;
+    } catch (evalError: any) {
+        logger.error(`[evaluateXPathQuery] Error evaluating XPath "${xpath}": ${evalError.message}`);
+        throw new ExtractionError(`Error evaluating XPath: ${xpath}`, { originalError: evalError });
     }
 }
 
@@ -135,16 +132,14 @@ class CoreScraperEngine {
   }
 
   private async _saveDebugHtml(
-    type: 'success' | 'failure_curl_knowncfg' | 'failure_captcha_knowncfg' | 
-          'failure_get_content_knowncfg' | 'failure_xpath_extract_knowncfg' | 
-          'failure_generic_knowncfg' | 'failure_datadome_discovery' | 
-          'failure_captcha_puppeteer_probe' | 'failure_no_html_for_analysis' | 
-          'failure_captcha_post_interaction' | 'failure_dom_undefined' | 
-          'failure_xpath_discovery' | 'success_discovery_phase' | 
-          'failure_discover_scrape' | 'failure_captcha_no_fallback' |
-          'failure_http_status_knowncfg',
-    domain: string, 
-    urlString: string, 
+    type: 'success' | 'failure_captcha_knowncfg' |
+          'failure_get_content_knowncfg' | 'failure_xpath_extract_knowncfg' |
+          'failure_generic_knowncfg' | 'failure_captcha_solve' |
+          'failure_no_html' | 'failure_dom_extraction' |
+          'failure_xpath_discovery' | 'failure_unified_puppeteer' |
+          'failure_captcha_post_interaction' | 'failure_no_html_for_analysis',
+    domain: string,
+    urlString: string,
     htmlContent: string | null | undefined
   ): Promise<void> {
     if (!this.configs.scraper.debug) {
@@ -182,31 +177,78 @@ class CoreScraperEngine {
     }
   }
 
-  async scrape(targetUrl: string, proxyDetails: PuppeteerProxyDetails | CurlProxyDetails | null = null, userAgentString: string | null = null, requestedOutput: OutputTypeValue = OUTPUT_TYPES.CONTENT_ONLY as OutputTypeValue): Promise<ScrapeResult> {
-    logger.debug(`[CoreScraperEngine SCRAPE_MAIN] Entry point. URL: ${targetUrl}, Output: ${requestedOutput}`);
-    logger.info(`Starting scrape for URL: ${targetUrl}`);
+  async scrape(targetUrl: string, proxyDetails: PuppeteerProxyDetails | null = null, userAgentString: string | null = null, requestedOutput: OutputTypeValue = OUTPUT_TYPES.CONTENT_ONLY as OutputTypeValue): Promise<ScrapeResult> {
+    logger.info(`[SCRAPE_STAGE_1] ===== STARTING SCRAPE PROCESS =====`);
+    logger.info(`[SCRAPE_STAGE_1] Target URL: ${targetUrl}`);
+    logger.info(`[SCRAPE_STAGE_1] Requested Output Type: ${requestedOutput}`);
+    logger.info(`[SCRAPE_STAGE_1] User Agent Override: ${userAgentString ? 'YES' : 'NO'}`);
+    logger.info(`[SCRAPE_STAGE_1] Proxy Override: ${proxyDetails ? 'YES' : 'NO'}`);
 
-    let browserGR: Browser | null = null; 
+    // Retry logic for banned IP scenarios
+    const maxBannedIPRetries = 2; // Allow 2 retries (3 total attempts)
+    const bannedIPRetryDelay = 70000; // 70 seconds in milliseconds
+
+    for (let retryAttempt = 0; retryAttempt <= maxBannedIPRetries; retryAttempt++) {
+      if (retryAttempt > 0) {
+        logger.info(`[BANNED_IP_RETRY] Attempt ${retryAttempt + 1}/${maxBannedIPRetries + 1} after banned IP detection`);
+      }
+
+      try {
+        return await this._performScrape(targetUrl, proxyDetails, userAgentString, requestedOutput);
+      } catch (error: any) {
+        // Check if this is a banned IP error
+        const isBannedIPError = error.name === 'CaptchaError' &&
+                               error.details?.reason === 'banned_ip' &&
+                               error.message.includes('banned IP');
+
+        if (isBannedIPError && retryAttempt < maxBannedIPRetries) {
+          logger.warn(`[BANNED_IP_RETRY] Banned IP detected on attempt ${retryAttempt + 1}. Pausing for ${bannedIPRetryDelay / 1000} seconds before retry...`);
+          logger.info(`[BANNED_IP_RETRY] Error details: ${error.message}`);
+
+          // Wait for the specified delay to allow IP rotation/ban to lift
+          await new Promise(resolve => setTimeout(resolve, bannedIPRetryDelay));
+
+          logger.info(`[BANNED_IP_RETRY] Pause completed. Retrying scrape attempt ${retryAttempt + 2}/${maxBannedIPRetries + 1}...`);
+          continue; // Retry the scrape
+        }
+
+        // If it's not a banned IP error, or we've exhausted retries, throw the error
+        if (isBannedIPError) {
+          logger.error(`[BANNED_IP_RETRY] Banned IP detected after ${maxBannedIPRetries + 1} attempts. Giving up.`);
+        }
+        throw error;
+      }
+    }
+
+    // This should never be reached due to the loop logic, but TypeScript requires it
+    throw new ScraperError('Unexpected end of retry loop in scrape method');
+  }
+
+  private async _performScrape(targetUrl: string, proxyDetails: PuppeteerProxyDetails | null = null, userAgentString: string | null = null, requestedOutput: OutputTypeValue = OUTPUT_TYPES.CONTENT_ONLY as OutputTypeValue): Promise<ScrapeResult> {
+    let browserGR: Browser | null = null;
     let pageGR: Page | null = null;
     let domain: string | null = null;
     let siteConfig: SiteConfig | null = null;
-    // Determine effectiveUserAgent once at the beginning
-    const effectiveUserAgent = userAgentString || this.configs.scraper.defaultUserAgent;
-    logger.debug(`[CoreScraperEngine SCRAPE_MAIN] Effective User-Agent: ${effectiveUserAgent}`);
 
+    logger.info(`[SCRAPE_STAGE_2] ===== CONFIGURATION SETUP =====`);
+    const effectiveUserAgent = userAgentString || this.configs.scraper.defaultUserAgent;
+    logger.info(`[SCRAPE_STAGE_2] Effective User Agent: ${effectiveUserAgent}`);
 
     try {
+      logger.info(`[SCRAPE_STAGE_3] ===== DOMAIN NORMALIZATION =====`);
       domain = normalizeDomain(targetUrl);
-      logger.debug(`[CoreScraperEngine SCRAPE_MAIN] Normalized domain: ${domain}`);
+      logger.info(`[SCRAPE_STAGE_3] Normalized domain: ${domain}`);
       if (!domain) {
         const errorMsg = `Invalid URL or could not normalize domain: ${targetUrl}`;
-        logger.error(errorMsg);
+        logger.error(`[SCRAPE_STAGE_3] ERROR: ${errorMsg}`);
         throw new ConfigurationError(errorMsg, { url: targetUrl });
       }
 
+      logger.info(`[SCRAPE_STAGE_4] ===== PROXY CONFIGURATION =====`);
       let effectiveProxy = proxyDetails;
       if (!effectiveProxy && this.configs.scraper.httpProxy) {
-        logger.info(`Using default proxy from HTTP_PROXY environment variable for ${targetUrl}`);
+        logger.info(`[SCRAPE_STAGE_4] Using default proxy from HTTP_PROXY environment variable`);
+        logger.info(`[SCRAPE_STAGE_4] HTTP_PROXY value: ${this.configs.scraper.httpProxy}`);
         try {
             const proxyUrl = new URL(this.configs.scraper.httpProxy);
             effectiveProxy = {
@@ -214,61 +256,102 @@ class CoreScraperEngine {
                 username: proxyUrl.username ? decodeURIComponent(proxyUrl.username) : undefined,
                 password: proxyUrl.password ? decodeURIComponent(proxyUrl.password) : undefined,
             };
+            logger.info(`[SCRAPE_STAGE_4] Proxy parsed successfully - Server: ${effectiveProxy.server}`);
+            logger.info(`[SCRAPE_STAGE_4] Proxy has credentials: ${effectiveProxy.username ? 'YES' : 'NO'}`);
         } catch (e: any) {
-            logger.error(`[CoreScraperEngine SCRAPE_MAIN] Invalid HTTP_PROXY format: ${this.configs.scraper.httpProxy}. Error: ${e.message}`);
+            logger.error(`[SCRAPE_STAGE_4] ERROR: Invalid HTTP_PROXY format: ${this.configs.scraper.httpProxy}. Error: ${e.message}`);
             throw new ConfigurationError(`Invalid HTTP_PROXY format: ${this.configs.scraper.httpProxy}`, { originalError: e.message });
         }
+      } else if (effectiveProxy) {
+        logger.info(`[SCRAPE_STAGE_4] Using provided proxy override`);
+        logger.info(`[SCRAPE_STAGE_4] Proxy server: ${effectiveProxy.server}`);
       }
 
       // FAIL HARD if no proxy configured - proxy is mandatory
       if (!effectiveProxy || !effectiveProxy.server) {
-        logger.error(`[CoreScraperEngine SCRAPE_MAIN] Proxy is required but not configured for URL: ${targetUrl}`);
+        logger.error(`[SCRAPE_STAGE_4] CRITICAL: Proxy is required but not configured for URL: ${targetUrl}`);
         throw new ConfigurationError('Proxy configuration is mandatory for all scraping operations. Set HTTP_PROXY environment variable or provide proxyDetails.', { url: targetUrl });
       }
 
-      logger.debug(`[CoreScraperEngine SCRAPE_MAIN] Effective proxy: ${effectiveProxy ? JSON.stringify(effectiveProxy) : 'None'}`);
+      logger.info(`[SCRAPE_STAGE_4] Final proxy configuration: ${effectiveProxy.server}`);
 
+      logger.info(`[SCRAPE_STAGE_5] ===== SITE CONFIG LOOKUP =====`);
+      logger.info(`[SCRAPE_STAGE_5] Looking up config for domain: ${domain}`);
       try {
         siteConfig = await this.knownSitesManager.getConfig(domain);
+        logger.info(`[SCRAPE_STAGE_5] Site config lookup completed successfully`);
+        if (siteConfig) {
+          logger.info(`[SCRAPE_STAGE_5] Found existing config - Method: ${siteConfig.method}`);
+          logger.info(`[SCRAPE_STAGE_5] Config XPath: ${siteConfig.xpath_main_content}`);
+          logger.info(`[SCRAPE_STAGE_5] Needs CAPTCHA solver: ${siteConfig.needs_captcha_solver}`);
+          logger.info(`[SCRAPE_STAGE_5] Last successful scrape: ${siteConfig.last_successful_scrape_timestamp || 'Never'}`);
+          logger.info(`[SCRAPE_STAGE_5] Failure count: ${siteConfig.failure_count_since_last_success}`);
+        } else {
+          logger.info(`[SCRAPE_STAGE_5] No existing config found for domain`);
+        }
       } catch (e: any) {
-          logger.error(`[CoreScraperEngine SCRAPE_MAIN] Error getting site config for ${domain}: ${e.message}`);
+          logger.error(`[SCRAPE_STAGE_5] ERROR getting site config for ${domain}: ${e.message}`);
           siteConfig = null;
       }
-      logger.debug(`[CoreScraperEngine SCRAPE_MAIN] Site config from KnownSitesManager for ${domain}: ${siteConfig ? `Keys: ${Object.keys(siteConfig).join(', ')}` : 'Not found'}`);
 
       if (siteConfig) {
-        logger.info(`Found known site config for domain: ${domain}`);
-        logger.debug(`[CoreScraperEngine SCRAPE_MAIN] Attempting _scrapeWithKnownConfig for ${domain}`);
-        try {
-            const knownScrapeOutput = await this._scrapeWithKnownConfig(targetUrl, domain, siteConfig, effectiveProxy, effectiveUserAgent, requestedOutput, browserGR, pageGR);
-            browserGR = knownScrapeOutput.browser; 
-            pageGR = knownScrapeOutput.page;
+        logger.info(`[SCRAPE_STAGE_6] ===== KNOWN CONFIG PROCESSING =====`);
+        // Check if this is an old config with unsupported method
+        if ((siteConfig.method as string) === 'curl') {
+          logger.warn(`[SCRAPE_STAGE_6] Found legacy cURL config for ${domain}. Migrating to Puppeteer and triggering re-discovery.`);
+          await this.knownSitesManager.deleteConfig(domain);
+          siteConfig = null; // Force re-discovery
+          logger.info(`[SCRAPE_STAGE_6] Legacy config deleted, will proceed to discovery`);
+        } else {
+          logger.info(`[SCRAPE_STAGE_6] Attempting to use known site config for domain: ${domain}`);
+          logger.info(`[SCRAPE_STAGE_6] Config method: ${siteConfig.method}`);
+          try {
+              const knownScrapeOutput = await this._scrapeWithKnownConfig(targetUrl, domain, siteConfig, effectiveProxy, effectiveUserAgent, requestedOutput, browserGR, pageGR);
+              browserGR = knownScrapeOutput.browser;
+              pageGR = knownScrapeOutput.page;
 
-            logger.debug(`[CoreScraperEngine SCRAPE_MAIN] _scrapeWithKnownConfig result: ${knownScrapeOutput.result !== null ? 'Success' : 'Failure (null)'}`);
-            if (knownScrapeOutput.result && knownScrapeOutput.result.success) {
-                logger.debug(`[CoreScraperEngine SCRAPE_MAIN] Known config scrape successful. Returning result.`);
-                return knownScrapeOutput.result;
-            }
-            logger.warn(`Scraping with known config failed for ${domain}. Triggering re-discovery.`);
-            await this.knownSitesManager.incrementFailure(domain);
-        } catch (error: any) {
-            logger.warn(`Error during _scrapeWithKnownConfig for ${domain}: ${error.message}. Triggering re-discovery.`);
-            if (this.configs.scraper.debug) {
-                logger.error(`[DEBUG_MODE] Full error during _scrapeWithKnownConfig for ${domain}:`, error);
-            }
-            await this.knownSitesManager.incrementFailure(domain);
+              logger.info(`[SCRAPE_STAGE_6] Known config scrape result: ${knownScrapeOutput.result !== null ? 'Success' : 'Failure (null)'}`);
+              if (knownScrapeOutput.result && knownScrapeOutput.result.success) {
+                  logger.info(`[SCRAPE_STAGE_6] ===== SCRAPE COMPLETED SUCCESSFULLY WITH KNOWN CONFIG =====`);
+                  logger.info(`[SCRAPE_STAGE_6] Method used: ${siteConfig.method}`);
+                  logger.info(`[SCRAPE_STAGE_6] Content length: ${knownScrapeOutput.result.data?.length || 0} chars`);
+                  return knownScrapeOutput.result;
+              }
+              logger.warn(`[SCRAPE_STAGE_6] Known config scrape failed for ${domain}. Will trigger re-discovery.`);
+              await this.knownSitesManager.incrementFailure(domain);
+          } catch (error: any) {
+              logger.warn(`[SCRAPE_STAGE_6] Error during known config scrape for ${domain}: ${error.message}. Will trigger re-discovery.`);
+              if (this.configs.scraper.debug) {
+                  logger.error(`[SCRAPE_STAGE_6] Full error during _scrapeWithKnownConfig for ${domain}:`, error);
+              }
+              await this.knownSitesManager.incrementFailure(domain);
+          }
         }
       }
 
-      logger.info(`No known site config for domain: ${domain} or known config failed. Starting discovery.`);
-      logger.debug(`[CoreScraperEngine SCRAPE_MAIN] Attempting _discoverAndScrape for ${domain}`);
-      const discoveryOutput = await this._discoverAndScrape(targetUrl, domain, effectiveProxy, effectiveUserAgent, requestedOutput, browserGR, pageGR);
+      logger.info(`[SCRAPE_STAGE_7] ===== STARTING DISCOVERY PROCESS =====`);
+      if (!siteConfig) {
+        logger.info(`[SCRAPE_STAGE_7] No known site config for domain: ${domain}. Starting unified Puppeteer scraping.`);
+      } else {
+        logger.info(`[SCRAPE_STAGE_7] Known site config failed for domain: ${domain}. Starting unified Puppeteer scraping.`);
+      }
+      logger.info(`[SCRAPE_STAGE_7] Discovery method: Unified Puppeteer approach`);
+      logger.info(`[SCRAPE_STAGE_7] Will attempt LLM-based XPath discovery`);
+
+      const discoveryOutput = await this._unifiedPuppeteerScrape(targetUrl, domain, effectiveProxy, effectiveUserAgent, requestedOutput, browserGR, pageGR);
       browserGR = discoveryOutput.browser;
       pageGR = discoveryOutput.page;
-      
+
+      logger.info(`[SCRAPE_STAGE_7] Discovery process completed`);
       if (!discoveryOutput.result || !discoveryOutput.result.success) {
+          logger.error(`[SCRAPE_STAGE_7] Discovery process failed to return a successful result`);
           throw new ScraperError("Discovery process failed to return a successful scrape result.", discoveryOutput.result?.details || { reason: "discovery_returned_failure" });
       }
+
+      logger.info(`[SCRAPE_STAGE_7] ===== SCRAPE COMPLETED SUCCESSFULLY WITH DISCOVERY =====`);
+      logger.info(`[SCRAPE_STAGE_7] Method discovered: ${discoveryOutput.result.method}`);
+      logger.info(`[SCRAPE_STAGE_7] XPath discovered: ${discoveryOutput.result.xpath}`);
+      logger.info(`[SCRAPE_STAGE_7] Content length: ${discoveryOutput.result.data?.length || 0} chars`);
       return discoveryOutput.result;
 
     } catch (error: any) {
@@ -290,9 +373,9 @@ class CoreScraperEngine {
 
   private async _scrapeWithKnownConfig(
     url: string,
-    domain: string, 
-    config: SiteConfig, 
-    proxyDetails: PuppeteerProxyDetails | CurlProxyDetails | null, 
+    domain: string,
+    config: SiteConfig,
+    proxyDetails: PuppeteerProxyDetails | null,
     userAgent: string, // This is the effectiveUserAgent
     requestedOutput: OutputTypeValue,
     browserIn: Browser | null,
@@ -305,62 +388,115 @@ class CoreScraperEngine {
     let errorHtmlToSave: string = '';
     let httpStatus: number | undefined;
     let needsConfigUpdate = false;
-    const uaToUse = config.user_agent_to_use || userAgent; // Use site-specific UA if available, else the effective one
 
     try {
-      logger.debug(`[CoreScraperEngine _scrapeWithKnownConfig] Using method: ${config.method} with UA: ${uaToUse.substring(0,50)}...`);
+      logger.info(`[KNOWN_CONFIG] ===== SCRAPING WITH KNOWN CONFIG =====`);
+      logger.info(`[KNOWN_CONFIG] Method: ${config.method}`);
+      logger.info(`[KNOWN_CONFIG] XPath: ${config.xpath_main_content}`);
+      logger.info(`[KNOWN_CONFIG] User Agent: ${userAgent.substring(0,50)}...`);
+      logger.info(`[KNOWN_CONFIG] Needs CAPTCHA solver: ${config.needs_captcha_solver}`);
 
       switch (config.method) {
-        case METHODS.CURL:
-          if (browser) { await this.puppeteerController.cleanupPuppeteer(browser); browser = null; page = null; }
-          const curlResponse = await fetchWithCurl(url, proxyDetails as CurlProxyDetails | null, config.site_specific_headers, uaToUse);
-          httpStatus = curlResponse.statusCode;
-          pageContent = curlResponse.html || null;
-          errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : '';
-          // Get HTML at all costs - ignore HTTP status, focus on getting content
-          if (!pageContent || pageContent.length === 0) {
-            logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] cURL returned no HTML content. Status: ${httpStatus}, Error: ${curlResponse.error}`);
-            await this._saveDebugHtml('failure_curl_knowncfg', config.domain_pattern, url, curlResponse.html || '');
-            throw new NetworkError(`cURL returned no HTML content for known config. Status: ${httpStatus}, Error: ${curlResponse.error}`, { reason: 'curl_no_html_known_config', statusCode: httpStatus });
-          }
-          logger.debug(`[CoreScraperEngine _scrapeWithKnownConfig] cURL fetch successful. HTML length: ${pageContent?.length}`);
-          break;
         case METHODS.PUPPETEER_STEALTH:
         case METHODS.PUPPETEER_CAPTCHA:
-          logger.debug(`[CoreScraperEngine _scrapeWithKnownConfig] Attempting Puppeteer (${config.method}) launch and navigate...`);
+          logger.info(`[KNOWN_CONFIG] Launching Puppeteer with method: ${config.method}`);
           let navigationResponse: HTTPResponse | null = null;
-          if (!page || page.isClosed()) { 
-            if (browser && browser.isConnected()) await this.puppeteerController.cleanupPuppeteer(browser);
-            const navigateResult = await this.puppeteerController.launchAndNavigate(url, proxyDetails as PuppeteerProxyDetails | null, uaToUse, config.puppeteer_wait_conditions);
-            browser = navigateResult.browser; page = navigateResult.page;
-            // Try to get the response from the last navigation in launchAndNavigate
-            navigationResponse = page.mainFrame().childFrames().length > 0 ? await page.mainFrame().childFrames()[0].goto(page.url()) : await page.goto(page.url()); // Re-navigate to get response, can be risky
-          } else { 
-             navigationResponse = await this.puppeteerController.navigate(page, url, config.puppeteer_wait_conditions);
+          let navigationError: any = null;
+
+          try {
+            if (!page || page.isClosed()) {
+              if (browser && browser.isConnected()) await this.puppeteerController.cleanupPuppeteer(browser);
+              logger.info(`[KNOWN_CONFIG] Launching new browser and navigating...`);
+              const navigateResult = await this.puppeteerController.launchAndNavigate(url, proxyDetails as PuppeteerProxyDetails | null, userAgent, config.puppeteer_wait_conditions);
+              browser = navigateResult.browser; page = navigateResult.page;
+              // Try to get the response from the last navigation in launchAndNavigate
+              navigationResponse = page.mainFrame().childFrames().length > 0 ? await page.mainFrame().childFrames()[0].goto(page.url()) : await page.goto(page.url()); // Re-navigate to get response, can be risky
+            } else {
+               logger.info(`[KNOWN_CONFIG] Reusing existing page, navigating to URL...`);
+               navigationResponse = await this.puppeteerController.navigate(page, url, config.puppeteer_wait_conditions);
+            }
+          } catch (navError: any) {
+            navigationError = navError;
+            logger.warn(`[KNOWN_CONFIG] Navigation error occurred: ${navError.message}`);
+
+            // Try to get page content even after navigation error - sometimes the page loads partially
+            try {
+              if (page && !page.isClosed()) {
+                pageContent = await this.puppeteerController.getPageContent(page);
+                errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : '';
+                logger.info(`[KNOWN_CONFIG] Retrieved content after navigation error - Length: ${pageContent?.length}`);
+
+                // If we have substantial content (200K+ chars), IGNORE the navigation error and proceed
+                if (pageContent && pageContent.length >= 200000) {
+                  logger.info(`[KNOWN_CONFIG] Got substantial content (${pageContent.length} chars) despite navigation error. Proceeding with content extraction.`);
+                  navigationError = null; // Clear the error - we have good content
+                  // Don't return here - just clear the error and continue
+                }
+
+                // Only attempt CAPTCHA solving if we have minimal content AND it's a blocking error
+                const isBlockingError = navError.message.includes('net::ERR_BLOCKED_BY_RESPONSE') ||
+                                       navError.message.includes('ERR_BLOCKED_BY_RESPONSE') ||
+                                       navError.message.includes('net::ERR_ACCESS_DENIED') ||
+                                       navError.message.includes('ERR_ACCESS_DENIED');
+
+                if (isBlockingError && (config.method as string) !== METHODS.PUPPETEER_CAPTCHA) {
+                  logger.info(`[KNOWN_CONFIG] Network-level blocking detected with minimal content (${navError.message}). Attempting CAPTCHA solve.`);
+
+                  const captchaSolved = await this.captchaSolver.solveIfPresent(page, url, userAgent);
+                  if (captchaSolved) {
+                    logger.info(`[KNOWN_CONFIG] CAPTCHA solved after network blocking. Re-attempting navigation.`);
+                    try {
+                      navigationResponse = await this.puppeteerController.navigate(page, url, config.puppeteer_wait_conditions);
+                      pageContent = await this.puppeteerController.getPageContent(page);
+                      errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : '';
+                      httpStatus = navigationResponse?.status();
+                      logger.info(`[KNOWN_CONFIG] Navigation successful after CAPTCHA solve - Status: ${httpStatus}, Content Length: ${pageContent?.length}`);
+                      needsConfigUpdate = true;
+                      navigationError = null; // Clear the error since we recovered
+                    } catch (retryNavError: any) {
+                      logger.warn(`[KNOWN_CONFIG] Navigation still failed after CAPTCHA solve: ${retryNavError.message}`);
+                      // Continue with whatever content we have
+                    }
+                  } else {
+                    logger.warn(`[KNOWN_CONFIG] CAPTCHA solving failed after network blocking.`);
+                  }
+                }
+              }
+            } catch (contentError: any) {
+              logger.warn(`[KNOWN_CONFIG] Could not retrieve content after navigation error: ${contentError.message}`);
+            }
+
+            // If we still have a navigation error and no substantial content, re-throw it
+            if (navigationError && (!pageContent || pageContent.length < 10000)) {
+              throw navigationError;
+            }
           }
+
           httpStatus = navigationResponse?.status();
-          pageContent = await this.puppeteerController.getPageContent(page!); 
-          errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : '';
-          logger.debug(`[CoreScraperEngine _scrapeWithKnownConfig] Puppeteer navigation/content fetch completed. Status: ${httpStatus}, Content Length: ${pageContent?.length}`);
+          if (!pageContent) {
+            pageContent = await this.puppeteerController.getPageContent(page!);
+            errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : '';
+          }
+          logger.info(`[KNOWN_CONFIG] Navigation completed - Status: ${httpStatus}, Content Length: ${pageContent?.length}`);
 
           // Check for CAPTCHA regardless of HTTP status - focus on getting content at all costs
           if (page && pageContent &&
               this.htmlAnalyser.detectCaptchaMarkers(pageContent) &&
               (config.method as string) !== METHODS.PUPPETEER_CAPTCHA) { // Added check to prevent re-solving if already P_CAPTCHA
-            logger.info(`[CoreScraperEngine _scrapeWithKnownConfig] CAPTCHA detected on page (status ${httpStatus}). Attempting solve.`);
-            const captchaSolved = await this.captchaSolver.solveIfPresent(page, url, uaToUse); // Pass uaToUse
+            logger.info(`[KNOWN_CONFIG] CAPTCHA detected on page (status ${httpStatus}). Attempting solve.`);
+            const captchaSolved = await this.captchaSolver.solveIfPresent(page, url, userAgent);
             if (captchaSolved) {
-              logger.info(`[CoreScraperEngine _scrapeWithKnownConfig] CAPTCHA solved. Re-fetching content.`);
+              logger.info(`[KNOWN_CONFIG] CAPTCHA solved. Re-fetching content.`);
               pageContent = await this.puppeteerController.getPageContent(page);
               errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : '';
               const newResponse = await page.goto(page.url(), { waitUntil: 'networkidle0' }).catch(() => null); // Try to get a new response
               httpStatus = newResponse?.status() || httpStatus;
-              logger.debug(`[CoreScraperEngine _scrapeWithKnownConfig] Content re-fetched after CAPTCHA. New Status: ${httpStatus}, Length: ${pageContent?.length}`);
+              logger.info(`[KNOWN_CONFIG] Content re-fetched after CAPTCHA. New Status: ${httpStatus}, Length: ${pageContent?.length}`);
               if (!config.needs_captcha_solver || (config.method as string) !== METHODS.PUPPETEER_CAPTCHA) {
                   needsConfigUpdate = true;
               }
             } else {
-              logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] CAPTCHA detected but solving failed.`);
+              logger.warn(`[KNOWN_CONFIG] CAPTCHA detected but solving failed.`);
               await this._saveDebugHtml('failure_captcha_knowncfg', config.domain_pattern, url, pageContent || '');
               throw new CaptchaError('CAPTCHA solving failed.', { reason: 'captcha_solve_failed_known_config' });
             }
@@ -394,9 +530,7 @@ class CoreScraperEngine {
       }
       
       logger.debug(`[CoreScraperEngine _scrapeWithKnownConfig] Extracting content with XPath: ${config.xpath_main_content}`);
-      if (config.method === METHODS.CURL) {
-        extractedElementHtml = this.htmlAnalyser.extractByXpath(pageContent, config.xpath_main_content);
-      } else if (page) {
+      if (page) {
           const elements: ElementHandle<Node>[] = await evaluateXPathQuery(page, config.xpath_main_content);
           if (elements.length > 0) {
               extractedElementHtml = await page.evaluate(elNode => (elNode && elNode.nodeType === Node.ELEMENT_NODE) ? (elNode as Element).innerHTML : null, elements[0]);
@@ -404,6 +538,8 @@ class CoreScraperEngine {
           } else {
               logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] XPath matched 0 elements in Puppeteer for XPath: ${config.xpath_main_content}`);
           }
+      } else {
+          throw new ConfigurationError('Page object not available for XPath extraction in Puppeteer-only mode.');
       }
 
       if (!extractedElementHtml) {
@@ -412,10 +548,10 @@ class CoreScraperEngine {
         
         // If XPath failed, and we are using Puppeteer, check for CAPTCHA one last time
         if (page && pageContent && this.htmlAnalyser.detectCaptchaMarkers(pageContent) && (config.method as string) !== METHODS.PUPPETEER_CAPTCHA) {
-            logger.info(`[CoreScraperEngine _scrapeWithKnownConfig] CAPTCHA detected after known XPath failed for ${url}. Attempting CAPTCHA solve.`);
-            const captchaSolved = await this.captchaSolver.solveIfPresent(page, url, uaToUse);
+            logger.info(`[KNOWN_CONFIG] CAPTCHA detected after known XPath failed. Attempting CAPTCHA solve.`);
+            const captchaSolved = await this.captchaSolver.solveIfPresent(page, url, userAgent);
             if (captchaSolved) {
-                logger.info(`[CoreScraperEngine _scrapeWithKnownConfig] CAPTCHA solved. Re-fetching content and re-trying XPath.`);
+                logger.info(`[KNOWN_CONFIG] CAPTCHA solved. Re-fetching content and re-trying XPath.`);
                 pageContent = await this.puppeteerController.getPageContent(page);
                 errorHtmlToSave = pageContent ? pageContent.substring(0, 50000) : ''; // Update errorHtmlToSave
                 const elements: ElementHandle<Node>[] = await evaluateXPathQuery(page, config.xpath_main_content);
@@ -424,13 +560,13 @@ class CoreScraperEngine {
                     for (const el of elements) await el.dispose();
                 }
                 if (extractedElementHtml) {
-                    logger.info(`[CoreScraperEngine _scrapeWithKnownConfig] Content successfully extracted with known XPath after CAPTCHA solve (post-XPath-fail) for ${url}.`);
-                    needsConfigUpdate = true; 
+                    logger.info(`[KNOWN_CONFIG] Content successfully extracted with known XPath after CAPTCHA solve.`);
+                    needsConfigUpdate = true;
                 } else {
-                    logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] Known XPath still failed after CAPTCHA solve (post-XPath-fail) for ${url}.`);
+                    logger.warn(`[KNOWN_CONFIG] Known XPath still failed after CAPTCHA solve.`);
                 }
             } else {
-                 logger.warn(`[CoreScraperEngine _scrapeWithKnownConfig] CAPTCHA detected (post-XPath-fail) and solving failed for ${url}.`);
+                 logger.warn(`[KNOWN_CONFIG] CAPTCHA detected and solving failed.`);
             }
         }
         if (!extractedElementHtml) { // If still no content
@@ -465,336 +601,284 @@ class CoreScraperEngine {
     }
   }
 
-  private async _discoverAndScrape(
-    url: string, 
-    domain: string, 
-    proxyDetails: PuppeteerProxyDetails | CurlProxyDetails | null, 
-    userAgent: string, // This is the effectiveUserAgent
+  private async _unifiedPuppeteerScrape(
+    url: string,
+    domain: string,
+    proxyDetails: PuppeteerProxyDetails | null,
+    userAgent: string,
     requestedOutput: OutputTypeValue,
     browserIn: Browser | null,
     pageIn: Page | null
   ): Promise<{ result: ScrapeResult, browser: Browser | null, page: Page | null }> {
-    logger.debug(`[CoreScraperEngine _discoverAndScrape] Entry. URL: ${url}, Domain: ${domain}`);
+    logger.debug(`[CoreScraperEngine _unifiedPuppeteerScrape] Entry. URL: ${url}, Domain: ${domain}`);
     let browser: Browser | null = browserIn;
     let page: Page | null = pageIn;
-    let curlHtml: string | null = null;
-    let puppeteerHtml: string | null = null;
     let htmlForAnalysis: string | null = null;
-    let tentativeMethodIsCurl = false;
-    let discoveredNeedsCaptcha = false; // Tracks if a CAPTCHA was encountered AND solved by our solver
+    let discoveredNeedsCaptcha = false;
     let pageContentForError: string = '';
     let finalScrapeResult: ScrapeResult | null = null;
 
     try {
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] Step 1: Initial Probing... UA: ${userAgent.substring(0,50)}...`);
-      
-      const curlResponse: CurlResponse = await fetchWithCurl(url, proxyDetails as CurlProxyDetails | null, null, userAgent).catch(e => {
-        logger.warn(`[CoreScraperEngine _discoverAndScrape] cURL fetch raw error: ${e.message}`);
-        return { success: false, error: e.message, html: (e.details as any)?.htmlContent || '', statusCode: (e.details as any)?.statusCode };
-      });
-      pageContentForError = curlResponse.html || '';
+      logger.info(`[DISCOVERY_STAGE_1] ===== STARTING UNIFIED PUPPETEER DISCOVERY =====`);
+      logger.info(`[DISCOVERY_STAGE_1] Target URL: ${url}`);
+      logger.info(`[DISCOVERY_STAGE_1] Domain: ${domain}`);
+      logger.info(`[DISCOVERY_STAGE_1] User Agent: ${userAgent.substring(0,50)}...`);
+      logger.info(`[DISCOVERY_STAGE_1] Proxy: ${proxyDetails?.server || 'Default'}`);
 
-      let curlHtmlIsUsable = false;
-      // Get HTML at all costs - ignore HTTP status, focus on getting content
-      if (curlResponse.html && curlResponse.html.length > 0) {
-        curlHtml = curlResponse.html;
-        if (!this.htmlAnalyser.detectCaptchaMarkers(curlHtml)) {
-          curlHtmlIsUsable = true;
-          htmlForAnalysis = curlHtml;
-          tentativeMethodIsCurl = true;
-          logger.debug(`[CoreScraperEngine _discoverAndScrape] cURL got HTML (status: ${curlResponse.statusCode}) and no CAPTCHA. Tentatively using cURL HTML.`);
+      // Step 1: Launch Puppeteer and navigate
+      logger.info(`[DISCOVERY_STAGE_2] ===== BROWSER LAUNCH & NAVIGATION =====`);
+      let navigationError: any = null;
+
+      try {
+        if (!page || page.isClosed()) {
+          if (browser && browser.isConnected()) await this.puppeteerController.cleanupPuppeteer(browser);
+          logger.info(`[DISCOVERY_STAGE_2] Launching new Puppeteer browser...`);
+          const navigateResult = await this.puppeteerController.launchAndNavigate(url, proxyDetails as PuppeteerProxyDetails | null, userAgent, null, true);
+          browser = navigateResult.browser;
+          page = navigateResult.page;
+          logger.info(`[DISCOVERY_STAGE_2] Browser launched and navigation completed successfully`);
         } else {
-          logger.info('[CoreScraperEngine _discoverAndScrape] CAPTCHA detected in cURL response. cURL HTML is not immediately usable.');
+          logger.info(`[DISCOVERY_STAGE_2] Reusing existing page, navigating to: ${url}`);
+          await this.puppeteerController.navigate(page, url, null, true);
+          logger.info(`[DISCOVERY_STAGE_2] Navigation to new URL completed`);
         }
-      } else {
-        logger.warn(`[CoreScraperEngine _discoverAndScrape] cURL returned no HTML content: ${curlResponse?.error || 'Unknown cURL issue'}, Status: ${curlResponse?.statusCode}`);
-      }
+      } catch (navError: any) {
+        navigationError = navError;
+        logger.warn(`[DISCOVERY_STAGE_2] Navigation error occurred: ${navError.message}`);
 
-      if (!curlHtmlIsUsable) {
-        logger.info(`[CoreScraperEngine _discoverAndScrape] cURL HTML not usable or CAPTCHA detected. Proceeding with Puppeteer probe.`);
-        tentativeMethodIsCurl = false; 
-        
-        let puppeteerNavSucceeded = false;
+        // Try to get page content even after navigation error - sometimes the page loads partially
         try {
-            if (!page || page.isClosed()) { 
-                if (browser && browser.isConnected()) await this.puppeteerController.cleanupPuppeteer(browser);
-                const navigateResult = await this.puppeteerController.launchAndNavigate(url, proxyDetails as PuppeteerProxyDetails | null, userAgent, null, true);
-                browser = navigateResult.browser;
-                page = navigateResult.page;
-            } else { 
-                 await this.puppeteerController.navigate(page, url, null, true);
-            }
-            puppeteerNavSucceeded = true;
-        } catch (navError: any) {
-            logger.warn(`[CoreScraperEngine _discoverAndScrape] Puppeteer navigation failed during initial probe: ${navError.message}`);
-            pageContentForError = navError.details?.htmlContent || pageContentForError; 
-            if (!curlHtmlIsUsable) { 
-                await this._saveDebugHtml('failure_no_html_for_analysis', domain, url, pageContentForError);
-                throw new NetworkError('Both cURL and Puppeteer probes failed to get usable page for discovery.', { originalError: navError });
-            }
-            if (curlHtml && this.htmlAnalyser.detectCaptchaMarkers(curlHtml)) {
-                 await this._saveDebugHtml('failure_captcha_no_fallback', domain, url, curlHtml);
-                 throw new CaptchaError('cURL HTML unusable due to CAPTCHA and Puppeteer probe also failed to navigate.', { originalError: navError });
-            }
-        }
-
-        if (puppeteerNavSucceeded && page) {
-            puppeteerHtml = await this.puppeteerController.getPageContent(page);
-            pageContentForError = puppeteerHtml || pageContentForError;
-
-            if (this.htmlAnalyser.detectCaptchaMarkers(puppeteerHtml)) {
-              logger.info('[CoreScraperEngine _discoverAndScrape] CAPTCHA detected in Puppeteer probe response.');
-              const solved = await this.captchaSolver.solveIfPresent(page, url, userAgent); // Pass userAgent
-              if (!solved) {
-                await this._saveDebugHtml('failure_captcha_puppeteer_probe', domain, url, pageContentForError);
-                throw new CaptchaError('CAPTCHA solving failed during Puppeteer probe.', { reason: 'captcha_solve_failed_puppeteer_probe' });
-              }
-              discoveredNeedsCaptcha = true; // CAPTCHA was present and solved
-              puppeteerHtml = await this.puppeteerController.getPageContent(page); 
-              logger.debug(`[CoreScraperEngine _discoverAndScrape] Puppeteer HTML after CAPTCHA solve. Length: ${puppeteerHtml?.length}`);
-            }
-            htmlForAnalysis = puppeteerHtml;
-        }
-      }
-      
-      if (!htmlForAnalysis) {
-        logger.error(`[CoreScraperEngine _discoverAndScrape] CRITICAL: Failed to retrieve any HTML content for analysis after all probes.`);
-        await this._saveDebugHtml('failure_no_html_for_analysis', domain, url, pageContentForError || '');
-        throw new NetworkError('Failed to retrieve any HTML content for analysis after all probes (final check).', { reason: 'no_html_for_analysis_final' });
-      }
-      pageContentForError = htmlForAnalysis; 
-
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] HTML for analysis chosen. Length: ${htmlForAnalysis?.length}. Tentative method is cURL: ${tentativeMethodIsCurl}. Needs CAPTCHA (solved): ${discoveredNeedsCaptcha}`);
-      
-      // If cURL was initially clean, and we want to compare with Puppeteer (if Puppeteer also ran and got clean HTML)
-      if (curlHtmlIsUsable && puppeteerHtml && !this.htmlAnalyser.detectCaptchaMarkers(puppeteerHtml) && !discoveredNeedsCaptcha) {
-        logger.debug(`[CoreScraperEngine _discoverAndScrape] Both cURL and Puppeteer HTML (clean) are available. Comparing DOMs...`);
-        const areSimilar = await this.domComparator.compareDoms(curlHtml, puppeteerHtml); // curlHtml is from initial usable fetch
-        if (areSimilar) {
-            logger.info('[CoreScraperEngine _discoverAndScrape] DOMs similar. Preferring cURL HTML for analysis.');
-            htmlForAnalysis = curlHtml; // Re-affirm
-            tentativeMethodIsCurl = true;
-            // Close the Puppeteer instance if it was opened just for this comparison/discovery path
-            if (page && !page.isClosed() && browser) { await this.puppeteerController.cleanupPuppeteer(browser); browser = null; page = null; }
-        } else {
-            logger.info(`[CoreScraperEngine _discoverAndScrape] DOMs differ. Using Puppeteer HTML for analysis.`);
-            htmlForAnalysis = puppeteerHtml; 
-            tentativeMethodIsCurl = false; // We are now committed to Puppeteer's version
-        }
-      }
-      
-      if (!tentativeMethodIsCurl && page && !page.isClosed()) {
-        logger.debug('[CoreScraperEngine _discoverAndScrape] Performing full interactions on Puppeteer page for discovery.');
-        await this.puppeteerController.performInteractions(page);
-        const freshPuppeteerHtml = await this.puppeteerController.getPageContent(page);
-        if (freshPuppeteerHtml) {
-            logger.debug(`[CoreScraperEngine _discoverAndScrape] HTML after interactions. Length: ${freshPuppeteerHtml?.length}. Updating htmlForAnalysis.`);
-            htmlForAnalysis = freshPuppeteerHtml;
-            pageContentForError = htmlForAnalysis;
-        }
-        // Re-check CAPTCHA after interactions, only if not already handled
-        if (this.htmlAnalyser.detectCaptchaMarkers(htmlForAnalysis) && !discoveredNeedsCaptcha) {
-            logger.info('[CoreScraperEngine _discoverAndScrape] CAPTCHA detected after full Puppeteer load and interactions. Attempting solve.');
-            const solved = await this.captchaSolver.solveIfPresent(page, url, userAgent); // Pass userAgent
-            if (!solved) {
-                await this._saveDebugHtml('failure_captcha_post_interaction', domain, url, pageContentForError);
-                throw new CaptchaError('CAPTCHA solving failed after full load and interactions.',{ reason: 'captcha_solve_failed_post_interaction' });
-            }
-            discoveredNeedsCaptcha = true; // Mark that CAPTCHA was solved
+          if (page && !page.isClosed()) {
             htmlForAnalysis = await this.puppeteerController.getPageContent(page);
-            pageContentForError = htmlForAnalysis;
-            logger.debug(`[CoreScraperEngine _discoverAndScrape] HTML after post-interaction CAPTCHA solve. Length: ${htmlForAnalysis?.length}`);
+            pageContentForError = htmlForAnalysis || '';
+            logger.info(`[DISCOVERY_STAGE_2] Retrieved content after navigation error - Length: ${htmlForAnalysis?.length}`);
+
+            // If we have substantial content (200K+ chars), IGNORE the navigation error and proceed
+            if (htmlForAnalysis && htmlForAnalysis.length >= 200000) {
+              logger.info(`[DISCOVERY_STAGE_2] Got substantial content (${htmlForAnalysis.length} chars) despite navigation error. Proceeding with discovery.`);
+              navigationError = null; // Clear the error - we have good content
+              // Don't return here - just clear the error and continue
+            }
+
+            // Only mark as needing CAPTCHA if we have minimal content AND it's a blocking error
+            const isBlockingError = navError.message.includes('net::ERR_BLOCKED_BY_RESPONSE') ||
+                                   navError.message.includes('ERR_BLOCKED_BY_RESPONSE') ||
+                                   navError.message.includes('net::ERR_ACCESS_DENIED') ||
+                                   navError.message.includes('ERR_ACCESS_DENIED');
+
+            if (isBlockingError) {
+              logger.info(`[DISCOVERY_STAGE_2] Network-level blocking detected with minimal content (${navError.message}). Will attempt CAPTCHA detection and solving.`);
+              discoveredNeedsCaptcha = true; // Mark that we detected blocking behavior
+            }
+          }
+        } catch (contentError: any) {
+          logger.warn(`[DISCOVERY_STAGE_2] Could not retrieve content after navigation error: ${contentError.message}`);
+        }
+
+        // If we don't have a page or browser after navigation error, we can't continue
+        if (!page || !browser) {
+          throw navigationError;
+        }
+
+        // If we still have a navigation error and no substantial content, we may need to handle it
+        if (navigationError && (!htmlForAnalysis || htmlForAnalysis.length < 10000)) {
+          // Continue anyway - we'll try to work with whatever we have
+          logger.warn(`[DISCOVERY_STAGE_2] Navigation error with minimal content, but continuing with discovery attempt`);
         }
       }
 
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] Step 3: LLM XPath Discovery...`);
-      logger.info('Preparing simplified DOM for LLM...');
-      const simplifiedDomForLlm = this.htmlAnalyser.extractDomStructure(htmlForAnalysis);
-      if (!simplifiedDomForLlm && htmlForAnalysis) {
-          logger.error(`[CoreScraperEngine _discoverAndScrape] extractDomStructure returned invalid for URL: ${url}. HTML length: ${htmlForAnalysis?.length}`);
-          await this._saveDebugHtml('failure_dom_undefined', domain, url, htmlForAnalysis);
-          throw new ExtractionError('Failed to extract DOM structure (returned invalid)', { reason: 'dom_structure_invalid' });
+      // Step 2: Get initial HTML content
+      logger.info(`[DISCOVERY_STAGE_3] ===== INITIAL HTML CONTENT RETRIEVAL =====`);
+      if (!htmlForAnalysis) {
+        htmlForAnalysis = await this.puppeteerController.getPageContent(page);
+        pageContentForError = htmlForAnalysis || '';
       }
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] Simplified DOM length: ${simplifiedDomForLlm?.length}.`);
+      logger.info(`[DISCOVERY_STAGE_3] HTML content retrieved - Length: ${htmlForAnalysis?.length} chars`);
+      logger.info(`[DISCOVERY_STAGE_3] Content preview: ${htmlForAnalysis?.substring(0, 200)}...`);
 
-      const snippets = this.htmlAnalyser.extractArticleSnippets(htmlForAnalysis);
-      if (!snippets && htmlForAnalysis) {
-          logger.error(`[CoreScraperEngine _discoverAndScrape] extractArticleSnippets returned invalid for URL: ${url}. HTML length: ${htmlForAnalysis?.length}`);
-          throw new ExtractionError('Failed to extract article snippets (returned invalid)', { reason: 'snippets_invalid' });
+      // Step 3: Check for CAPTCHA and solve if needed
+      logger.info(`[DISCOVERY_STAGE_4] ===== INITIAL CAPTCHA DETECTION =====`);
+      if (htmlForAnalysis && this.htmlAnalyser.detectCaptchaMarkers(htmlForAnalysis)) {
+        logger.info(`[DISCOVERY_STAGE_4] CAPTCHA detected in initial HTML, attempting to solve...`);
+        const solved = await this.captchaSolver.solveIfPresent(page, url, userAgent);
+        if (!solved) {
+          logger.error(`[DISCOVERY_STAGE_4] CAPTCHA solving failed`);
+          await this._saveDebugHtml('failure_captcha_solve', domain, url, pageContentForError);
+          throw new CaptchaError('CAPTCHA solving failed during unified Puppeteer scraping.', { reason: 'captcha_solve_failed' });
+        }
+        discoveredNeedsCaptcha = true;
+        htmlForAnalysis = await this.puppeteerController.getPageContent(page);
+        pageContentForError = htmlForAnalysis;
+        logger.info(`[DISCOVERY_STAGE_4] CAPTCHA solved successfully, fresh HTML retrieved - Length: ${htmlForAnalysis?.length} chars`);
+      } else {
+        logger.info(`[DISCOVERY_STAGE_4] No CAPTCHA detected in initial HTML`);
       }
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] Extracted ${snippets?.length} snippets for LLM.`);
+
+      // Step 4: Perform interactions to load dynamic content
+      logger.info(`[DISCOVERY_STAGE_5] ===== PAGE INTERACTIONS =====`);
+      logger.info(`[DISCOVERY_STAGE_5] Performing page interactions to load dynamic content...`);
+      await this.puppeteerController.performInteractions(page);
+      const freshHtml = await this.puppeteerController.getPageContent(page);
+      if (freshHtml) {
+        const lengthBefore = htmlForAnalysis?.length || 0;
+        htmlForAnalysis = freshHtml;
+        pageContentForError = htmlForAnalysis;
+        logger.info(`[DISCOVERY_STAGE_5] HTML updated after interactions - Before: ${lengthBefore} chars, After: ${htmlForAnalysis?.length} chars`);
+        logger.info(`[DISCOVERY_STAGE_5] Content change: ${lengthBefore !== htmlForAnalysis?.length ? 'YES' : 'NO'}`);
+      }
+
+      // Step 5: Final CAPTCHA check after interactions
+      logger.info(`[DISCOVERY_STAGE_6] ===== POST-INTERACTION CAPTCHA CHECK =====`);
+      if (htmlForAnalysis && this.htmlAnalyser.detectCaptchaMarkers(htmlForAnalysis) && !discoveredNeedsCaptcha) {
+        logger.info(`[DISCOVERY_STAGE_6] CAPTCHA detected after interactions, attempting to solve...`);
+        const solved = await this.captchaSolver.solveIfPresent(page, url, userAgent);
+        if (!solved) {
+          logger.error(`[DISCOVERY_STAGE_6] Post-interaction CAPTCHA solving failed`);
+          await this._saveDebugHtml('failure_captcha_post_interaction', domain, url, pageContentForError);
+          throw new CaptchaError('CAPTCHA solving failed after interactions.', { reason: 'captcha_solve_failed_post_interaction' });
+        }
+        discoveredNeedsCaptcha = true;
+        htmlForAnalysis = await this.puppeteerController.getPageContent(page);
+        pageContentForError = htmlForAnalysis;
+        logger.info(`[DISCOVERY_STAGE_6] Post-interaction CAPTCHA solved successfully`);
+      } else if (!discoveredNeedsCaptcha) {
+        logger.info(`[DISCOVERY_STAGE_6] No CAPTCHA detected after interactions`);
+      } else {
+        logger.info(`[DISCOVERY_STAGE_6] CAPTCHA already solved earlier, skipping check`);
+      }
+
+      logger.info(`[DISCOVERY_STAGE_7] ===== HTML CONTENT VALIDATION =====`);
+      if (!htmlForAnalysis) {
+        logger.error(`[DISCOVERY_STAGE_7] CRITICAL: No HTML content available for analysis`);
+        await this._saveDebugHtml('failure_no_html', domain, url, pageContentForError || '');
+        throw new NetworkError('Failed to retrieve HTML content for analysis.', { reason: 'no_html_content' });
+      }
+      logger.info(`[DISCOVERY_STAGE_7] HTML content validated - Length: ${htmlForAnalysis.length} chars`);
+
+      // Step 6: LLM XPath Discovery
+      logger.info(`[DISCOVERY_STAGE_8] ===== LLM XPATH DISCOVERY PREPARATION =====`);
+      logger.info(`[DISCOVERY_STAGE_8] Extracting DOM structure for LLM analysis...`);
+      const simplifiedDomForLlm = this.htmlAnalyser.extractDomStructure(htmlForAnalysis);
+      if (!simplifiedDomForLlm) {
+        logger.error(`[DISCOVERY_STAGE_8] CRITICAL: Failed to extract DOM structure`);
+        await this._saveDebugHtml('failure_dom_extraction', domain, url, htmlForAnalysis);
+        throw new ExtractionError('Failed to extract DOM structure', { reason: 'dom_structure_failed' });
+      }
+      logger.info(`[DISCOVERY_STAGE_8] DOM structure extracted - Length: ${simplifiedDomForLlm.length} chars`);
+
+      logger.info(`[DISCOVERY_STAGE_8] Extracting article snippets for LLM context...`);
+      const snippets = this.htmlAnalyser.extractArticleSnippets(htmlForAnalysis);
+      if (!snippets) {
+        logger.error(`[DISCOVERY_STAGE_8] CRITICAL: Failed to extract article snippets`);
+        throw new ExtractionError('Failed to extract article snippets', { reason: 'snippets_failed' });
+      }
+      logger.info(`[DISCOVERY_STAGE_8] Article snippets extracted - Count: ${snippets.length}`);
+      logger.info(`[DISCOVERY_STAGE_8] Snippet preview: ${snippets[0]?.substring(0, 100)}...`);
 
       let bestXPath: string | null = null;
       let bestScore = -Infinity;
       const llmFeedback: Array<{ xpath?: string; result?: string; message?: string } | string> = [];
 
+      logger.info(`[DISCOVERY_STAGE_9] ===== LLM XPATH DISCOVERY ATTEMPTS =====`);
+      logger.info(`[DISCOVERY_STAGE_9] Max LLM retries: ${this.configs.scraper.maxLlmRetries}`);
+      logger.info(`[DISCOVERY_STAGE_9] Min XPath score threshold: ${this.configs.scraper.minXpathScoreThreshold}`);
+
+      // LLM attempts
       for (let i = 0; i < this.configs.scraper.maxLlmRetries; i++) {
-        logger.info(`LLM attempt ${i + 1}/${this.configs.scraper.maxLlmRetries} for ${url}`);
+        logger.info(`[DISCOVERY_STAGE_9] === LLM ATTEMPT ${i + 1}/${this.configs.scraper.maxLlmRetries} ===`);
         const candidateXPaths = await this.llmInterface.getCandidateXPaths(simplifiedDomForLlm, snippets, llmFeedback);
-        logger.debug(`[CoreScraperEngine _discoverAndScrape] LLM attempt ${i+1} returned ${candidateXPaths?.length || 0} candidates: ${JSON.stringify(candidateXPaths)}`);
 
         if (!candidateXPaths || candidateXPaths.length === 0) {
-          const feedbackMsg = `LLM returned no candidates.`;
-          if (!llmFeedback.some(f => typeof f === 'string' && f.includes(feedbackMsg.substring(0,20)))) llmFeedback.push(feedbackMsg);
-          logger.warn(feedbackMsg + ` on attempt ${i + 1}`);
-          if (i === this.configs.scraper.maxLlmRetries - 1) {
-            logger.debug(`[CoreScraperEngine _discoverAndScrape] Max LLM retries reached with no candidates.`);
-          }
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          logger.warn(`[DISCOVERY_STAGE_9] LLM returned no candidates on attempt ${i + 1}`);
           continue;
         }
 
-        let foundXPathInAttempt: string | null = null;
-        let bestScoreInAttempt = -Infinity;
-        const attemptFeedback: Array<{ xpath: string; result: string }> = [];
+        logger.info(`[DISCOVERY_STAGE_9] LLM returned ${candidateXPaths.length} candidate XPaths: ${JSON.stringify(candidateXPaths)}`);
 
         for (const xpath of candidateXPaths) {
-          logger.debug(`[CoreScraperEngine _discoverAndScrape] Scoring XPath: ${xpath}`);
-          let details: ElementDetails | XPathQueryDetails;
+          logger.info(`[DISCOVERY_STAGE_9] Testing XPath: ${xpath}`);
           try {
-            if (tentativeMethodIsCurl) { // If analysis is based on cURL HTML
-                details = this.htmlAnalyser.queryStaticXPathWithDetails(htmlForAnalysis, xpath);
-            } else if (page) { // If analysis is based on Puppeteer HTML, page must be valid
-                details = await this.puppeteerController.queryXPathWithDetails(page, xpath);
+            const details = await this.puppeteerController.queryXPathWithDetails(page, xpath);
+            if (details && details.element_found_count > 0) {
+              const score = this.contentScoringEngine.scoreElement(details as ElementDetails);
+              logger.info(`[DISCOVERY_STAGE_9] XPath "${xpath}" - Found: ${details.element_found_count} elements, Score: ${score.toFixed(2)}`);
+              logger.info(`[DISCOVERY_STAGE_9] Element details - Tag: ${details.tagName}, Paragraphs: ${details.paragraphCount}, Text Length: ${details.textContentLength}`);
+              if (score > bestScore) {
+                bestScore = score;
+                bestXPath = xpath;
+                logger.info(`[DISCOVERY_STAGE_9] NEW BEST XPath: ${xpath} with score ${score.toFixed(2)}`);
+              }
             } else {
-                logger.error("[CoreScraperEngine _discoverAndScrape] Page object is unexpectedly null in Puppeteer mode for XPath scoring during discovery.");
-                throw new Error("Page object is not available for XPath querying in Puppeteer mode but tentativeMethodIsCurl is false.");
+              logger.info(`[DISCOVERY_STAGE_9] XPath "${xpath}" found 0 elements`);
             }
           } catch (queryError: any) {
-            logger.warn(`[CoreScraperEngine _discoverAndScrape] Error querying XPath "${xpath}": ${queryError.message}`);
-            attemptFeedback.push({ xpath, result: `Error querying: ${queryError.message.substring(0,50)}`});
-            continue;
-          }
-
-          if (details && details.element_found_count !== undefined && details.element_found_count > 0) {
-            logger.debug(`[CoreScraperEngine _discoverAndScrape] Details for XPath "${xpath}": found_count=${details.element_found_count}, tagName=${details.tagName}, pCount=${details.paragraphCount}, textLen=${details.textContentLength}`);
-            const score = this.contentScoringEngine.scoreElement(details as ElementDetails);
-            logger.debug(`[CoreScraperEngine _discoverAndScrape] XPath "${xpath}" scored: ${score.toFixed(2)}`);
-            attemptFeedback.push({ xpath, result: `Score ${score.toFixed(2)} (P:${details.paragraphCount || 0}, TL:${details.textContentLength || 0}, Found:${details.element_found_count})` });
-            if (score > bestScoreInAttempt) {
-              bestScoreInAttempt = score;
-              foundXPathInAttempt = xpath;
-            }
-          } else {
-            attemptFeedback.push({ xpath, result: `Found 0 elements.` });
-            logger.debug(`[CoreScraperEngine _discoverAndScrape] XPath "${xpath}" found 0 elements.`);
+            logger.warn(`[DISCOVERY_STAGE_9] Error querying XPath "${xpath}": ${queryError.message}`);
           }
         }
 
-        if (foundXPathInAttempt && bestScoreInAttempt > bestScore) {
-            bestScore = bestScoreInAttempt;
-            bestXPath = foundXPathInAttempt;
-            if (foundXPathInAttempt) logger.info(`[CoreScraperEngine _discoverAndScrape] New best XPath from attempt ${i+1}: ${foundXPathInAttempt} with score: ${bestScore.toFixed(2)}`);
-        }
-        
-        llmFeedback.push(...attemptFeedback
-            .sort((a,b) => parseFloat(b.result.match(/Score (-?\d+\.?\d*)/)?.[1] || '-Infinity') - parseFloat(a.result.match(/Score (-?\d+\.?\d*)/)?.[1] || '-Infinity') )
-            .slice(0,5));
-        logger.debug(`[CoreScraperEngine _discoverAndScrape] Feedback for next LLM attempt:`, llmFeedback);
-
+        logger.info(`[DISCOVERY_STAGE_9] Attempt ${i + 1} completed - Current best score: ${bestScore.toFixed(2)}, Best XPath: ${bestXPath || 'None'}`);
         if (bestScore >= this.configs.scraper.minXpathScoreThreshold) {
-          logger.info(`[CoreScraperEngine _discoverAndScrape] Sufficiently good XPath found with score ${bestScore.toFixed(2)}. Stopping LLM attempts.`);
+          logger.info(`[DISCOVERY_STAGE_9] Score threshold reached! Stopping LLM attempts.`);
           break;
-        }
-        if (i < this.configs.scraper.maxLlmRetries - 1) {
-            logger.info(`[CoreScraperEngine _discoverAndScrape] Current best score ${bestScore.toFixed(2)} is below threshold ${this.configs.scraper.minXpathScoreThreshold}. Retrying with feedback.`);
-            await new Promise(resolve => setTimeout(resolve, 1500));
+        } else {
+          logger.info(`[DISCOVERY_STAGE_9] Score ${bestScore.toFixed(2)} below threshold ${this.configs.scraper.minXpathScoreThreshold}, continuing...`);
         }
       }
 
+      logger.info(`[DISCOVERY_STAGE_10] ===== XPATH DISCOVERY RESULTS =====`);
       if (!bestXPath || bestScore < this.configs.scraper.minXpathScoreThreshold) {
-        logger.error(`[CoreScraperEngine _discoverAndScrape] XPath discovery failed for ${url} after all retries or score too low (${bestScore.toFixed(2)}).`);
+        logger.error(`[DISCOVERY_STAGE_10] CRITICAL: XPath discovery failed`);
+        logger.error(`[DISCOVERY_STAGE_10] Best score achieved: ${bestScore.toFixed(2)}`);
+        logger.error(`[DISCOVERY_STAGE_10] Required threshold: ${this.configs.scraper.minXpathScoreThreshold}`);
+        logger.error(`[DISCOVERY_STAGE_10] Best XPath candidate: ${bestXPath || 'None'}`);
         await this._saveDebugHtml('failure_xpath_discovery', domain, url, htmlForAnalysis);
-        throw new ExtractionError('XPath discovery failed or score too low.', {bestScore: bestScore, llmFeedback, reason: 'xpath_discovery_failed_or_low_score'});
-      }
-      const foundXPath = bestXPath;
-      logger.info(`[CoreScraperEngine _discoverAndScrape] Best XPath found: ${foundXPath} with score ${bestScore.toFixed(2)}`);
-
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] Step 4: Determine Method and Save Config...`);
-      let methodToStore: MethodValue;
-      if (discoveredNeedsCaptcha) { // If a CAPTCHA was successfully solved by our system during Puppeteer interaction
-        methodToStore = METHODS.PUPPETEER_CAPTCHA;
-        logger.debug(`[CoreScraperEngine _discoverAndScrape] Method to store: PUPPETEER_CAPTCHA (CAPTCHA was solved).`);
-      } else if (curlHtmlIsUsable && puppeteerHtml && !this.htmlAnalyser.detectCaptchaMarkers(puppeteerHtml)) {
-        // Both cURL and Puppeteer (clean) HTML are available. Compare them.
-        const areSimilar = await this.domComparator.compareDoms(curlHtml, puppeteerHtml);
-        if (areSimilar) {
-            const curlValidationContent = this.htmlAnalyser.extractByXpath(curlHtml, foundXPath);
-            if (curlValidationContent) {
-                methodToStore = METHODS.CURL;
-                logger.info(`[CoreScraperEngine _discoverAndScrape] cURL and Puppeteer DOMs similar, XPath works on cURL. Storing as CURL.`);
-                if (page && !page.isClosed() && browser) { await this.puppeteerController.cleanupPuppeteer(browser); browser = null; page = null; }
-            } else {
-                methodToStore = METHODS.PUPPETEER_STEALTH; // XPath didn't work on cURL, default to Puppeteer
-                logger.warn(`[CoreScraperEngine _discoverAndScrape] DOMs similar, but XPath failed on cURL. Storing as PUPPETEER_STEALTH.`);
-            }
-        } else {
-            methodToStore = METHODS.PUPPETEER_STEALTH; // DOMs different, prefer Puppeteer
-            logger.info(`[CoreScraperEngine _discoverAndScrape] cURL and Puppeteer DOMs differ. Storing as PUPPETEER_STEALTH.`);
-        }
-      } else if (curlHtmlIsUsable) { // Only cURL was usable (Puppeteer failed or wasn't run for comparison)
-        const curlValidationContent = this.htmlAnalyser.extractByXpath(curlHtml, foundXPath);
-        if (curlValidationContent) {
-            methodToStore = METHODS.CURL;
-            logger.info(`[CoreScraperEngine _discoverAndScrape] Only cURL HTML was usable, XPath works. Storing as CURL.`);
-        } else {
-            // This is a tricky case: LLM found XPath on cURL HTML, but it doesn't re-validate.
-            // This implies an issue with XPath or LLM.
-            logger.error(`[CoreScraperEngine _discoverAndScrape] XPath found on cURL HTML, but failed re-validation. Discovery failed.`);
-            throw new ExtractionError("XPath from cURL HTML failed re-validation.", {xpath: foundXPath});
-        }
-      } else { // Only Puppeteer HTML was usable (or cURL was unusable and Puppeteer was the only option)
-        methodToStore = discoveredNeedsCaptcha ? METHODS.PUPPETEER_CAPTCHA : METHODS.PUPPETEER_STEALTH;
-        logger.debug(`[CoreScraperEngine _discoverAndScrape] Defaulting to Puppeteer method: ${methodToStore} (cURL not viable or not chosen after comparison).`);
+        throw new ExtractionError('XPath discovery failed or score too low.', { bestScore, reason: 'xpath_discovery_failed' });
       }
 
+      logger.info(`[DISCOVERY_STAGE_10] XPath discovery SUCCESSFUL!`);
+      logger.info(`[DISCOVERY_STAGE_10] Best XPath: ${bestXPath}`);
+      logger.info(`[DISCOVERY_STAGE_10] Final score: ${bestScore.toFixed(2)}`);
+      logger.info(`[DISCOVERY_STAGE_10] CAPTCHA required: ${discoveredNeedsCaptcha ? 'YES' : 'NO'}`);
+
+      // Step 7: Save config and perform final scrape
+      logger.info(`[DISCOVERY_STAGE_11] ===== CONFIG CREATION & STORAGE =====`);
+      const methodToStore = discoveredNeedsCaptcha ? METHODS.PUPPETEER_CAPTCHA : METHODS.PUPPETEER_STEALTH;
+      logger.info(`[DISCOVERY_STAGE_11] Method to store: ${methodToStore}`);
 
       const newConfig: SiteConfig = {
         domain_pattern: domain,
         method: methodToStore,
-        xpath_main_content: foundXPath,
+        xpath_main_content: bestXPath,
         last_successful_scrape_timestamp: new Date().toISOString(),
         failure_count_since_last_success: 0,
         site_specific_headers: null,
-        user_agent_to_use: userAgent, // Use the effectiveUserAgent that led to successful discovery
-        needs_captcha_solver: discoveredNeedsCaptcha, 
+        needs_captcha_solver: discoveredNeedsCaptcha,
         puppeteer_wait_conditions: null,
         discovered_by_llm: true,
       };
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] New config to save for ${domain}:`, newConfig);
+
+      logger.info(`[DISCOVERY_STAGE_11] Saving new config for domain: ${domain}`);
       await this.knownSitesManager.saveConfig(domain, newConfig);
-      logger.info(`New config saved for ${domain}. Method: ${methodToStore}, XPath: ${foundXPath}`);
+      logger.info(`[DISCOVERY_STAGE_11] Config saved successfully`);
 
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] Step 5: Scrape with newly discovered config...`);
-      await this._saveDebugHtml('success_discovery_phase', domain, url, htmlForAnalysis);
-
+      // Final scrape with discovered config
+      logger.info(`[DISCOVERY_STAGE_12] ===== FINAL SCRAPE WITH DISCOVERED CONFIG =====`);
       const scrapeWithNewConfig = await this._scrapeWithKnownConfig(url, domain, newConfig, proxyDetails, userAgent, requestedOutput, browser, page);
-      browser = scrapeWithNewConfig.browser; 
-      page = scrapeWithNewConfig.page;
 
-      if (!scrapeWithNewConfig.result || !scrapeWithNewConfig.result.success) {
-          logger.error(`[CoreScraperEngine _discoverAndScrape] Scraping with newly discovered config FAILED unexpectedly.`);
-          throw new ExtractionError("Scraping with newly discovered config failed unexpectedly.", { reason: 'scrape_with_new_config_failed' });
-      }
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] Final result from scraping with new config obtained successfully.`);
-      finalScrapeResult = scrapeWithNewConfig.result;
-      return { result: finalScrapeResult, browser, page };
+      logger.info(`[DISCOVERY_STAGE_12] Final scrape completed successfully`);
+      logger.info(`[DISCOVERY_STAGE_12] Content length: ${scrapeWithNewConfig.result?.data?.length || 0} chars`);
+      return { result: scrapeWithNewConfig.result, browser: scrapeWithNewConfig.browser, page: scrapeWithNewConfig.page };
 
     } catch (error: any) {
-      logger.error(`[CoreScraperEngine _discoverAndScrape] ${error.name || 'Error'} during discovery/scrape for ${url}: ${error.message}`);
-      if (this.configs.scraper.debug) {
-        logger.error(`[DEBUG_MODE] Full error in _discoverAndScrape for ${url}:`, error);
+      logger.error(`[DEBUG] Error in _unifiedPuppeteerScrape: ${error.message}`);
+      if (pageContentForError.length > 0) {
+        await this._saveDebugHtml('failure_unified_puppeteer', domain, url, pageContentForError);
       }
-      if (error.details) logger.error(`[CoreScraperEngine _discoverAndScrape] Error details:`, error.details);
-
-      const finalErrorHtmlContent = pageContentForError || (htmlForAnalysis ? htmlForAnalysis.substring(0,50000) : '');
-      logger.debug(`[CoreScraperEngine _discoverAndScrape] HTML content at time of error (length: ${finalErrorHtmlContent?.length}): ${finalErrorHtmlContent ? finalErrorHtmlContent.substring(0, 200) + '...' : 'N/A'}`);
-      if (finalErrorHtmlContent.length > 0) {
-        await this._saveDebugHtml('failure_discover_scrape', domain, url, finalErrorHtmlContent);
-      }
-      throw error; 
+      throw error;
     }
   }
+
+
 }
 
 export { CoreScraperEngine };

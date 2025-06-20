@@ -78,7 +78,20 @@ async function processUrls(urlFilePath: string): Promise<void> {
 
     let result: ScrapeResult;
     try {
-        result = await scrapeUrl(url, { outputType: OUTPUT_TYPES.CONTENT_ONLY as any });
+        logger.info(`[DEBUG] About to call scrapeUrl for: ${url}`);
+        const startTime = Date.now();
+
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Scrape operation timed out after 120 seconds')), 120000);
+        });
+
+        const scrapePromise = scrapeUrl(url, { outputType: OUTPUT_TYPES.CONTENT_ONLY as any });
+
+        result = await Promise.race([scrapePromise, timeoutPromise]) as ScrapeResult;
+
+        const endTime = Date.now();
+        logger.info(`[DEBUG] scrapeUrl completed in ${endTime - startTime}ms`);
     } catch (error: any) {
         logger.error(`  STATUS: CRITICAL FAILURE (unhandled exception from scrapeUrl for ${url})`);
         logger.error(`  ERROR_NAME: ${error.name}`);

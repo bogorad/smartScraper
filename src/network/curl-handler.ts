@@ -37,7 +37,7 @@ async function fetchWithCurl(
   }
 
   const axiosConfig: AxiosRequestConfig = {
-    timeout: scraperSettings.curlTimeout || 30000, // 30 seconds timeout
+    timeout: 15000, // Reduced to 15 seconds to prevent hanging
     headers: {
       'User-Agent': userAgent || scraperSettings.defaultUserAgent,
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
@@ -45,7 +45,8 @@ async function fetchWithCurl(
       'Connection': 'keep-alive',
       ...(headers || {}), // Spread any custom headers
     },
-    maxRedirects: 5,
+    maxRedirects: 10, // Increased to handle paywall redirects
+    validateStatus: () => true, // Accept all status codes to get HTML at all costs
   };
 
   // ALWAYS configure proxy (mandatory)
@@ -89,10 +90,19 @@ async function fetchWithCurl(
   const maxRetries = 5;
   let lastError: any = null;
 
+  logger.info(`[DEBUG] Starting cURL request with proxy: ${axiosConfig.proxy ? `${axiosConfig.proxy.host}:${axiosConfig.proxy.port}` : 'None'}`);
+  logger.info(`[DEBUG] Request timeout: ${axiosConfig.timeout}ms`);
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      logger.info(`Making cURL-like request to: ${url} (attempt ${attempt}/${maxRetries})`);
+      logger.info(`[DEBUG] Making cURL-like request to: ${url} (attempt ${attempt}/${maxRetries})`);
+      logger.info(`[DEBUG] About to call axios.get...`);
+
+      const startTime = Date.now();
       const response: AxiosResponse = await axios.get(url, axiosConfig);
+      const endTime = Date.now();
+
+      logger.info(`[DEBUG] axios.get completed in ${endTime - startTime}ms`);
       logger.info(`cURL request to ${url} successful with status: ${response.status} on attempt ${attempt}`);
 
       // Get HTML at all costs - extract from response regardless of status
@@ -112,7 +122,21 @@ async function fetchWithCurl(
       const axiosError = error as AxiosError;
       lastError = axiosError;
 
+      logger.warn(`[DEBUG] axios.get threw error: ${axiosError.code || 'NO_CODE'} - ${axiosError.message}`);
       logger.warn(`cURL request to ${url} failed on attempt ${attempt}/${maxRetries}. Error: ${axiosError.message}`);
+
+      // Try to extract HTML from error response (for redirect errors, etc.)
+      let errorHtml = '';
+      if (axiosError.response && axiosError.response.data) {
+        try {
+          errorHtml = typeof axiosError.response.data === 'string' ? axiosError.response.data : '';
+          if (errorHtml.length > 0) {
+            logger.info(`[DEBUG] Extracted ${errorHtml.length} chars of HTML from error response`);
+          }
+        } catch (e) {
+          logger.debug(`[DEBUG] Could not extract HTML from error response: ${e}`);
+        }
+      }
 
       // Get HTML from error response if available (at all costs)
       if (axiosError.response) {

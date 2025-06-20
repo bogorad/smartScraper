@@ -121,6 +121,7 @@ class PuppeteerController {
         '--no-first-run',
         '--no-zygote',
         '--disable-gpu',
+        '--blink-settings=imagesEnabled=false',
         `--window-size=${this.scraperSettings.puppeteerViewport.width},${this.scraperSettings.puppeteerViewport.height}`,
       ],
     };
@@ -244,21 +245,38 @@ class PuppeteerController {
       logger.info(`[PuppeteerController launchAndNavigate] Successfully launched and navigated to ${url}`);
       return { browser, page };
     } catch (error: any) {
-      logger.error(`[PuppeteerController launchAndNavigate] Launch or navigation failed for ${url}: ${error.message} (Error Name: ${error.name})`);
+      const isTimeout = error.message.includes('timeout') || error.message.includes('Navigation timeout');
+
+      if (isTimeout) {
+        logger.warn(`[PuppeteerController launchAndNavigate] Navigation timeout for ${url} - this is normal, continuing with browser and page`);
+        logger.info(`[PuppeteerController launchAndNavigate] Successfully launched browser despite timeout for ${url}`);
+        return { browser, page }; // Return browser and page even on timeout
+      } else {
+        logger.error(`[PuppeteerController launchAndNavigate] Launch or navigation failed for ${url}: ${error.message} (Error Name: ${error.name})`);
+      }
+
       if (logger.isDebugging()) {
-        logger.error(`[DEBUG_MODE] Full error in launchAndNavigate for ${url}:`, error);
+        if (isTimeout) {
+          logger.debug(`[DEBUG_MODE] Navigation timeout in launchAndNavigate for ${url} (this is normal):`, error);
+        } else {
+          logger.error(`[DEBUG_MODE] Full error in launchAndNavigate for ${url}:`, error);
+        }
         if (error.stack) logger.debug(`[DEBUG_MODE] Stack: ${error.stack}`);
       }
-      if (page && !page.isClosed()) {
-        try { await page.close(); logger.debug('[PuppeteerController launchAndNavigate] Page closed during error handling.'); }
-        catch (closeError: any) { logger.warn(`[PuppeteerController launchAndNavigate] Error closing page during error handling: ${closeError.message}`); }
+
+      // For non-timeout errors, cleanup and throw
+      if (!isTimeout) {
+        if (page && !page.isClosed()) {
+          try { await page.close(); logger.debug('[PuppeteerController launchAndNavigate] Page closed during error handling.'); }
+          catch (closeError: any) { logger.warn(`[PuppeteerController launchAndNavigate] Error closing page during error handling: ${closeError.message}`); }
+        }
+        if (browser && browser.isConnected()) {
+          try { await browser.close(); logger.debug('[PuppeteerController launchAndNavigate] Browser closed during error handling.'); }
+          catch (browserCloseError: any) { logger.warn(`[PuppeteerController launchAndNavigate] Error closing browser during error handling: ${browserCloseError.message}`); }
+        }
+        if (error instanceof ScraperError) throw error;
+        throw new NetworkError(`Unexpected error during launch and navigation for ${url}: ${error.message}`, { originalErrorName: error.name, originalErrorMessage: error.message, stack: error.stack });
       }
-      if (browser && browser.isConnected()) {
-        try { await browser.close(); logger.debug('[PuppeteerController launchAndNavigate] Browser closed during error handling.'); }
-        catch (browserCloseError: any) { logger.warn(`[PuppeteerController launchAndNavigate] Error closing browser during error handling: ${browserCloseError.message}`); }
-      }
-      if (error instanceof ScraperError) throw error;
-      throw new NetworkError(`Unexpected error during launch and navigation for ${url}: ${error.message}`, { originalErrorName: error.name, originalErrorMessage: error.message, stack: error.stack });
     }
   }
 
@@ -297,7 +315,15 @@ class PuppeteerController {
       }
       return response;
     } catch (error: any) {
-      logger.error(`[PuppeteerController navigate] Navigation to ${url} failed: ${error.message}`);
+      // Check if this is a timeout error - timeouts are NOT errors, websites often use them defensively
+      const isTimeout = error.message.includes('timeout') || error.message.includes('Navigation timeout');
+
+      if (isTimeout) {
+        logger.warn(`[PuppeteerController navigate] Navigation timeout for ${url} - this is normal, continuing with partial content`);
+      } else {
+        logger.error(`[PuppeteerController navigate] Navigation to ${url} failed: ${error.message}`);
+      }
+
       try {
         if (!page.isClosed()) {
             htmlContentOnError = await page.content();
@@ -305,10 +331,23 @@ class PuppeteerController {
       } catch (contentError: any) {
         logger.warn(`[PuppeteerController navigate] Could not get page content after navigation error: ${contentError.message}`);
       }
+
       if (logger.isDebugging()) {
-        logger.error(`[DEBUG_MODE] Full error during navigation to ${url}:`, error);
+        if (isTimeout) {
+          logger.debug(`[DEBUG_MODE] Navigation timeout for ${url} (this is normal):`, error);
+        } else {
+          logger.error(`[DEBUG_MODE] Full error during navigation to ${url}:`, error);
+        }
         if (htmlContentOnError) logger.debug(`[DEBUG_MODE] HTML content on navigation error (first 500 chars): ${htmlContentOnError.substring(0,500)}...`);
       }
+
+      // For timeouts, continue with whatever content we have - don't throw error
+      if (isTimeout && htmlContentOnError && htmlContentOnError.length > 0) {
+        logger.info(`[PuppeteerController navigate] Timeout occurred but we have ${htmlContentOnError.length} chars of HTML content - continuing`);
+        return null; // Return null response but don't throw error
+      }
+
+      // For non-timeout errors, still throw
       throw new NetworkError(`Navigation to ${url} failed: ${error.message}`, {
         originalErrorName: error.name,
         originalErrorMessage: error.message,
@@ -401,8 +440,34 @@ class PuppeteerController {
     };
 
     try {
-      // Use a type assertion for $x if it's not found on the Page type directly
-      const elements: ElementHandle<Node>[] = await (page as any).$x(xpath);
+      // Try page.$x first, fallback to evaluateHandle if not available
+      let elements: ElementHandle<Node>[] = [];
+
+      try {
+        elements = await (page as any).$x(xpath);
+      } catch (xError: any) {
+        logger.warn(`[PuppeteerController queryXPathWithDetails] page.$x failed for "${xpath}": ${xError.message}. Using fallback method.`);
+
+        // Fallback to page.evaluateHandle with document.evaluate
+        const jsHandle = await page.evaluateHandle((xpathSelector) => {
+          const results: Node[] = [];
+          const query = document.evaluate(xpathSelector, document, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+          let node = query.iterateNext();
+          while (node) {
+            results.push(node);
+            node = query.iterateNext();
+          }
+          return results;
+        }, xpath);
+
+        const properties = await jsHandle.getProperties();
+        for (const property of properties.values()) {
+          const element = property.asElement();
+          if (element) elements.push(element as ElementHandle<Node>);
+        }
+        await jsHandle.dispose();
+      }
+
       result.element_found_count = elements.length;
 
       if (elements.length > 0) {

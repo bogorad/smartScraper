@@ -1,7 +1,6 @@
 // src/constants.ts
 
 export const METHODS = Object.freeze({
-  CURL: 'curl',
   PUPPETEER_STEALTH: 'puppeteer_stealth',
   PUPPETEER_CAPTCHA: 'puppeteer_captcha',
 });

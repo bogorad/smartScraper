@@ -23,7 +23,6 @@ export interface SiteConfig {
   last_successful_scrape_timestamp: string | null;
   failure_count_since_last_success: number;
   site_specific_headers: Record<string, string> | null;
-  user_agent_to_use: string | null;
   needs_captcha_solver: boolean;
   puppeteer_wait_conditions: any | null; // Define more specific type if possible
   discovered_by_llm: boolean;
@@ -51,6 +50,7 @@ export class KnownSitesManager {
   }
 
   private async _initialize(): Promise<void> {
+    logger.info(`[DEBUG] _initialize called, isInitialized: ${this.isInitialized}`);
     if (this.isInitialized) {
       logger.debug('[KnownSitesManager _initialize] Already initialized.');
       return;
@@ -62,10 +62,14 @@ export class KnownSitesManager {
 
     logger.debug(`[KnownSitesManager _initialize] Initializing storage from ${this.storageFilePath}`);
     try {
+      logger.info(`[DEBUG] About to create directory: ${path.dirname(this.storageFilePath)}`);
       await fs.mkdir(path.dirname(this.storageFilePath), { recursive: true });
+      logger.info(`[DEBUG] Directory created, checking if file exists...`);
       const fileExists = await fs.access(this.storageFilePath).then(() => true).catch(() => false);
+      logger.info(`[DEBUG] File exists check completed: ${fileExists}`);
 
       if (fileExists) {
+        logger.info(`[DEBUG] File exists, reading content...`);
         const fileContent = await fs.readFile(this.storageFilePath, 'utf-8');
         if (fileContent.trim() === '') {
             logger.warn(`[KnownSitesManager _initialize] Storage file is empty. Initializing with empty data.`);
@@ -75,8 +79,11 @@ export class KnownSitesManager {
         }
         logger.info(`Known sites storage loaded successfully from: ${this.storageFilePath}. Entries: ${Object.keys(this.storageData).length}`);
       } else {
+        logger.info(`[DEBUG] File doesn't exist, creating empty storage...`);
         this.storageData = {};
+        logger.info(`[DEBUG] About to call _saveStorage to create file...`);
         await this._saveStorage(); // Save empty storage to create the file
+        logger.info(`[DEBUG] _saveStorage completed`);
         logger.info(`Known sites storage file not found. Created new empty storage at: ${this.storageFilePath}`);
       }
     } catch (error: any) {
@@ -90,12 +97,15 @@ export class KnownSitesManager {
   }
 
   private async _ensureInitialized(): Promise<void> {
+    logger.info(`[DEBUG] _ensureInitialized called, isInitialized: ${this.isInitialized}`);
     if (!this.isInitialized && !this._initPromise) {
         logger.warn('[KnownSitesManager _ensureInitialized] Initialization not started, starting now.');
         this._initPromise = this._initialize();
     }
     if (this._initPromise) {
+        logger.info(`[DEBUG] About to await _initPromise...`);
         await this._initPromise;
+        logger.info(`[DEBUG] _initPromise completed`);
     }
     if (!this.isInitialized) {
         const errorMsg = '[KnownSitesManager _ensureInitialized] CRITICAL: Initialization failed or did not complete.';
@@ -121,12 +131,25 @@ export class KnownSitesManager {
 
 
   private async _saveStorage(): Promise<void> {
-    await this._ensureInitialized();
+    logger.info(`[DEBUG] _saveStorage called, isInitialized: ${this.isInitialized}`);
+
+    // Skip _ensureInitialized during initial setup to avoid infinite recursion
+    if (!this.isInitialized) {
+      logger.info(`[DEBUG] Skipping _ensureInitialized during initial setup`);
+    } else {
+      await this._ensureInitialized();
+    }
+
+    logger.info(`[DEBUG] About to acquire write lock...`);
     const releaseLock = await this._acquireWriteLock();
+    logger.info(`[DEBUG] Write lock acquired`);
+
     try {
       logger.debug(`[KnownSitesManager _saveStorage] Attempting to save storage. Current entries: ${Object.keys(this.storageData).length}`);
       const jsonData = JSON.stringify(this.storageData, null, 2);
+      logger.info(`[DEBUG] About to write file: ${this.storageFilePath}`);
       await fs.writeFile(this.storageFilePath, jsonData, 'utf-8');
+      logger.info(`[DEBUG] File write completed`);
       logger.debug('[KnownSitesManager _saveStorage] Known sites storage saved successfully.');
     } catch (error: any) {
       logger.error(`[KnownSitesManager _saveStorage] Failed to save known sites storage: ${error.message}`);
@@ -136,12 +159,17 @@ export class KnownSitesManager {
         path: this.storageFilePath,
       });
     } finally {
+        logger.info(`[DEBUG] Releasing write lock...`);
         releaseLock();
+        logger.info(`[DEBUG] Write lock released`);
     }
   }
 
   async getConfig(domain: string): Promise<SiteConfig | null> {
+    logger.info(`[DEBUG] KnownSitesManager.getConfig called for domain: ${domain}`);
+    logger.info(`[DEBUG] About to call _ensureInitialized...`);
     await this._ensureInitialized();
+    logger.info(`[DEBUG] _ensureInitialized completed`);
     if (Object.prototype.hasOwnProperty.call(this.storageData, domain)) {
       if (scraperSettingsInstance.debug) {
         logger.debug(`[KnownSitesManager getConfig] Config found for domain: ${domain}. Keys: ${Object.keys(this.storageData[domain]).join(', ')}`);
@@ -222,12 +250,11 @@ export class KnownSitesManager {
     }
     const config = this.storageData[domain] || {
         domain_pattern: domain,
-        method: 'curl', // Provide a default or ensure it's set
+        method: 'puppeteer_stealth' as MethodValue, // Default to Puppeteer
         xpath_main_content: '', // Provide a default
         last_successful_scrape_timestamp: null,
         failure_count_since_last_success: 0,
         site_specific_headers: null,
-        user_agent_to_use: null,
         needs_captcha_solver: true, // Assume true if storing cookie
         puppeteer_wait_conditions: null,
         discovered_by_llm: false,
