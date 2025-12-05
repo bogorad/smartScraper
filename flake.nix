@@ -1,0 +1,211 @@
+{
+  description = "SmartScraper - Intelligent web scraping service";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs = { self, nixpkgs, flake-utils }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
+        
+        nodejs = pkgs.nodejs_24;
+        pnpm = pkgs.pnpm;
+        chromium = pkgs.chromium;
+
+        # Build the application
+        smart-scraper = pkgs.stdenv.mkDerivation {
+          pname = "smart-scraper";
+          version = "0.1.0";
+          
+          src = ./.;
+
+          nativeBuildInputs = [
+            nodejs
+            pnpm.configHook
+            pkgs.makeWrapper
+          ];
+
+          pnpmDeps = pnpm.fetchDeps {
+            inherit (smart-scraper) pname version src;
+            hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+          };
+
+          buildPhase = ''
+            runHook preBuild
+            pnpm build
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            
+            mkdir -p $out/lib/smart-scraper
+            cp -r dist $out/lib/smart-scraper/
+            cp -r node_modules $out/lib/smart-scraper/
+            cp package.json $out/lib/smart-scraper/
+            
+            mkdir -p $out/bin
+            makeWrapper ${nodejs}/bin/node $out/bin/smart-scraper \
+              --add-flags "$out/lib/smart-scraper/dist/index.js" \
+              --set EXECUTABLE_PATH "${chromium}/bin/chromium" \
+              --prefix PATH : "${pkgs.lib.makeBinPath [ chromium ]}"
+            
+            runHook postInstall
+          '';
+
+          meta = with pkgs.lib; {
+            description = "Intelligent web scraping service with LLM-assisted content extraction";
+            license = licenses.mit;
+            platforms = platforms.linux;
+          };
+        };
+
+      in {
+        packages = {
+          default = smart-scraper;
+          inherit smart-scraper;
+        };
+
+        devShells.default = pkgs.mkShell {
+          buildInputs = [
+            nodejs
+            pnpm
+            chromium
+            
+            # Development tools
+            pkgs.typescript
+            pkgs.nodePackages.typescript-language-server
+            pkgs.nodePackages.prettier
+          ];
+
+          shellHook = ''
+            export EXECUTABLE_PATH="${chromium}/bin/chromium"
+            export PATH="$PWD/node_modules/.bin:$PATH"
+            
+            echo "SmartScraper Development Shell"
+            echo "==============================="
+            echo "Node.js:  $(node --version)"
+            echo "pnpm:     $(pnpm --version)"
+            echo "Chromium: ${chromium.version}"
+            echo ""
+            echo "EXECUTABLE_PATH=$EXECUTABLE_PATH"
+            echo ""
+            echo "Commands:"
+            echo "  pnpm install    - Install dependencies"
+            echo "  pnpm build      - Build TypeScript"
+            echo "  pnpm dev        - Run in development mode"
+            echo "  pnpm start      - Run production build"
+          '';
+        };
+      }
+    ) // {
+      # NixOS module
+      nixosModules.default = { config, lib, pkgs, ... }:
+        let
+          cfg = config.services.smart-scraper;
+          pkg = self.packages.${pkgs.system}.smart-scraper;
+        in {
+          options.services.smart-scraper = {
+            enable = lib.mkEnableOption "SmartScraper web scraping service";
+
+            port = lib.mkOption {
+              type = lib.types.port;
+              default = 5555;
+              description = "Port to listen on";
+            };
+
+            dataDir = lib.mkOption {
+              type = lib.types.path;
+              default = "/var/lib/smart-scraper";
+              description = "Directory for persistent data (sites.jsonc, stats.json, logs/)";
+            };
+
+            extensionPaths = lib.mkOption {
+              type = lib.types.listOf lib.types.path;
+              default = [];
+              description = "Paths to unpacked Chrome extensions";
+            };
+
+            secretsDir = lib.mkOption {
+              type = lib.types.path;
+              default = "/run/secrets";
+              description = "Directory containing secrets (api_token, proxy_server, openrouter_api_key)";
+            };
+
+            openFirewall = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Open firewall port for the service";
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            users.users.smartscraper = {
+              isSystemUser = true;
+              group = "smartscraper";
+              home = cfg.dataDir;
+              createHome = true;
+            };
+
+            users.groups.smartscraper = {};
+
+            systemd.services.smart-scraper = {
+              description = "SmartScraper web scraping service";
+              wantedBy = [ "multi-user.target" ];
+              after = [ "network.target" ];
+
+              environment = {
+                PORT = toString cfg.port;
+                DATA_DIR = cfg.dataDir;
+                EXTENSION_PATHS = lib.concatStringsSep "," cfg.extensionPaths;
+                NODE_ENV = "production";
+              };
+
+              serviceConfig = {
+                Type = "simple";
+                User = "smartscraper";
+                Group = "smartscraper";
+                WorkingDirectory = cfg.dataDir;
+                
+                ExecStartPre = pkgs.writeShellScript "smart-scraper-pre" ''
+                  mkdir -p ${cfg.dataDir}/logs
+                '';
+                
+                ExecStart = pkgs.writeShellScript "smart-scraper-start" ''
+                  # Load secrets from sops-nix
+                  export API_TOKEN=$(cat ${cfg.secretsDir}/smart-scraper/api_token 2>/dev/null || echo "")
+                  export OPENROUTER_API_KEY=$(cat ${cfg.secretsDir}/smart-scraper/openrouter_api_key 2>/dev/null || echo "")
+                  export TWOCAPTCHA_API_KEY=$(cat ${cfg.secretsDir}/smart-scraper/twocaptcha_api_key 2>/dev/null || echo "")
+                  
+                  if [ -f ${cfg.secretsDir}/smart-scraper/proxy_server ]; then
+                    export PROXY_SERVER=$(cat ${cfg.secretsDir}/smart-scraper/proxy_server)
+                  fi
+                  
+                  exec ${pkg}/bin/smart-scraper
+                '';
+
+                Restart = "on-failure";
+                RestartSec = 5;
+
+                # Hardening
+                NoNewPrivileges = true;
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                PrivateTmp = true;
+                ReadWritePaths = [ cfg.dataDir ];
+                
+                # Chromium needs these
+                ProtectKernelTunables = false;
+                MemoryDenyWriteExecute = false;
+              };
+            };
+
+            networking.firewall.allowedTCPPorts = 
+              lib.mkIf cfg.openFirewall [ cfg.port ];
+          };
+        };
+    };
+}

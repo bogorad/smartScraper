@@ -1,0 +1,341 @@
+# ADR-001: Puppeteer Browser Configuration
+
+- Status: Accepted
+- Date: 2025-12-05
+
+## Context
+
+SmartScraper requires a headless browser for scraping JavaScript-heavy sites and bypassing anti-bot measures. The browser must:
+
+- Maintain session isolation between scrapes
+- Support extensibility via Chrome extensions for ad blocking and paywall bypass
+- Present a realistic fingerprint to avoid detection
+- Extract content via XPath or return full body HTML
+
+## Decision
+
+### Runtime Configuration
+
+**Environment Variables:**
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `EXECUTABLE_PATH` | No | `/usr/lib/chromium/chromium` | Path to Chromium/Chrome binary |
+| `EXTENSION_PATHS` | No | - | Comma-separated paths to unpacked extensions |
+| `PROXY_SERVER` | No | - | Proxy server (e.g., `socks5://host:port`) |
+
+### Session Management
+
+Each Puppeteer session uses a unique temporary profile directory via `userDataDir`:
+
+```typescript
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+const userDataDir = fs.mkdtempSync(
+  path.join(os.tmpdir(), 'puppeteer-user-data-')
+);
+
+const browser = await puppeteer.launch({
+  executablePath: process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium',
+  headless: false,  // Required for extensions
+  userDataDir,
+  args: launchArgs,
+  timeout: 60000
+});
+```
+
+On session close, the profile directory is deleted in a `finally` block:
+
+```typescript
+finally {
+  if (page) {
+    try { await page.close(); } catch (e) { /* log */ }
+  }
+  if (browser) {
+    try { await browser.close(); } catch (e) { /* log */ }
+  }
+  if (userDataDir) {
+    try {
+      await fs.promises.rm(userDataDir, { recursive: true, force: true });
+    } catch (e) { /* log */ }
+  }
+}
+```
+
+### Extension Architecture
+
+Extensions are loaded as unpacked Chrome extensions (not puppeteer-extra plugins):
+
+```typescript
+let extensionArgs: string[] = [];
+
+if (process.env.EXTENSION_PATHS) {
+  const extensionPaths = process.env.EXTENSION_PATHS
+    .split(',')
+    .map(p => p.trim())
+    .filter(p => p.length > 0);
+
+  extensionArgs = [
+    `--disable-extensions-except=${extensionPaths.join(',')}`,
+    `--load-extension=${extensionPaths.join(',')}`
+  ];
+}
+```
+
+**Required Extensions:**
+
+| Extension | Purpose |
+|-----------|---------|
+| Ad blocker (uBlock Origin) | Block ads, trackers, annoyances |
+| Paywall bypass | Remove overlay paywalls, clear cookies for article limits |
+| Tab duplicator | Site-specific workarounds (e.g., WSJ.com) |
+
+**Extension Communication:**
+
+Extensions with service workers can be communicated with via `chrome.runtime.sendMessage`:
+
+```typescript
+async function findExtensionByIdentity(browser: Browser, identity: string) {
+  const targets = await browser.targets();
+  const serviceWorkers = targets.filter(
+    t => t.type() === 'service_worker' && t.url().includes('chrome-extension://')
+  );
+
+  for (const worker of serviceWorkers) {
+    const workerContext = await worker.worker();
+    const response = await workerContext.evaluate(() => {
+      return new Promise(resolve => {
+        chrome.runtime.sendMessage({ action: 'identify' }, resolve);
+      });
+    });
+    if (response?.identity === identity) {
+      return worker;
+    }
+  }
+  return null;
+}
+```
+
+### User-Agent Configuration
+
+Set a fixed Windows Chrome User-Agent to avoid headless detection:
+
+```typescript
+await page.setUserAgent(
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36'
+);
+```
+
+### Viewport Configuration
+
+```typescript
+await page.setViewport({ width: 1280, height: 720 });
+```
+
+### Content Extraction
+
+**XPath Extraction (comprehensive):**
+
+```typescript
+async function extractByXPath(page: Page, xpath: string): Promise<any[]> {
+  return await page.evaluate((xpathSelector) => {
+    const result = document.evaluate(
+      xpathSelector,
+      document,
+      null,
+      XPathResult.ANY_TYPE,
+      null
+    );
+    
+    const results: any[] = [];
+    
+    const processNode = (node: Node | null) => {
+      if (!node) return null;
+      switch (node.nodeType) {
+        case Node.ELEMENT_NODE:
+          return (node as Element).outerHTML;
+        case Node.ATTRIBUTE_NODE:
+        case Node.TEXT_NODE:
+          return node.nodeValue;
+        case Node.COMMENT_NODE:
+          return `<!-- ${node.nodeValue} -->`;
+        default:
+          return `Unsupported node type: ${node.nodeType}`;
+      }
+    };
+
+    switch (result.resultType) {
+      case XPathResult.NUMBER_TYPE:
+        return [result.numberValue];
+      case XPathResult.STRING_TYPE:
+        return [result.stringValue];
+      case XPathResult.BOOLEAN_TYPE:
+        return [result.booleanValue];
+      case XPathResult.UNORDERED_NODE_ITERATOR_TYPE:
+      case XPathResult.ORDERED_NODE_ITERATOR_TYPE: {
+        let node;
+        while ((node = result.iterateNext())) {
+          results.push(processNode(node));
+        }
+        return results;
+      }
+      case XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE:
+      case XPathResult.ORDERED_NODE_SNAPSHOT_TYPE: {
+        for (let i = 0; i < result.snapshotLength; i++) {
+          results.push(processNode(result.snapshotItem(i)));
+        }
+        return results;
+      }
+      case XPathResult.ANY_UNORDERED_NODE_TYPE:
+      case XPathResult.FIRST_ORDERED_NODE_TYPE:
+        return [processNode(result.singleNodeValue)];
+      default:
+        return [`Unknown XPathResult type: ${result.resultType}`];
+    }
+  }, xpath);
+}
+```
+
+### Launch Arguments
+
+Complete launch configuration:
+
+```typescript
+const launchArgs = [
+  // Security/sandbox
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  
+  // Performance
+  '--disable-dev-shm-usage',
+  '--disable-accelerated-2d-canvas',
+  '--disable-gpu',
+  '--use-gl=swiftshader',
+  
+  // Display
+  '--window-size=1280,720',
+  '--font-render-hinting=none',
+  
+  // Extensions (required for extension support)
+  '--enable-extensions',
+  
+  // Proxy (if configured)
+  ...(process.env.PROXY_SERVER ? [`--proxy-server=${process.env.PROXY_SERVER}`] : []),
+  
+  // Extensions (if configured)
+  ...extensionArgs
+];
+
+const browser = await puppeteer.launch({
+  executablePath: process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium',
+  headless: false,  // Must be false for extensions to work
+  userDataDir,
+  args: launchArgs,
+  timeout: 60000
+});
+```
+
+### Navigation Strategy
+
+```typescript
+// Pre-navigation delay (allow extensions to initialize)
+await new Promise(resolve => setTimeout(resolve, 3000));
+
+// Navigate with networkidle2
+await page.goto(url, {
+  waitUntil: 'networkidle2',
+  timeout: 45000
+});
+
+// Simulate user interaction (helps bypass bot detection)
+await page.mouse.move(100, 100);
+await page.evaluate(() => window.scrollBy(0, 200));
+
+// Post-navigation delay (allow dynamic content to load)
+const postNavDelay = method === 'xpath' ? 5000 : 2000;
+await new Promise(resolve => setTimeout(resolve, postNavDelay));
+```
+
+### Site-Specific Handlers
+
+Some sites require special handling. Example for WSJ.com tab duplication:
+
+```typescript
+if (url.includes('wsj.com/')) {
+  try {
+    const tabDuplicator = await findExtensionByIdentity(browser, 'tab-duplicator');
+    if (tabDuplicator) {
+      const workerContext = await tabDuplicator.worker();
+      await workerContext.evaluate(() => {
+        return new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({ action: 'duplicateTab' }, response => {
+            if (response?.success) resolve(response);
+            else reject(new Error(response?.error || 'Failed'));
+          });
+        });
+      });
+    }
+  } catch (e) {
+    // Non-fatal, continue scraping
+  }
+}
+```
+
+### Error Handling and Status Codes
+
+Map errors to appropriate HTTP status codes:
+
+| Error Type | Status Code |
+|------------|-------------|
+| Timeout | 504 Gateway Timeout |
+| Selector not found | 404 Not Found |
+| Navigation failed (`net::ERR_*`) | 502 Bad Gateway |
+| XPath evaluation failed | 400 Bad Request |
+| Other | 500 Internal Server Error |
+
+```typescript
+let statusCode = 500;
+
+if (error.name === 'TimeoutError' || 
+    error.message.includes('timeout') || 
+    error.message.includes('exceeded')) {
+  statusCode = 504;
+} else if (error.message.includes('selector') && 
+           (error.message.includes('not found') || 
+            error.message.includes('failed to find'))) {
+  statusCode = 404;
+} else if (error.message.includes('Navigation failed') || 
+           error.message.includes('net::ERR_')) {
+  statusCode = 502;
+} else if (error.message.includes('XPath evaluation failed')) {
+  statusCode = 400;
+}
+```
+
+## Consequences
+
+### Benefits
+
+- **Session isolation**: Fresh profile per scrape prevents fingerprint accumulation and cookie contamination
+- **Real Chrome extensions**: Use battle-tested extensions like uBlock Origin instead of maintaining custom plugins
+- **Realistic fingerprint**: Windows UA + viewport + mouse movement avoids headless detection
+- **Flexible extraction**: XPath with full result type support
+- **Site-specific handlers**: Extension communication enables workarounds for difficult sites
+
+### Trade-offs
+
+- **`headless: false` required**: Extensions only work in headed mode (use Xvfb for headless servers)
+- **Profile cleanup overhead**: Directory deletion adds ~50-100ms per session
+- **Extension maintenance**: Extensions may need updates for browser compatibility
+- **Longer startup time**: 3-second pre-navigation delay for extension initialization
+
+### Implementation Requirements
+
+- Profile cleanup must be in a `finally` block to handle errors
+- Extensions must be unpacked (not CRX files)
+- Use `puppeteer-core` with system Chromium for extension support
+- Run with Xvfb on headless servers (`xvfb-run` or `DISPLAY=:99`)
+- Validate `EXECUTABLE_PATH` exists on startup
