@@ -2,15 +2,22 @@
   description = "SmartScraper - Intelligent web scraping service";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
+
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        
+
         nodejs = pkgs.nodejs_24;
         pnpm = pkgs.pnpm;
         chromium = pkgs.chromium;
@@ -19,7 +26,7 @@
         smart-scraper = pkgs.stdenv.mkDerivation {
           pname = "smart-scraper";
           version = "0.1.0";
-          
+
           src = ./.;
 
           nativeBuildInputs = [
@@ -41,18 +48,18 @@
 
           installPhase = ''
             runHook preInstall
-            
+
             mkdir -p $out/lib/smart-scraper
             cp -r dist $out/lib/smart-scraper/
             cp -r node_modules $out/lib/smart-scraper/
             cp package.json $out/lib/smart-scraper/
-            
+
             mkdir -p $out/bin
             makeWrapper ${nodejs}/bin/node $out/bin/smart-scraper \
               --add-flags "$out/lib/smart-scraper/dist/index.js" \
               --set EXECUTABLE_PATH "${chromium}/bin/chromium" \
               --prefix PATH : "${pkgs.lib.makeBinPath [ chromium ]}"
-            
+
             runHook postInstall
           '';
 
@@ -63,7 +70,8 @@
           };
         };
 
-      in {
+      in
+      {
         packages = {
           default = smart-scraper;
           inherit smart-scraper;
@@ -74,17 +82,36 @@
             nodejs
             pnpm
             chromium
-            
+
             # Development tools
             pkgs.typescript
             pkgs.nodePackages.typescript-language-server
             pkgs.nodePackages.prettier
+
+            # Secrets management
+            pkgs.sops
+            pkgs.jq
           ];
 
           shellHook = ''
             export EXECUTABLE_PATH="${chromium}/bin/chromium"
             export PATH="$PWD/node_modules/.bin:$PATH"
-            
+
+            # Load secrets from sops-encrypted secrets.yaml
+            if [ -f secrets.yaml ]; then
+              echo "Loading secrets from secrets.yaml..."
+              SECRETS_JSON=$(sops decrypt secrets.yaml --output-type=json 2>/dev/null) && {
+                export API_TOKEN=$(echo "$SECRETS_JSON" | jq -r '.api_keys.smart_scraper // empty')
+                export OPENROUTER_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.api_keys.openrouter // empty')
+                export TWOCAPTCHA_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.api_keys.twocaptcha // empty')
+                export PROXY_SERVER=$(echo "$SECRETS_JSON" | jq -r '.proxy_server // empty')
+                echo "Secrets loaded."
+              } || echo "Warning: Failed to decrypt secrets.yaml (check sops config)"
+            else
+              echo "Warning: secrets.yaml not found, API keys not set"
+            fi
+
+            echo ""
             echo "SmartScraper Development Shell"
             echo "==============================="
             echo "Node.js:  $(node --version)"
@@ -92,6 +119,10 @@
             echo "Chromium: ${chromium.version}"
             echo ""
             echo "EXECUTABLE_PATH=$EXECUTABLE_PATH"
+            [ -n "$API_TOKEN" ] && echo "API_TOKEN=<set>" || echo "API_TOKEN=<not set>"
+            [ -n "$OPENROUTER_API_KEY" ] && echo "OPENROUTER_API_KEY=<set>" || echo "OPENROUTER_API_KEY=<not set>"
+            [ -n "$TWOCAPTCHA_API_KEY" ] && echo "TWOCAPTCHA_API_KEY=<set>" || echo "TWOCAPTCHA_API_KEY=<not set>"
+            [ -n "$PROXY_SERVER" ] && echo "PROXY_SERVER=<set>" || echo "PROXY_SERVER=<not set>"
             echo ""
             echo "Commands:"
             echo "  pnpm install    - Install dependencies"
@@ -101,13 +132,21 @@
           '';
         };
       }
-    ) // {
+    )
+    // {
       # NixOS module
-      nixosModules.default = { config, lib, pkgs, ... }:
+      nixosModules.default =
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
         let
           cfg = config.services.smart-scraper;
           pkg = self.packages.${pkgs.system}.smart-scraper;
-        in {
+        in
+        {
           options.services.smart-scraper = {
             enable = lib.mkEnableOption "SmartScraper web scraping service";
 
@@ -125,7 +164,7 @@
 
             extensionPaths = lib.mkOption {
               type = lib.types.listOf lib.types.path;
-              default = [];
+              default = [ ];
               description = "Paths to unpacked Chrome extensions";
             };
 
@@ -150,7 +189,7 @@
               createHome = true;
             };
 
-            users.groups.smartscraper = {};
+            users.groups.smartscraper = { };
 
             systemd.services.smart-scraper = {
               description = "SmartScraper web scraping service";
@@ -169,21 +208,21 @@
                 User = "smartscraper";
                 Group = "smartscraper";
                 WorkingDirectory = cfg.dataDir;
-                
+
                 ExecStartPre = pkgs.writeShellScript "smart-scraper-pre" ''
                   mkdir -p ${cfg.dataDir}/logs
                 '';
-                
+
                 ExecStart = pkgs.writeShellScript "smart-scraper-start" ''
                   # Load secrets from sops-nix
-                  export API_TOKEN=$(cat ${cfg.secretsDir}/smart-scraper/api_token 2>/dev/null || echo "")
-                  export OPENROUTER_API_KEY=$(cat ${cfg.secretsDir}/smart-scraper/openrouter_api_key 2>/dev/null || echo "")
-                  export TWOCAPTCHA_API_KEY=$(cat ${cfg.secretsDir}/smart-scraper/twocaptcha_api_key 2>/dev/null || echo "")
-                  
+                  export API_TOKEN=$(cat ${cfg.secretsDir}/api_keys/smart_scraper 2>/dev/null || echo "")
+                  export OPENROUTER_API_KEY=$(cat ${cfg.secretsDir}/api_keys/openrouter 2>/dev/null || echo "")
+                  export TWOCAPTCHA_API_KEY=$(cat ${cfg.secretsDir}/api_keys/twocaptcha 2>/dev/null || echo "")
+
                   if [ -f ${cfg.secretsDir}/smart-scraper/proxy_server ]; then
                     export PROXY_SERVER=$(cat ${cfg.secretsDir}/smart-scraper/proxy_server)
                   fi
-                  
+
                   exec ${pkg}/bin/smart-scraper
                 '';
 
@@ -196,15 +235,14 @@
                 ProtectHome = true;
                 PrivateTmp = true;
                 ReadWritePaths = [ cfg.dataDir ];
-                
+
                 # Chromium needs these
                 ProtectKernelTunables = false;
                 MemoryDenyWriteExecute = false;
               };
             };
 
-            networking.firewall.allowedTCPPorts = 
-              lib.mkIf cfg.openFirewall [ cfg.port ];
+            networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
           };
         };
     };

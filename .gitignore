@@ -13,3 +13,9 @@ node_modules/
 plugins/
 repomix-output.xml
 dist/
+
+# Secrets
+secrets.yaml
+
+# Data
+data/

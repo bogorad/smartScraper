@@ -1,0 +1,18 @@
+keys:
+  - &hetz age18k0j43xy2gl3vxdw4039u0lzju65sxy0tnk3hgk7md8dxp3txa9sds8dah
+  - &oracle-arm64 age1jndhu0tqy3rtqsjynxudjhsx8l5dqylszxxgc6dz54dzteg6g40qa686mx
+  - &nix-sp age1c74jm66n9cxhq3z8zezaupmzxmqjy7hhx5ylt7d5xrxg8m4v8prqsax4s2
+  - &ago age1l3zfggeufqcz77akn06reaw2rpe29ghxnlj6pnzg7q7yr02xc54spp3tvr
+  - &spino age1u7xts375ca822ampy29y7shky4cjd3entu9gxwqq7wfn4zdvg9usfnlgvs
+  - &lxc age1q3a7c382czvkqvq2aypfjqqrurudd6lz4qsw6c02fqkf0zpn0ynq4zhx3d
+
+creation_rules:
+  - path_regex: (.*\.yaml)$
+    key_groups:
+      - age:
+          - *hetz
+          - *oracle-arm64
+          - *nix-sp
+          - *ago
+          - *spino
+          - *lxc

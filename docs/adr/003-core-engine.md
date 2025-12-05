@@ -56,9 +56,33 @@ class CoreScraperEngine {
 }
 ```
 
+### Concurrency Control
+
+Access to the browser resource is serialized to prevent resource exhaustion and ensure stability.
+
+**Mechanism:** In-memory priority queue (`p-queue`).
+
+**Configuration:**
+- Concurrency: `1` (Strictly serial execution)
+- Timeout: Request dependent (default 60s)
+
+```typescript
+import PQueue from 'p-queue';
+
+export class CoreScraperEngine {
+  private queue = new PQueue({ concurrency: 1 });
+
+  async scrapeUrl(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
+    return this.queue.add(() => this._executeScrape(url, options));
+  }
+}
+```
+
 ## Consequences
 
 - Single place to reason about scraping flow
+- **Protected Resources:** Prevents concurrent Puppeteer instances from crashing the host
+- **Queueing:** Requests queue up in memory; client timeout handling is required
 - Testable via mock port implementations
 - Changes to engine have wide impact; requires comprehensive testing
 - Concrete adapters (Puppeteer, OpenRouter, 2Captcha, FS) implement ports
