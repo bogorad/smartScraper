@@ -26,7 +26,7 @@ SmartScraper requires a headless browser for scraping JavaScript-heavy sites and
 
 ### Session Management
 
-Each Puppeteer session uses a unique temporary profile directory via `userDataDir`:
+Each Puppeteer session uses a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode (new headless) while still supporting extensions via specific flags:
 
 ```typescript
 import fs from 'fs';
@@ -39,28 +39,21 @@ const userDataDir = fs.mkdtempSync(
 
 const browser = await puppeteer.launch({
   executablePath: process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium',
-  headless: false,  // Required for extensions
+  headless: true,
+  pipe: true,
   userDataDir,
   args: launchArgs,
-  timeout: 60000
+  timeout: 60000,
+  ...(hasExtensions && { enableExtensions: extensionPaths })
 });
 ```
 
-On session close, the profile directory is deleted in a `finally` block:
+On session close, the profile directory is deleted:
 
 ```typescript
-finally {
-  if (page) {
-    try { await page.close(); } catch (e) { /* log */ }
-  }
-  if (browser) {
-    try { await browser.close(); } catch (e) { /* log */ }
-  }
-  if (userDataDir) {
-    try {
-      await fs.promises.rm(userDataDir, { recursive: true, force: true });
-    } catch (e) { /* log */ }
-  }
+async closePage(pageId: string) {
+  // ...
+  try { await fs.promises.rm(session.userDataDir, { recursive: true, force: true }); } catch {}
 }
 ```
 
@@ -137,64 +130,35 @@ await page.setViewport({ width: 1280, height: 720 });
 
 ### Content Extraction
 
-**XPath Extraction (comprehensive):**
+**XPath Extraction:**
+
+We primarily use `XPathResult.ORDERED_NODE_SNAPSHOT_TYPE` (7) to capture a static snapshot of matching nodes. This allows iterating over results safely even if the DOM changes.
 
 ```typescript
 async function extractByXPath(page: Page, xpath: string): Promise<any[]> {
   return await page.evaluate((xpathSelector) => {
+    // XPathResult.ORDERED_NODE_SNAPSHOT_TYPE = 7
     const result = document.evaluate(
       xpathSelector,
       document,
       null,
-      XPathResult.ANY_TYPE,
+      7,
       null
     );
     
-    const results: any[] = [];
+    const results: string[] = [];
     
-    const processNode = (node: Node | null) => {
-      if (!node) return null;
-      switch (node.nodeType) {
-        case Node.ELEMENT_NODE:
-          return (node as Element).outerHTML;
-        case Node.ATTRIBUTE_NODE:
-        case Node.TEXT_NODE:
-          return node.nodeValue;
-        case Node.COMMENT_NODE:
-          return `<!-- ${node.nodeValue} -->`;
-        default:
-          return `Unsupported node type: ${node.nodeType}`;
-      }
-    };
+    for (let i = 0; i < result.snapshotLength; i++) {
+      const node = result.snapshotItem(i);
+      if (!node) continue;
+      
+      let val: string | null = null;
+      if (node.nodeType === 1) val = (node as Element).outerHTML;
+      else if (node.nodeType === 2 || node.nodeType === 3) val = node.nodeValue;
 
-    switch (result.resultType) {
-      case XPathResult.NUMBER_TYPE:
-        return [result.numberValue];
-      case XPathResult.STRING_TYPE:
-        return [result.stringValue];
-      case XPathResult.BOOLEAN_TYPE:
-        return [result.booleanValue];
-      case XPathResult.UNORDERED_NODE_ITERATOR_TYPE:
-      case XPathResult.ORDERED_NODE_ITERATOR_TYPE: {
-        let node;
-        while ((node = result.iterateNext())) {
-          results.push(processNode(node));
-        }
-        return results;
-      }
-      case XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE:
-      case XPathResult.ORDERED_NODE_SNAPSHOT_TYPE: {
-        for (let i = 0; i < result.snapshotLength; i++) {
-          results.push(processNode(result.snapshotItem(i)));
-        }
-        return results;
-      }
-      case XPathResult.ANY_UNORDERED_NODE_TYPE:
-      case XPathResult.FIRST_ORDERED_NODE_TYPE:
-        return [processNode(result.singleNodeValue)];
-      default:
-        return [`Unknown XPathResult type: ${result.resultType}`];
+      if (val) results.push(val);
     }
+    return results;
   }, xpath);
 }
 ```
@@ -219,22 +183,18 @@ const launchArgs = [
   '--window-size=1280,720',
   '--font-render-hinting=none',
   
-  // Extensions (required for extension support)
-  '--enable-extensions',
-  
   // Proxy (if configured)
   ...(process.env.PROXY_SERVER ? [`--proxy-server=${process.env.PROXY_SERVER}`] : []),
-  
-  // Extensions (if configured)
-  ...extensionArgs
 ];
 
 const browser = await puppeteer.launch({
   executablePath: process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium',
-  headless: false,  // Must be false for extensions to work
+  headless: true, 
+  pipe: true,
   userDataDir,
   args: launchArgs,
-  timeout: 60000
+  timeout: 60000,
+  ...(hasExtensions && { enableExtensions: extensionPaths })
 });
 ```
 

@@ -49,10 +49,10 @@ src/
     stats-card.tsx            # Stat display card
     confirm-dialog.tsx        # Delete confirmation
   services/
-    scraper.ts                # Core scraping logic wrapper
-    sites-storage.ts          # JSONC read/write with comment preservation
-    stats-storage.ts          # Stats persistence
     log-storage.ts            # JSON Lines logging
+    stats-storage.ts          # Stats persistence
+  adapters/
+    fs-known-sites.ts         # JSONC read/write with comment preservation
   utils/
     jsonc.ts                  # JSONC parser/serializer
     date.ts                   # UTC date helpers
@@ -329,18 +329,23 @@ JSONC format with comment preservation:
 
 **Comment Preservation:**
 ```typescript
-// services/sites-storage.ts
+// src/adapters/fs-known-sites.ts
 import { parse, stringify } from 'comment-json';
 
-export async function loadSites(): Promise<SiteConfig[]> {
-  const content = await fs.readFile('./data/sites.jsonc', 'utf-8');
-  return parse(content) as SiteConfig[];
-}
+export class FsKnownSitesAdapter implements KnownSitesPort {
+  private async load(): Promise<SiteConfig[]> {
+    await this.ensureFile();
+    const content = await fs.readFile(SITES_FILE, 'utf-8');
+    this.cache = parse(content) as unknown as SiteConfig[];
+    return this.cache;
+  }
 
-export async function saveSites(sites: SiteConfig[]): Promise<void> {
-  // stringify preserves comments from original parse
-  const content = stringify(sites, null, 2);
-  await fs.writeFile('./data/sites.jsonc', content);
+  private async save(configs: SiteConfig[]): Promise<void> {
+    await this.ensureFile();
+    const content = stringify(configs, null, 2);
+    await fs.writeFile(SITES_FILE, content);
+    this.cache = configs;
+  }
 }
 ```
 
