@@ -36,21 +36,27 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
 
   async loadPage(url: string, options?: LoadPageOptions): Promise<{ pageId: string }> {
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'puppeteer-user-data-'));
-    const launchArgs = this.buildLaunchArgs();
+    const extensionPaths = this.getExtensionPaths();
+    const hasExtensions = extensionPaths.length > 0;
 
     const browser = await puppeteer.launch({
       executablePath: process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium',
-      headless: false,
+      headless: true,
+      pipe: true,
       userDataDir,
-      args: launchArgs,
-      timeout: options?.timeout || DEFAULTS.TIMEOUT_MS
+      args: this.buildLaunchArgs(),
+      timeout: options?.timeout || DEFAULTS.TIMEOUT_MS,
+      ...(hasExtensions && { enableExtensions: extensionPaths })
     });
 
     const page = await browser.newPage();
+    page.on('console', msg => console.log('[BROWSER]', msg.text()));
     await page.setUserAgent(DEFAULTS.USER_AGENT);
     await page.setViewport({ width: DEFAULTS.VIEWPORT_WIDTH, height: DEFAULTS.VIEWPORT_HEIGHT });
 
-    await new Promise(r => setTimeout(r, 3000));
+    if (hasExtensions) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
 
     await page.goto(url, {
       waitUntil: options?.waitUntil || 'networkidle2',
@@ -59,12 +65,17 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
 
     await page.mouse.move(100, 100);
     await page.evaluate(() => window.scrollBy(0, 200));
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 1000));
 
     const pageId = `page-${++this.pageCounter}`;
     this.sessions.set(pageId, { page, browser, userDataDir });
 
     return { pageId };
+  }
+
+  private getExtensionPaths(): string[] {
+    if (!process.env.EXTENSION_PATHS) return [];
+    return process.env.EXTENSION_PATHS.split(',').map(p => p.trim()).filter(Boolean);
   }
 
   private buildLaunchArgs(): string[] {
@@ -76,18 +87,11 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       '--disable-gpu',
       '--use-gl=swiftshader',
       '--window-size=1280,720',
-      '--font-render-hinting=none',
-      '--enable-extensions'
+      '--font-render-hinting=none'
     ];
 
     if (process.env.PROXY_SERVER) {
       args.push(`--proxy-server=${process.env.PROXY_SERVER}`);
-    }
-
-    if (process.env.EXTENSION_PATHS) {
-      const extensionPaths = process.env.EXTENSION_PATHS.split(',').map(p => p.trim()).filter(Boolean);
-      args.push(`--disable-extensions-except=${extensionPaths.join(',')}`);
-      args.push(`--load-extension=${extensionPaths.join(',')}`);
     }
 
     return args;
@@ -99,44 +103,34 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
 
     try {
       return await session.page.evaluate((xpathSelector) => {
-        const result = document.evaluate(xpathSelector, document, null, XPathResult.ANY_TYPE, null);
-        const results: string[] = [];
+        console.log(`Evaluating XPath: ${xpathSelector}`);
+        const body = document.querySelector('body');
+        console.log(`Body check: ${!!body}`);
 
-        const processNode = (node: Node | null): string | null => {
-          if (!node) return null;
-          switch (node.nodeType) {
-            case Node.ELEMENT_NODE:
-              return (node as Element).outerHTML;
-            case Node.ATTRIBUTE_NODE:
-            case Node.TEXT_NODE:
-              return node.nodeValue;
-            default:
-              return null;
-          }
-        };
+        try {
+            // XPathResult.ORDERED_NODE_SNAPSHOT_TYPE = 7
+            const result = document.evaluate(xpathSelector, document, null, 7, null);
+            const results: string[] = [];
+            console.log(`Snapshot length: ${result.snapshotLength}`);
 
-        switch (result.resultType) {
-          case XPathResult.STRING_TYPE:
-            return [result.stringValue];
-          case XPathResult.UNORDERED_NODE_ITERATOR_TYPE:
-          case XPathResult.ORDERED_NODE_ITERATOR_TYPE: {
-            let node;
-            while ((node = result.iterateNext())) {
-              const val = processNode(node);
-              if (val) results.push(val);
+            for (let i = 0; i < result.snapshotLength; i++) {
+                const node = result.snapshotItem(i);
+                if (!node) continue;
+                
+                let val: string | null = null;
+                if (node.nodeType === 1) val = (node as Element).outerHTML;
+                else if (node.nodeType === 2 || node.nodeType === 3) val = node.nodeValue;
+
+                if (val) results.push(val);
             }
             return results;
-          }
-          case XPathResult.FIRST_ORDERED_NODE_TYPE:
-          case XPathResult.ANY_UNORDERED_NODE_TYPE: {
-            const val = processNode(result.singleNodeValue);
-            return val ? [val] : [];
-          }
-          default:
+        } catch (e) {
+            console.error('Evaluate error:', e instanceof Error ? e.message : String(e));
             return [];
         }
       }, xpath);
-    } catch {
+    } catch (e) {
+      console.error('Puppeteer evaluate error:', e);
       return null;
     }
   }

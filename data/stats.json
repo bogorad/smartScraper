@@ -1,0 +1,11 @@
+{
+  "scrapeTotal": 17,
+  "failTotal": 14,
+  "todayDate": "2025-12-05",
+  "scrapeToday": 17,
+  "failToday": 14,
+  "domainCounts": {
+    "nypost.com": 16,
+    "example.com": 1
+  }
+}

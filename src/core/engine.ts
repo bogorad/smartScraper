@@ -1,4 +1,6 @@
 import PQueue from 'p-queue';
+import fs from 'fs';
+import path from 'path';
 import type { BrowserPort, LlmPort, CaptchaPort, KnownSitesPort } from '../ports/index.js';
 import type { ScrapeOptions, ScrapeResult, ScrapeContext, LogEntry } from '../domain/models.js';
 import { METHODS, OUTPUT_TYPES, ERROR_TYPES, CAPTCHA_TYPES, SCORING, DEFAULTS } from '../constants.js';
@@ -77,16 +79,19 @@ export class CoreScraperEngine {
         }
       }
 
-      let xpath: string | undefined;
-      let needsDiscovery = !context.siteConfig?.xpathMainContent ||
-        (context.siteConfig.failureCountSinceLastSuccess >= DEFAULTS.MAX_REDISCOVERY_FAILURES);
+      let xpath: string | undefined = options?.xpathOverride;
+      let needsDiscovery = !xpath && (!context.siteConfig?.xpathMainContent ||
+        (context.siteConfig.failureCountSinceLastSuccess >= DEFAULTS.MAX_REDISCOVERY_FAILURES));
 
-      if (!needsDiscovery && context.siteConfig?.xpathMainContent) {
+      if (!xpath && !needsDiscovery && context.siteConfig?.xpathMainContent) {
         xpath = context.siteConfig.xpathMainContent;
         const extracted = await this.browserPort.evaluateXPath(pageId, xpath);
         
         if (!extracted || extracted.length === 0 || extracted[0].length < SCORING.MIN_CONTENT_CHARS) {
           needsDiscovery = true;
+          if (options?.debug) {
+             console.log(`[DEBUG] Existing XPath ${xpath} failed validation. Needs discovery.`);
+          }
           await this.knownSitesPort.incrementFailure(domain);
         }
       }
@@ -135,6 +140,18 @@ export class CoreScraperEngine {
       }
 
       const extracted = await this.browserPort.evaluateXPath(pageId, xpath!);
+      
+      if (options?.debug) {
+          const fullHtml = await this.browserPort.getPageHtml(pageId);
+          const debugDir = path.join(process.cwd(), 'data', 'logs', 'debug');
+          await fs.promises.mkdir(debugDir, { recursive: true });
+          const filename = `${context.normalizedDomain.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.html`;
+          await fs.promises.writeFile(path.join(debugDir, filename), fullHtml);
+          console.log(`[DEBUG] Saved HTML snapshot to ${filename}`);
+          console.log(`[DEBUG] XPath used: ${xpath}`);
+          console.log(`[DEBUG] Extracted count: ${extracted ? extracted.length : 0}`);
+      }
+
       if (!extracted || extracted.length === 0) {
         result = { success: false, errorType: ERROR_TYPES.EXTRACTION, error: 'Extraction returned empty' };
         await this.knownSitesPort.incrementFailure(domain);

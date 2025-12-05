@@ -1,0 +1,327 @@
+[
+  {
+    "domainPattern": "alexberenson.substack.com",
+    "xpathMainContent": "//div[@class='body markup']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "amgreatness.com",
+    "xpathMainContent": "//main//article//div[@class='entry-content relative  dropcap ']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "apnews.com",
+    "xpathMainContent": "//div[@class='RichTextStoryBody RichTextBody']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "axios.com",
+    "xpathMainContent": "//div[contains(@class,'col-1-13') and *[contains(@data-schema,'smart-brevity')]]",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "bloomberg.com",
+    "xpathMainContent": "//div[@class='body-content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "bostonherald.com",
+    "xpathMainContent": "//article[@id='post-5524767']/div[@class='article-content']/div[@class='article-content-wrapper']/div[@class='article-body']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "city-journal.org",
+    "xpathMainContent": "//div[@id='article-content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "civitasinstitute.org",
+    "xpathMainContent": "//main",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "commentary.org",
+    "xpathMainContent": "//div[@class='entry-content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "commonplace.org",
+    "xpathMainContent": "//div[contains(@class, 'entry-content')]",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "compactmag.com",
+    "xpathMainContent": "//main",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "coolidgereview.com",
+    "xpathMainContent": "//div[@class='blog-item-content e-content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "esquire.com",
+    "xpathMainContent": "//div[@data-journey-body='longform-article']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "foreignaffairs.com",
+    "xpathMainContent": "//main[@id='content']/article",
+    "lastSuccessfulScrapeTimestamp": "2025-05-18T00:16:34.347Z",
+    "failureCountSinceLastSuccess": 0,
+    "discoveredByLlm": true
+  },
+  {
+    "domainPattern": "foxnews.com",
+    "xpathMainContent": "//article",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "freebeacon.com",
+    "xpathMainContent": "//div[@class='article-content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "ft.com",
+    "xpathMainContent": "//div[@class='article-content']",
+    "lastSuccessfulScrapeTimestamp": "2025-05-18T00:45:58.158Z",
+    "failureCountSinceLastSuccess": 0,
+    "discoveredByLlm": true
+  },
+  {
+    "domainPattern": "gizmodo.com",
+    "xpathMainContent": "//div[contains(@class,'entry-content')]",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "harvardsalient.com",
+    "xpathMainContent": "//article",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "issuesinsights.com",
+    "xpathMainContent": "//div[@class='entry-content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "manhattancontrarian.com",
+    "xpathMainContent": "//div[@data-content-field='main-content']//article",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "nationalpost.com",
+    "xpathMainContent": "//*[@class='story-v2-block-content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "newcriterion.com",
+    "xpathMainContent": "//main",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "newsnationnow.com",
+    "xpathMainContent": "//main",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "nypost.com",
+    "xpathMainContent": "//div[contains(@class, \"single__content\")]",
+    "failureCountSinceLastSuccess": 0,
+    "lastSuccessfulScrapeTimestamp": "2025-12-05T21:12:30.139Z"
+  },
+  {
+    "domainPattern": "nytimes.com",
+    "xpathMainContent": "//article",
+    "lastSuccessfulScrapeTimestamp": "2025-05-18T00:16:58.762Z",
+    "failureCountSinceLastSuccess": 2
+  },
+  {
+    "domainPattern": "piratewires.com",
+    "xpathMainContent": "//section[contains(@class, 'article_postBody')]",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "pjmedia.com",
+    "xpathMainContent": "//section[@class='post-body']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "post-gazette.com",
+    "xpathMainContent": "//div[@class='pgevoke-contentarea-body-text']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "prospect.org",
+    "xpathMainContent": "//main[@id='maincontent']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "realclearinvestigations.com",
+    "xpathMainContent": "//article",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "realclearmarkets.com",
+    "xpathMainContent": "//article",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "realclearworld.com",
+    "xpathMainContent": "//div[@id='article_content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "reason.com",
+    "xpathMainContent": "//div[@class='entry-content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "sfchronicle.com",
+    "xpathMainContent": "//article[@class='rel']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "sltrib.com",
+    "xpathMainContent": "//div[@class='article-body-container']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "spiked-online.com",
+    "xpathMainContent": "//article",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "theamericanconservative.com",
+    "xpathMainContent": "//div[@class='c-blog-post__content s-wysiwyg s-wysiwyg--blog']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "theatlantic.com",
+    "xpathMainContent": "//main/article",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "thefederalist.com",
+    "xpathMainContent": "//main[@id='main']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "theglobeandmail.com",
+    "xpathMainContent": "//*[@id='content-gate']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "theguardian.com",
+    "xpathMainContent": "//div[@data-gu-name='body']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "thehill.com",
+    "xpathMainContent": "//div[@class='article__text | body-copy | flow']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "thespectator.com",
+    "xpathMainContent": "//main",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "thestar.com",
+    "xpathMainContent": "//*[@class='asset-body']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "time.com",
+    "xpathMainContent": "/html/body/div/main/article",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "tippinsights.com",
+    "xpathMainContent": "//div[@class='c-content ']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "unherd.com",
+    "xpathMainContent": "//article[contains(@class, 'post-')]",
+    "lastSuccessfulScrapeTimestamp": "2025-05-17T17:02:35.546Z",
+    "failureCountSinceLastSuccess": 0,
+    "discoveredByLlm": true
+  },
+  {
+    "domainPattern": "universetoday.com",
+    "xpathMainContent": "//div[@class='article-content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "usatoday.com",
+    "xpathMainContent": "//article[@class='story primary-content text opinion row']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "vox.com",
+    "xpathMainContent": "//div[@id='zephr-anchor']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "washingtonexaminer.com",
+    "xpathMainContent": "//div[@class='article-paywall']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "washingtontimes.com",
+    "xpathMainContent": "//section[@id='content']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "wsj.com",
+    "xpathMainContent": "//section[contains(@class,'Container')]",
+    "failureCountSinceLastSuccess": 2
+  },
+  {
+    "domainPattern": "yahoo.com",
+    "xpathMainContent": "//article",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "nzz.ch",
+    "xpathMainContent": "//div[@class='nzz-page-transition']/div/div[@class='article']",
+    "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:27.978Z",
+    "failureCountSinceLastSuccess": 0,
+    "discoveredByLlm": true
+  },
+  {
+    "domainPattern": "spiegel.de",
+    "xpathMainContent": "//main[@id='Inhalt']/article",
+    "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:31.320Z",
+    "failureCountSinceLastSuccess": 0,
+    "discoveredByLlm": true
+  },
+  {
+    "domainPattern": "thelocal.es",
+    "xpathMainContent": "//div[@class='col-xl-8 mobile-full-width']/main",
+    "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:36.784Z",
+    "failureCountSinceLastSuccess": 0,
+    "discoveredByLlm": true
+  },
+  {
+    "domainPattern": "cjr.org",
+    "xpathMainContent": "//div[@class='container-lg']/div[@class='row']/div[@class='col-sm-8 entry-content']",
+    "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:39.961Z",
+    "failureCountSinceLastSuccess": 0,
+    "discoveredByLlm": true
+  },
+  {
+    "domainPattern": "thetimes.com",
+    "xpathMainContent": "//section[contains(@class, 'MainContainer') and contains(@class, 'MainContainer--noPadding')]",
+    "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:44.486Z",
+    "failureCountSinceLastSuccess": 0,
+    "discoveredByLlm": true
+  },
+  {
+    "domainPattern": "variety.com",
+    "xpathMainContent": "//article[@class='u-border-r-1@tablet u-border-color-medium-grey u-padding-lr-4@tablet lrv-a-grid-item@tablet lrv-a-span6@tablet lrv-u-width-100p u-margin-b-1']",
+    "lastSuccessfulScrapeTimestamp": "2025-05-17T17:01:26.424Z",
+    "failureCountSinceLastSuccess": 0,
+    "discoveredByLlm": true
+  }
+]

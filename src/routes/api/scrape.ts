@@ -10,7 +10,9 @@ const scrapeSchema = z.object({
   outputType: z.enum(['content_only', 'markdown', 'cleaned_html', 'full_html', 'metadata_only']).optional(),
   proxyServer: z.string().optional(),
   userAgent: z.string().optional(),
-  timeoutMs: z.number().optional()
+  timeoutMs: z.number().optional(),
+  xpath: z.string().optional(),
+  debug: z.boolean().optional()
 });
 
 export const scrapeRouter = new Hono();
@@ -25,7 +27,9 @@ scrapeRouter.post('/', zValidator('json', scrapeSchema), async (c) => {
     outputType: body.outputType as typeof OUTPUT_TYPES[keyof typeof OUTPUT_TYPES],
     proxyDetails: body.proxyServer ? { server: body.proxyServer } : undefined,
     userAgentString: body.userAgent,
-    timeoutMs: body.timeoutMs
+    timeoutMs: body.timeoutMs,
+    xpathOverride: body.xpath,
+    debug: body.debug
   });
 
   return c.json(result);

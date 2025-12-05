@@ -18,6 +18,8 @@ export interface ScrapeOptions {
   userAgentString?: string;
   timeoutMs?: number;
   debugContextId?: string;
+  xpathOverride?: string;
+  debug?: boolean;
 }
 
 export interface ScrapeResult {

@@ -1,21 +1,9 @@
-.aider*
-.aider/
 .direnv/
 .env
-.git/
 .gitconfig
-.vscode/
-chat_history/
-debug_dumps/
-failed_html_dumps/
-success_html_dumps/
 node_modules/
-plugins/
+extensions/
 repomix-output.xml
 dist/
-
-# Secrets
-secrets.yaml
-
-# Data
-data/
+*.log
+data/logs/

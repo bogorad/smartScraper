@@ -3,7 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
-
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -19,30 +18,24 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         nodejs = pkgs.nodejs_24;
-        pnpm = pkgs.pnpm;
         chromium = pkgs.chromium;
 
         # Build the application
-        smart-scraper = pkgs.stdenv.mkDerivation {
+        smart-scraper = pkgs.buildNpmPackage {
           pname = "smart-scraper";
           version = "0.1.0";
 
           src = ./.;
 
+          npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
           nativeBuildInputs = [
-            nodejs
-            pnpm.configHook
             pkgs.makeWrapper
           ];
 
-          pnpmDeps = pnpm.fetchDeps {
-            inherit (smart-scraper) pname version src;
-            hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-          };
-
           buildPhase = ''
             runHook preBuild
-            pnpm build
+            npm run build
             runHook postBuild
           '';
 
@@ -80,7 +73,6 @@
         devShells.default = pkgs.mkShell {
           buildInputs = [
             nodejs
-            pnpm
             chromium
 
             # Development tools
@@ -115,7 +107,7 @@
             echo "SmartScraper Development Shell"
             echo "==============================="
             echo "Node.js:  $(node --version)"
-            echo "pnpm:     $(pnpm --version)"
+            echo "npm:      $(npm --version)"
             echo "Chromium: ${chromium.version}"
             echo ""
             echo "EXECUTABLE_PATH=$EXECUTABLE_PATH"
@@ -125,10 +117,10 @@
             [ -n "$PROXY_SERVER" ] && echo "PROXY_SERVER=<set>" || echo "PROXY_SERVER=<not set>"
             echo ""
             echo "Commands:"
-            echo "  pnpm install    - Install dependencies"
-            echo "  pnpm build      - Build TypeScript"
-            echo "  pnpm dev        - Run in development mode"
-            echo "  pnpm start      - Run production build"
+            echo "  npm install    - Install dependencies"
+            echo "  npm run build  - Build TypeScript"
+            echo "  npm run dev    - Run in development mode"
+            echo "  npm start      - Run production build"
           '';
         };
       }
