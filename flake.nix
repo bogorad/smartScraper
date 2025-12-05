@@ -4,6 +4,10 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
+    sops-nix = {
+      url = "github:Mic92/sops-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -11,6 +15,7 @@
       self,
       nixpkgs,
       flake-utils,
+      sops-nix,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -89,6 +94,15 @@
             export EXECUTABLE_PATH="${chromium}/bin/chromium"
             export PATH="$PWD/node_modules/.bin:$PATH"
 
+            # Load .env file if present
+            if [ -f .env ]; then
+              echo "Loading .env file..."
+              set -a
+              source .env
+              set +a
+              echo ".env loaded."
+            fi
+
             # Load secrets from sops-encrypted secrets.yaml
             if [ -f secrets.yaml ]; then
               echo "Loading secrets from secrets.yaml..."
@@ -96,7 +110,6 @@
                 export API_TOKEN=$(echo "$SECRETS_JSON" | jq -r '.api_keys.smart_scraper // empty')
                 export OPENROUTER_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.api_keys.openrouter // empty')
                 export TWOCAPTCHA_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.api_keys.twocaptcha // empty')
-                export PROXY_SERVER=$(echo "$SECRETS_JSON" | jq -r '.proxy_server // empty')
                 echo "Secrets loaded."
               } || echo "Warning: Failed to decrypt secrets.yaml (check sops config)"
             else
@@ -114,7 +127,7 @@
             [ -n "$API_TOKEN" ] && echo "API_TOKEN=<set>" || echo "API_TOKEN=<not set>"
             [ -n "$OPENROUTER_API_KEY" ] && echo "OPENROUTER_API_KEY=<set>" || echo "OPENROUTER_API_KEY=<not set>"
             [ -n "$TWOCAPTCHA_API_KEY" ] && echo "TWOCAPTCHA_API_KEY=<set>" || echo "TWOCAPTCHA_API_KEY=<not set>"
-            [ -n "$PROXY_SERVER" ] && echo "PROXY_SERVER=<set>" || echo "PROXY_SERVER=<not set>"
+            [ -n "$EXTENSION_PATHS" ] && echo "EXTENSION_PATHS=<set>" || echo "EXTENSION_PATHS=<not set>"
             echo ""
             echo "Commands:"
             echo "  npm install    - Install dependencies"
@@ -139,6 +152,8 @@
           pkg = self.packages.${pkgs.system}.smart-scraper;
         in
         {
+          imports = [ sops-nix.nixosModules.sops ];
+
           options.services.smart-scraper = {
             enable = lib.mkEnableOption "SmartScraper web scraping service";
 
@@ -160,10 +175,16 @@
               description = "Paths to unpacked Chrome extensions";
             };
 
-            secretsDir = lib.mkOption {
+            sopsSecretsFile = lib.mkOption {
               type = lib.types.path;
-              default = "/run/secrets";
-              description = "Directory containing secrets (api_token, proxy_server, openrouter_api_key)";
+              default = ./secrets.yaml;
+              description = "Path to sops-encrypted secrets.yaml file";
+            };
+
+            envFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              description = "Path to .env file for additional environment variables (e.g., EXTENSION_PATHS)";
             };
 
             openFirewall = lib.mkOption {
@@ -174,6 +195,24 @@
           };
 
           config = lib.mkIf cfg.enable {
+            sops.secrets = {
+              "api_keys/smart_scraper" = {
+                sopsFile = cfg.sopsSecretsFile;
+                owner = "smartscraper";
+                group = "smartscraper";
+              };
+              "api_keys/openrouter" = {
+                sopsFile = cfg.sopsSecretsFile;
+                owner = "smartscraper";
+                group = "smartscraper";
+              };
+              "api_keys/twocaptcha" = {
+                sopsFile = cfg.sopsSecretsFile;
+                owner = "smartscraper";
+                group = "smartscraper";
+              };
+            };
+
             users.users.smartscraper = {
               isSystemUser = true;
               group = "smartscraper";
@@ -191,7 +230,6 @@
               environment = {
                 PORT = toString cfg.port;
                 DATA_DIR = cfg.dataDir;
-                EXTENSION_PATHS = lib.concatStringsSep "," cfg.extensionPaths;
                 NODE_ENV = "production";
               };
 
@@ -206,14 +244,19 @@
                 '';
 
                 ExecStart = pkgs.writeShellScript "smart-scraper-start" ''
-                  # Load secrets from sops-nix
-                  export API_TOKEN=$(cat ${cfg.secretsDir}/api_keys/smart_scraper 2>/dev/null || echo "")
-                  export OPENROUTER_API_KEY=$(cat ${cfg.secretsDir}/api_keys/openrouter 2>/dev/null || echo "")
-                  export TWOCAPTCHA_API_KEY=$(cat ${cfg.secretsDir}/api_keys/twocaptcha 2>/dev/null || echo "")
+                  # Load .env file if configured
+                  ${lib.optionalString (cfg.envFile != null) ''
+                    if [ -f "${cfg.envFile}" ]; then
+                      set -a
+                      source "${cfg.envFile}"
+                      set +a
+                    fi
+                  ''}
 
-                  if [ -f ${cfg.secretsDir}/smart-scraper/proxy_server ]; then
-                    export PROXY_SERVER=$(cat ${cfg.secretsDir}/smart-scraper/proxy_server)
-                  fi
+                  # Load secrets from sops-nix
+                  export API_TOKEN=$(cat ${config.sops.secrets."api_keys/smart_scraper".path} 2>/dev/null || echo "")
+                  export OPENROUTER_API_KEY=$(cat ${config.sops.secrets."api_keys/openrouter".path} 2>/dev/null || echo "")
+                  export TWOCAPTCHA_API_KEY=$(cat ${config.sops.secrets."api_keys/twocaptcha".path} 2>/dev/null || echo "")
 
                   exec ${pkg}/bin/smart-scraper
                 '';
