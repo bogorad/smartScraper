@@ -11,19 +11,12 @@ Represents learned configuration for a domain.
 Fields (minimum set to support current behavior):
 
 - `domainPattern: string`
-- `method: MethodValue`
 - `xpathMainContent: string`
 - `lastSuccessfulScrapeTimestamp?: string` (ISO)
 - `failureCountSinceLastSuccess: number`
-- `needsCaptchaSolver?: boolean`
 - `discoveredByLlm?: boolean`
-- `userAgentToUse?: string`
 - `siteSpecificHeaders?: Record<string, string>`
-- `puppeteerWaitConditions?: {
-    waitUntil?: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2',
-    timeoutMs?: number
-  }`
-- `captchaCookie?: string`
+- `siteCleanupClasses: [ class1, class2, class3 ]`
 
 ### ScrapeContext
 
@@ -65,13 +58,13 @@ These ports allow the engine to be rebuilt cleanly with dependency inversion.
 Responsible for HTTP fetches (curl-like).
 
 - `fetch(url, options) -> Promise<{
-    ok: boolean,
-    status: number,
-    finalUrl: string,
-    headers: Record<string, string>,
-    body: string,
-    errorMessage?: string
-  }>`
+  ok: boolean,
+  status: number,
+  finalUrl: string,
+  headers: Record<string, string>,
+  body: string,
+  errorMessage?: string
+}>`
 
 Options include proxy, UA, timeouts, TLS relax.
 
@@ -91,25 +84,25 @@ Responsible for dynamic rendering and DOM queries.
 Responsible for generating XPath candidates.
 
 - `suggestXPaths(input: {
-    simplifiedDom: string,
-    snippets: string[],
-    previousFailureReason?: string
-  }): Promise<LlmXPathSuggestion[]>`
+  simplifiedDom: string,
+  snippets: string[],
+  previousFailureReason?: string
+}): Promise<LlmXPathSuggestion[]>`
 
 ### CaptchaPort
 
 Responsible for solving CAPTCHAs.
 
 - `solveIfPresent(input: {
-    pageId: string,
-    captchaTypeHint?: 'generic' | 'datadome',
-    proxyDetails?: { server: string },
-    userAgentString?: string
-  }): Promise<{
-    solved: boolean,
-    updatedCookie?: string,
-    reason?: string
-  }>`
+  pageId: string,
+  captchaTypeHint?: 'generic' | 'datadome',
+  proxyDetails?: { server: string },
+  userAgentString?: string
+}): Promise<{
+  solved: boolean,
+  updatedCookie?: string,
+  reason?: string
+}>`
 
 ### KnownSitesPort
 
