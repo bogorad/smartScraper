@@ -134,6 +134,8 @@
             echo "  npm run build  - Build TypeScript"
             echo "  npm run dev    - Run in development mode"
             echo "  npm start      - Run production build"
+            echo ""
+            echo ""
           '';
         };
       }
@@ -255,8 +257,12 @@
 
                   # Load secrets from sops-nix
                   export API_TOKEN=$(cat ${config.sops.secrets."api_keys/smart_scraper".path} 2>/dev/null || echo "")
-                  export OPENROUTER_API_KEY=$(cat ${config.sops.secrets."api_keys/openrouter".path} 2>/dev/null || echo "")
-                  export TWOCAPTCHA_API_KEY=$(cat ${config.sops.secrets."api_keys/twocaptcha".path} 2>/dev/null || echo "")
+                  export OPENROUTER_API_KEY=$(cat ${
+                    config.sops.secrets."api_keys/openrouter".path
+                  } 2>/dev/null || echo "")
+                  export TWOCAPTCHA_API_KEY=$(cat ${
+                    config.sops.secrets."api_keys/twocaptcha".path
+                  } 2>/dev/null || echo "")
 
                   exec ${pkg}/bin/smart-scraper
                 '';

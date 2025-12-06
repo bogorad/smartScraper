@@ -6,13 +6,16 @@
   },
   {
     "domainPattern": "amgreatness.com",
-    "xpathMainContent": "//main//article//div[@class='entry-content relative  dropcap ']",
+    "xpathMainContent": "//div[contains(@class,'entry-content relative  dropcap')]",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "apnews.com",
     "xpathMainContent": "//div[@class='RichTextStoryBody RichTextBody']",
-    "failureCountSinceLastSuccess": 0
+    "failureCountSinceLastSuccess": 0,
+    "siteCleanupClasses": [
+      "Enhancement-item"
+    ]
   },
   {
     "domainPattern": "axios.com",
@@ -26,7 +29,7 @@
   },
   {
     "domainPattern": "bostonherald.com",
-    "xpathMainContent": "//article[@id='post-5524767']/div[@class='article-content']/div[@class='article-content-wrapper']/div[@class='article-body']",
+    "xpathMainContent": "//div[contains(@class,'body-copy mng-metered-content')]",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -36,7 +39,7 @@
   },
   {
     "domainPattern": "civitasinstitute.org",
-    "xpathMainContent": "//main",
+    "xpathMainContent": "//div[@class='rich-text w-richtext']",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -46,34 +49,33 @@
   },
   {
     "domainPattern": "commonplace.org",
-    "xpathMainContent": "//div[contains(@class, 'entry-content')]",
+    "xpathMainContent": "//div[contains(@class, 'body markup')]",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "compactmag.com",
-    "xpathMainContent": "//main",
+    "xpathMainContent": "//section[contains(@class, 'group')]",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "coolidgereview.com",
-    "xpathMainContent": "//div[@class='blog-item-content e-content']",
+    "xpathMainContent": "//div[@class='sqs-html-content']",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "esquire.com",
-    "xpathMainContent": "//div[@data-journey-body='longform-article']",
+    "xpathMainContent": "//div[contains(@class,'article-body-content')]",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "foreignaffairs.com",
-    "xpathMainContent": "//main[@id='content']/article",
+    "xpathMainContent": "//main[@class='rich-text__inner ']",
     "lastSuccessfulScrapeTimestamp": "2025-05-18T00:16:34.347Z",
-    "failureCountSinceLastSuccess": 0,
-    "discoveredByLlm": true
+    "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "foxnews.com",
-    "xpathMainContent": "//article",
+    "xpathMainContent": "//div[@class='article-body']",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -83,10 +85,9 @@
   },
   {
     "domainPattern": "ft.com",
-    "xpathMainContent": "//div[@class='article-content']",
+    "xpathMainContent": "//article[@id='article-body']",
     "lastSuccessfulScrapeTimestamp": "2025-05-18T00:45:58.158Z",
-    "failureCountSinceLastSuccess": 0,
-    "discoveredByLlm": true
+    "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "gizmodo.com",
@@ -95,7 +96,7 @@
   },
   {
     "domainPattern": "harvardsalient.com",
-    "xpathMainContent": "//article",
+    "xpathMainContent": "//div[class='body markup']",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -120,20 +121,25 @@
   },
   {
     "domainPattern": "newsnationnow.com",
-    "xpathMainContent": "//main",
+    "xpathMainContent": "//div[contains(@class,'article-content rich-text ')]",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "nypost.com",
     "xpathMainContent": "//div[contains(@class, \"single__content\")]",
     "failureCountSinceLastSuccess": 0,
-    "lastSuccessfulScrapeTimestamp": "2025-12-05T21:12:30.139Z"
+    "lastSuccessfulScrapeTimestamp": "2025-12-05T21:12:30.139Z",
+    "siteCleanupClasses": [
+      "featured-image__wrapper",
+      "inline-module--more",
+      "comments-inline-cta"
+    ]
   },
   {
     "domainPattern": "nytimes.com",
-    "xpathMainContent": "//article",
+    "xpathMainContent": "//section[@name='articleBody']",
     "lastSuccessfulScrapeTimestamp": "2025-05-18T00:16:58.762Z",
-    "failureCountSinceLastSuccess": 2
+    "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "piratewires.com",
@@ -157,17 +163,22 @@
   },
   {
     "domainPattern": "realclearinvestigations.com",
-    "xpathMainContent": "//article",
+    "xpathMainContent": "//div[@class='article-body-text']",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "realclearmarkets.com",
-    "xpathMainContent": "//article",
+    "xpathMainContent": "//div[@class='article-body-text']",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "realclearworld.com",
-    "xpathMainContent": "//div[@id='article_content']",
+    "xpathMainContent": "//div[@class='article-body-text']",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
+    "domainPattern": "realclearpolitics.com",
+    "xpathMainContent": "//div[@class='article-body-text']",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -187,7 +198,7 @@
   },
   {
     "domainPattern": "spiked-online.com",
-    "xpathMainContent": "//article",
+    "xpathMainContent": "//div[@id='article-main']",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -197,42 +208,42 @@
   },
   {
     "domainPattern": "theatlantic.com",
-    "xpathMainContent": "//main/article",
+    "xpathMainContent": "//section[@data-event-module='article body']",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "thefederalist.com",
-    "xpathMainContent": "//main[@id='main']",
+    "xpathMainContent": "//div[@class='article-content']",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "theglobeandmail.com",
-    "xpathMainContent": "//*[@id='content-gate']",
+    "xpathMainContent": "//article[@id='content-gate']",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "theguardian.com",
-    "xpathMainContent": "//div[@data-gu-name='body']",
+    "xpathMainContent": "//div[@id='maincontent']",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "thehill.com",
-    "xpathMainContent": "//div[@class='article__text | body-copy | flow']",
+    "xpathMainContent": "//div[contains(@class, 'article__text')]",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "thespectator.com",
-    "xpathMainContent": "//main",
+    "xpathMainContent": "//div[@class='entry-content']",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "thestar.com",
-    "xpathMainContent": "//*[@class='asset-body']",
+    "xpathMainContent": "//div[id='article-body']",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "time.com",
-    "xpathMainContent": "/html/body/div/main/article",
+    "xpathMainContent": "//article[@id='article-body']",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -274,12 +285,12 @@
   },
   {
     "domainPattern": "wsj.com",
-    "xpathMainContent": "//section[contains(@class,'Container')]",
-    "failureCountSinceLastSuccess": 2
+    "xpathMainContent": "//div[contains(@class, 'paywall')]",
+    "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "yahoo.com",
-    "xpathMainContent": "//article",
+    "xpathMainContent": "//div[@class='max-w-screen-sm mx-auto']",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -298,30 +309,26 @@
   },
   {
     "domainPattern": "thelocal.es",
-    "xpathMainContent": "//div[@class='col-xl-8 mobile-full-width']/main",
+    "xpathMainContent": "//div[@id='articleBody']",
     "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:36.784Z",
-    "failureCountSinceLastSuccess": 0,
-    "discoveredByLlm": true
+    "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "cjr.org",
-    "xpathMainContent": "//div[@class='container-lg']/div[@class='row']/div[@class='col-sm-8 entry-content']",
+    "xpathMainContent": "//div[contains(@class, 'entry-content')]",
     "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:39.961Z",
-    "failureCountSinceLastSuccess": 0,
-    "discoveredByLlm": true
+    "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "thetimes.com",
-    "xpathMainContent": "//section[contains(@class, 'MainContainer') and contains(@class, 'MainContainer--noPadding')]",
+    "xpathMainContent": "//div[@data-testid='article-content-body']",
     "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:44.486Z",
-    "failureCountSinceLastSuccess": 0,
-    "discoveredByLlm": true
+    "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "variety.com",
-    "xpathMainContent": "//article[@class='u-border-r-1@tablet u-border-color-medium-grey u-padding-lr-4@tablet lrv-a-grid-item@tablet lrv-a-span6@tablet lrv-u-width-100p u-margin-b-1']",
+    "xpathMainContent": "//div[contains(@class, 'vy-cx-page-content')]",
     "lastSuccessfulScrapeTimestamp": "2025-05-17T17:01:26.424Z",
-    "failureCountSinceLastSuccess": 0,
-    "discoveredByLlm": true
+    "failureCountSinceLastSuccess": 0
   }
 ]
