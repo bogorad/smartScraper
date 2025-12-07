@@ -5,17 +5,18 @@ import { utcToday, isOlderThanDays } from '../utils/date.js';
 import { DEFAULTS } from '../constants.js';
 import { getDataDir } from '../config.js';
 
-const DATA_DIR = getDataDir();
-const LOGS_DIR = path.join(DATA_DIR, 'logs');
+function getLogsDir(): string {
+  return path.join(getDataDir(), 'logs');
+}
 
 async function ensureDir(): Promise<void> {
-  await fs.mkdir(LOGS_DIR, { recursive: true });
+  await fs.mkdir(getLogsDir(), { recursive: true });
 }
 
 export async function logScrape(entry: LogEntry): Promise<void> {
   await ensureDir();
   const today = utcToday();
-  const logFile = path.join(LOGS_DIR, `${today}.jsonl`);
+  const logFile = path.join(getLogsDir(), `${today}.jsonl`);
   const line = JSON.stringify(entry) + '\n';
   await fs.appendFile(logFile, line);
 }
@@ -24,14 +25,15 @@ export async function cleanupOldLogs(): Promise<void> {
   await ensureDir();
   
   try {
-    const files = await fs.readdir(LOGS_DIR);
+    const logsDir = getLogsDir();
+    const files = await fs.readdir(logsDir);
     
     for (const file of files) {
       if (!file.endsWith('.jsonl')) continue;
       
       const dateStr = file.replace('.jsonl', '');
       if (isOlderThanDays(dateStr, DEFAULTS.LOG_RETENTION_DAYS)) {
-        await fs.unlink(path.join(LOGS_DIR, file));
+        await fs.unlink(path.join(logsDir, file));
         console.log(`[LOGS] Cleaned up old log: ${file}`);
       }
     }
@@ -43,7 +45,7 @@ export async function cleanupOldLogs(): Promise<void> {
 export async function readTodayLogs(): Promise<LogEntry[]> {
   await ensureDir();
   const today = utcToday();
-  const logFile = path.join(LOGS_DIR, `${today}.jsonl`);
+  const logFile = path.join(getLogsDir(), `${today}.jsonl`);
   
   try {
     const content = await fs.readFile(logFile, 'utf-8');

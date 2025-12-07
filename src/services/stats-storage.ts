@@ -5,8 +5,6 @@ import { utcToday } from '../utils/date.js';
 import { Mutex } from '../utils/mutex.js';
 import { getDataDir } from '../config.js';
 
-const DATA_DIR = getDataDir();
-const STATS_FILE = path.join(DATA_DIR, 'stats.json');
 const statsMutex = new Mutex();
 
 const DEFAULT_STATS: Stats = {
@@ -18,24 +16,29 @@ const DEFAULT_STATS: Stats = {
   domainCounts: {}
 };
 
+function getStatsFile(): string {
+  return path.join(getDataDir(), 'stats.json');
+}
+
 async function ensureFile(): Promise<void> {
+  const statsFile = getStatsFile();
   try {
-    await fs.access(STATS_FILE);
+    await fs.access(statsFile);
   } catch {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(STATS_FILE, JSON.stringify(DEFAULT_STATS, null, 2));
+    await fs.mkdir(getDataDir(), { recursive: true });
+    await fs.writeFile(statsFile, JSON.stringify(DEFAULT_STATS, null, 2));
   }
 }
 
 async function loadStatsInternal(): Promise<Stats> {
   await ensureFile();
-  const content = await fs.readFile(STATS_FILE, 'utf-8');
+  const content = await fs.readFile(getStatsFile(), 'utf-8');
   return JSON.parse(content) as Stats;
 }
 
 async function saveStatsInternal(stats: Stats): Promise<void> {
   await ensureFile();
-  await fs.writeFile(STATS_FILE, JSON.stringify(stats, null, 2));
+  await fs.writeFile(getStatsFile(), JSON.stringify(stats, null, 2));
 }
 
 export async function loadStats(): Promise<Stats> {

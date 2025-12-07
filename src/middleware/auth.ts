@@ -56,9 +56,15 @@ export const dashboardAuthMiddleware = createMiddleware(async (c, next) => {
 
 export function createSession(c: any, token: string): void {
   const hash = hashToken(token);
+  const url = new URL(c.req.url);
+  const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '0.0.0.0';
+  
+  // Secure cookies in production, unless running locally
+  const isSecure = getNodeEnv() === 'production' && !isLocalhost;
+  
   setCookie(c, SESSION_COOKIE, hash, {
     httpOnly: true,
-    secure: getNodeEnv() === 'production',
+    secure: isSecure,
     maxAge: SESSION_MAX_AGE,
     sameSite: 'Lax',
     path: '/'
@@ -66,5 +72,8 @@ export function createSession(c: any, token: string): void {
 }
 
 export function validateToken(token: string): boolean {
-  return token === getConfiguredApiToken();
+  const configuredToken = getConfiguredApiToken();
+  console.log(`[AUTH-DEBUG] Expected token: "${configuredToken}"`);
+  console.log(`[AUTH-DEBUG] Provided token matches expected: ${token === configuredToken}`);
+  return token === configuredToken;
 }

@@ -7,25 +7,27 @@ import { utcNow } from '../utils/date.js';
 import { Mutex } from '../utils/mutex.js';
 import { getDataDir } from '../config.js';
 
-const DATA_DIR = getDataDir();
-const SITES_FILE = path.join(DATA_DIR, 'sites.jsonc');
+function getSitesFile(): string {
+  return path.join(getDataDir(), 'sites.jsonc');
+}
 
 export class FsKnownSitesAdapter implements KnownSitesPort {
   private cache: SiteConfig[] | null = null;
   private mutex = new Mutex();
 
   private async ensureFile(): Promise<void> {
+    const sitesFile = getSitesFile();
     try {
-      await fs.access(SITES_FILE);
+      await fs.access(sitesFile);
     } catch {
-      await fs.mkdir(DATA_DIR, { recursive: true });
-      await fs.writeFile(SITES_FILE, '[]');
+      await fs.mkdir(getDataDir(), { recursive: true });
+      await fs.writeFile(sitesFile, '[]');
     }
   }
 
   private async load(): Promise<SiteConfig[]> {
     await this.ensureFile();
-    const content = await fs.readFile(SITES_FILE, 'utf-8');
+    const content = await fs.readFile(getSitesFile(), 'utf-8');
     this.cache = parse(content) as unknown as SiteConfig[];
     return this.cache;
   }
@@ -33,7 +35,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   private async save(configs: SiteConfig[]): Promise<void> {
     await this.ensureFile();
     const content = stringify(configs, null, 2);
-    await fs.writeFile(SITES_FILE, content);
+    await fs.writeFile(getSitesFile(), content);
     this.cache = configs;
   }
 

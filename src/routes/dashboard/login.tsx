@@ -50,7 +50,11 @@ loginRouter.post('/', async (c) => {
   const token = body.token as string;
   const redirect = c.req.query('redirect') || '/dashboard';
 
-  if (!validateToken(token)) {
+  console.log(`[AUTH-DEBUG] Login attempt. Token provided: "${token}"`);
+  const isValid = validateToken(token);
+  console.log(`[AUTH-DEBUG] Token validation result: ${isValid}`);
+
+  if (!isValid) {
     return c.redirect(`/login?error=invalid&redirect=${encodeURIComponent(redirect)}`);
   }
 
