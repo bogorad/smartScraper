@@ -1,11 +1,23 @@
 {
-  "scrapeTotal": 17,
-  "failTotal": 14,
-  "todayDate": "2025-12-05",
-  "scrapeToday": 17,
-  "failToday": 14,
+  "scrapeTotal": 32,
+  "failTotal": 21,
+  "todayDate": "2025-12-07",
+  "scrapeToday": 15,
+  "failToday": 7,
   "domainCounts": {
-    "nypost.com": 16,
-    "example.com": 1
+    "nypost.com": 17,
+    "example.com": 1,
+    "unherd.com": 1,
+    "variety.com": 1,
+    "cjr.org": 1,
+    "foreignaffairs.com": 1,
+    "ft.com": 1,
+    "nytimes.com": 1,
+    "nzz.ch": 1,
+    "reuters.com": 3,
+    "spiegel.de": 1,
+    "thelocal.es": 1,
+    "thetimes.com": 1,
+    "wsj.com": 1
   }
 }

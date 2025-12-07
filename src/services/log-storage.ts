@@ -3,11 +3,11 @@ import path from 'path';
 import type { LogEntry } from '../domain/models.js';
 import { utcToday, isOlderThanDays } from '../utils/date.js';
 import { DEFAULTS } from '../constants.js';
-import { getDataDir } from '../config.js';
+import { getLogDir } from '../config.js';
 import { logger } from '../utils/logger.js';
 
 function getLogsDir(): string {
-  return path.join(getDataDir(), 'logs');
+  return getLogDir();
 }
 
 async function ensureDir(): Promise<void> {

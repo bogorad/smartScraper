@@ -86,7 +86,7 @@ export class CoreScraperEngine {
       }
 
       let xpath: string | undefined = options?.xpathOverride;
-      let needsDiscovery = !xpath && (!context.siteConfig?.xpathMainContent ||
+      let needsDiscovery = !options?.disableDiscovery && !xpath && (!context.siteConfig?.xpathMainContent ||
         (context.siteConfig.failureCountSinceLastSuccess >= DEFAULTS.MAX_REDISCOVERY_FAILURES));
 
       if (!xpath && !needsDiscovery && context.siteConfig?.xpathMainContent) {
@@ -94,9 +94,13 @@ export class CoreScraperEngine {
         const extracted = await this.browserPort.evaluateXPath(pageId, xpath);
         
         if (!extracted || extracted.length === 0 || extracted[0].length < SCORING.MIN_CONTENT_CHARS) {
-          needsDiscovery = true;
-          logger.debug(`[ENGINE] Existing XPath ${xpath} failed validation (length: ${extracted?.[0]?.length || 0}). Needs discovery.`);
-          await this.knownSitesPort.incrementFailure(domain);
+          if (options?.disableDiscovery) {
+            logger.debug(`[ENGINE] Validation failed for cached XPath ${xpath}, but discovery is disabled.`);
+          } else {
+            needsDiscovery = true;
+            logger.debug(`[ENGINE] Existing XPath ${xpath} failed validation (length: ${extracted?.[0]?.length || 0}). Needs discovery.`);
+            await this.knownSitesPort.incrementFailure(domain);
+          }
         } else {
           logger.debug(`[ENGINE] Using cached XPath: ${xpath}`);
         }

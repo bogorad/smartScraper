@@ -20,6 +20,7 @@ export interface ScrapeOptions {
   debugContextId?: string;
   xpathOverride?: string;
   debug?: boolean;
+  disableDiscovery?: boolean;
 }
 
 export interface ScrapeResult {

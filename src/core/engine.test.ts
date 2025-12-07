@@ -4,7 +4,8 @@ import type { BrowserPort, LlmPort, CaptchaPort, KnownSitesPort } from '../ports
 import { CAPTCHA_TYPES, ERROR_TYPES, OUTPUT_TYPES, METHODS } from '../constants.js';
 
 vi.mock('../config.js', () => ({
-  getDataDir: () => './data'
+  getDataDir: () => './data',
+  getLogLevel: () => 'NONE'
 }));
 
 vi.mock('../services/stats-storage.js', () => ({

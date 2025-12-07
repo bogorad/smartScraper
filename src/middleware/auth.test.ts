@@ -4,7 +4,8 @@ import { apiAuthMiddleware, dashboardAuthMiddleware, createSession, validateToke
 
 vi.mock('../config.js', () => ({
   getApiToken: () => 'test-token',
-  getNodeEnv: () => 'test'
+  getNodeEnv: () => 'test',
+  getLogLevel: () => 'NONE'
 }));
 
 describe('auth middleware', () => {
@@ -140,7 +141,10 @@ describe('auth middleware', () => {
   describe('createSession', () => {
     it('should set session cookie', () => {
       const mockContext = {
-        header: vi.fn()
+        header: vi.fn(),
+        req: {
+          url: 'http://localhost'
+        }
       };
 
       createSession(mockContext, 'test-token');

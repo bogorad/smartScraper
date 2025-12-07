@@ -21,6 +21,7 @@ const ConfigSchema = z.object({
   
   // Data storage
   dataDir: z.string().default('./data'),
+  logDir: z.string().optional(),
   
   // LLM Configuration (OpenRouter)
   openrouterApiKey: z.string().default(''),
@@ -98,6 +99,7 @@ function mapEnvVars(): Record<string, string | undefined> {
     
     // Data storage
     dataDir: process.env.DATA_DIR,
+    logDir: process.env.LOG_DIR,
     
     // LLM
     openrouterApiKey: process.env.OPENROUTER_API_KEY || process.env.OPENROUTER || secrets.openrouter_api_key,
@@ -186,6 +188,11 @@ export function getPort(): number {
 
 export function getDataDir(): string {
   return getConfig().dataDir;
+}
+
+export function getLogDir(): string {
+  const config = getConfig();
+  return config.logDir || path.join(config.dataDir, 'logs');
 }
 
 export function getOpenrouterApiKey(): string {

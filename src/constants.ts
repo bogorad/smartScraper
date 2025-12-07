@@ -1,4 +1,8 @@
-export const VERSION = '0.1.16';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json');
+
+export const VERSION = pkg.version;
 
 export const METHODS = {
   CURL: 'curl',
@@ -44,7 +48,7 @@ export const SCORING = {
 
 export const DEFAULTS = {
   TIMEOUT_MS: 60000,
-  USER_AGENT: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+  USER_AGENT: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
   VIEWPORT_WIDTH: 1280,
   VIEWPORT_HEIGHT: 720,
   LLM_MODEL: 'meta-llama/llama-4-maverick:free',
