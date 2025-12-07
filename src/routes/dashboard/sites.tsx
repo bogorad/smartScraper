@@ -15,6 +15,8 @@ sitesRouter.use('/*', dashboardAuthMiddleware);
 sitesRouter.get('/', async (c) => {
   const q = c.req.query('q')?.toLowerCase() || '';
   const sort = c.req.query('sort') || 'domain';
+  const limit = c.req.query('limit') || '10';
+  const page = parseInt(c.req.query('page') || '1');
 
   let sites = await knownSitesAdapter.getAllConfigs();
 
@@ -35,28 +37,36 @@ sitesRouter.get('/', async (c) => {
     }
   });
 
+  // Pagination logic
+  const totalSites = sites.length;
+  const limitNum = limit === 'all' ? totalSites : parseInt(limit);
+  const totalPages = limit === 'all' ? 1 : Math.ceil(totalSites / limitNum);
+  const startIndex = (page - 1) * limitNum;
+  const endIndex = limit === 'all' ? totalSites : Math.min(startIndex + limitNum, totalSites);
+  const paginatedSites = sites.slice(startIndex, endIndex);
+
   const isHtmx = c.req.header('HX-Request') === 'true';
 
   const tableContent = (
     <>
       <thead>
         <tr>
-          <th hx-get="/dashboard/sites?sort=domain" hx-target="#sites-table" hx-push-url="true" style="cursor: pointer">
+          <th hx-get={`/dashboard/sites?sort=domain&limit=${limit}&q=${encodeURIComponent(q)}&page=${page}`} hx-target="#sites-container" hx-push-url="true" style="cursor: pointer">
             Domain {sort === 'domain' && '↓'}
           </th>
           <th>XPath</th>
-          <th hx-get="/dashboard/sites?sort=last" hx-target="#sites-table" hx-push-url="true" style="cursor: pointer">
+          <th hx-get={`/dashboard/sites?sort=last&limit=${limit}&q=${encodeURIComponent(q)}&page=${page}`} hx-target="#sites-container" hx-push-url="true" style="cursor: pointer">
             Last Success {sort === 'last' && '↓'}
           </th>
-          <th hx-get="/dashboard/sites?sort=failures" hx-target="#sites-table" hx-push-url="true" style="cursor: pointer">
+          <th hx-get={`/dashboard/sites?sort=failures&limit=${limit}&q=${encodeURIComponent(q)}&page=${page}`} hx-target="#sites-container" hx-push-url="true" style="cursor: pointer">
             Failures {sort === 'failures' && '↓'}
           </th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        {sites.map(site => <SiteRow site={site} />)}
-        {sites.length === 0 && (
+        {paginatedSites.map(site => <SiteRow site={site} />)}
+        {paginatedSites.length === 0 && (
           <tr>
             <td colSpan={5} class="text-muted text-center">No sites configured yet.</td>
           </tr>
@@ -66,7 +76,54 @@ sitesRouter.get('/', async (c) => {
   );
 
   if (isHtmx) {
-    return c.html(tableContent);
+    return c.html(
+      <div id="sites-container">
+        <div class="card">
+          <table id="sites-table">
+            {tableContent}
+          </table>
+        </div>
+        
+        {totalPages > 1 && (
+          <div class="card">
+            <div class="flex justify-between items-center">
+              <div class="text-sm text-muted">
+                Showing {startIndex + 1} to {endIndex} of {totalSites} sites
+              </div>
+              <div class="btn-group gap-2">
+                {page > 1 && (
+                  <a
+                    href={`/dashboard/sites?page=${page - 1}&limit=${limit}&q=${encodeURIComponent(q)}&sort=${sort}`}
+                    hx-get={`/dashboard/sites?page=${page - 1}&limit=${limit}&q=${encodeURIComponent(q)}&sort=${sort}`}
+                    hx-target="#sites-container"
+                    hx-push-url="true"
+                    class="btn btn-secondary btn-sm"
+                  >
+                    ← Previous
+                  </a>
+                )}
+                
+                <span class="text-sm text-muted">
+                  Page {page} of {totalPages}
+                </span>
+                
+                {page < totalPages && (
+                  <a
+                    href={`/dashboard/sites?page=${page + 1}&limit=${limit}&q=${encodeURIComponent(q)}&sort=${sort}`}
+                    hx-get={`/dashboard/sites?page=${page + 1}&limit=${limit}&q=${encodeURIComponent(q)}&sort=${sort}`}
+                    hx-target="#sites-container"
+                    hx-push-url="true"
+                    class="btn btn-secondary btn-sm"
+                  >
+                    Next →
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
   return c.html(
@@ -77,22 +134,82 @@ sitesRouter.get('/', async (c) => {
       </div>
 
       <div class="card mb-4">
-        <input
-          type="search"
-          name="q"
-          placeholder="Search domains..."
-          value={q}
-          hx-get="/dashboard/sites"
-          hx-trigger="keyup changed delay:300ms"
-          hx-target="#sites-table"
-          hx-push-url="true"
-        />
+        <form hx-get="/dashboard/sites" hx-target="#sites-container" hx-push-url="true">
+          <div class="flex gap-4 items-center">
+            <input
+              type="search"
+              name="q"
+              placeholder="Search domains..."
+              value={q}
+              hx-trigger="keyup changed delay:300ms"
+              style="flex: 1"
+              onchange="this.form.page.value = 1"
+            />
+            <input type="hidden" name="sort" value={sort} />
+            <input type="hidden" name="page" value={page} />
+            <div class="limit-selector">
+              <label>Show:</label>
+              <select
+                name="limit"
+                value={limit}
+                class="mb-0"
+                              style="width: auto"
+                              onchange="this.form.page.value = 1"
+              >
+                <option value="10">10</option>
+                <option value="50">50</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+          </div>
+        </form>
       </div>
 
-      <div class="card">
-        <table id="sites-table">
-          {tableContent}
-        </table>
+      <div id="sites-container">
+        <div class="card">
+          <table id="sites-table">
+            {tableContent}
+          </table>
+        </div>
+        
+        {totalPages > 1 && (
+          <div class="card">
+            <div class="flex justify-between items-center">
+              <div class="text-sm text-muted">
+                Showing {startIndex + 1} to {endIndex} of {totalSites} sites
+              </div>
+              <div class="btn-group gap-2">
+                {page > 1 && (
+                  <a
+                    href={`/dashboard/sites?page=${page - 1}&limit=${limit}&q=${encodeURIComponent(q)}&sort=${sort}`}
+                    hx-get={`/dashboard/sites?page=${page - 1}&limit=${limit}&q=${encodeURIComponent(q)}&sort=${sort}`}
+                    hx-target="#sites-container"
+                    hx-push-url="true"
+                    class="btn btn-secondary btn-sm"
+                  >
+                    ← Previous
+                  </a>
+                )}
+                
+                <span class="text-sm text-muted">
+                  Page {page} of {totalPages}
+                </span>
+                
+                {page < totalPages && (
+                  <a
+                    href={`/dashboard/sites?page=${page + 1}&limit=${limit}&q=${encodeURIComponent(q)}&sort=${sort}`}
+                    hx-get={`/dashboard/sites?page=${page + 1}&limit=${limit}&q=${encodeURIComponent(q)}&sort=${sort}`}
+                    hx-target="#sites-container"
+                    hx-push-url="true"
+                    class="btn btn-secondary btn-sm"
+                  >
+                    Next →
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
   );
