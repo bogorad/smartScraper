@@ -233,3 +233,48 @@ Visit `http://localhost:5555/dashboard` (requires login) to:
 - View extraction statistics.
 - Manage known site configurations.
 - Manually test extraction on specific URLs.
+
+## Testing
+
+SmartScraper has comprehensive test coverage using **Vitest** with 176 tests across 12 test files.
+
+### Running Tests
+
+```bash
+# Run all tests (watch mode)
+npm test
+
+# Run tests once (CI mode)
+npm test -- --run
+
+# Run tests with coverage
+npm test -- --run --coverage
+
+# Run type checking
+npm run typecheck
+```
+
+### Test Coverage
+
+- **Utilities** (6 test files) - Date, URL, DOM, mutex, HTML cleaning, XPath parsing
+- **Core Engine** (2 test files) - Element scoring, scraper orchestration (with mocked ports)
+- **Adapters** (2 test files) - LLM integration, CAPTCHA solving (with mocked axios)
+- **Routes & Middleware** (2 test files) - API endpoints, authentication
+
+All external dependencies are mocked, so tests run without requiring:
+- Real API keys
+- Browser instances
+- Network access
+- File system changes
+
+### Continuous Integration
+
+Tests and type checking run automatically on every push and pull request via GitHub Actions:
+
+- ✅ TypeScript type checking (`tsc --noEmit`)
+- ✅ All unit tests pass
+- ✅ Code coverage reporting
+
+See `.github/workflows/ci.yml` for the CI configuration.
+
+For more details, see [TEST_SUMMARY.md](TEST_SUMMARY.md).
