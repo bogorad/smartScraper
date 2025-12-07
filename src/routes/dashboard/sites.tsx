@@ -141,7 +141,7 @@ sitesRouter.get('/', async (c) => {
               name="q"
               placeholder="Search domains..."
               value={q}
-              hx-trigger="keyup changed delay:300ms"
+              ""
               style="flex: 1"
               onchange="this.form.page.value = 1"
             />
@@ -153,8 +153,8 @@ sitesRouter.get('/', async (c) => {
                 name="limit"
                 value={limit}
                 class="mb-0"
-                              style="width: auto"
-                              onchange="this.form.page.value = 1"
+              style="width: auto"
+              onchange="this.form.page.value = 1"
               >
                 <option value="10">10</option>
                 <option value="50">50</option>
