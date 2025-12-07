@@ -4,6 +4,7 @@ import type { LogEntry } from '../domain/models.js';
 import { utcToday, isOlderThanDays } from '../utils/date.js';
 import { DEFAULTS } from '../constants.js';
 import { getDataDir } from '../config.js';
+import { logger } from '../utils/logger.js';
 
 function getLogsDir(): string {
   return path.join(getDataDir(), 'logs');
@@ -34,11 +35,11 @@ export async function cleanupOldLogs(): Promise<void> {
       const dateStr = file.replace('.jsonl', '');
       if (isOlderThanDays(dateStr, DEFAULTS.LOG_RETENTION_DAYS)) {
         await fs.unlink(path.join(logsDir, file));
-        console.log(`[LOGS] Cleaned up old log: ${file}`);
+        logger.info(`[LOGS] Cleaned up old log: ${file}`);
       }
     }
   } catch (error) {
-    console.error('[LOGS] Cleanup error:', error);
+    logger.error('[LOGS] Cleanup error:', error);
   }
 }
 

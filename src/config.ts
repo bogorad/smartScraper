@@ -64,13 +64,22 @@ function loadSecretsFromYaml(): Record<string, string> {
     const content = fs.readFileSync(secretsPath, 'utf-8');
     const data = YAML.parse(content);
     
-    // Extract secrets from the YAML structure (api_keys section)
+    // Support simplified flat structure or legacy nested structure
     const apiKeys: Record<string, string> = {};
-    if (data?.api_keys) {
+    
+    // Flat structure check
+    if (data?.smart_scraper || data?.openrouter || data?.twocaptcha) {
+      apiKeys.api_token = data.smart_scraper || '';
+      apiKeys.openrouter_api_key = data.openrouter || '';
+      apiKeys.twocaptcha_api_key = data.twocaptcha || '';
+    } 
+    // Legacy nested check
+    else if (data?.api_keys) {
       apiKeys.api_token = data.api_keys.smart_scraper || '';
       apiKeys.openrouter_api_key = data.api_keys.openrouter || '';
       apiKeys.twocaptcha_api_key = data.api_keys.twocaptcha || '';
     }
+    
     return apiKeys;
   } catch (error) {
     console.warn('[CONFIG] Failed to load secrets.yaml:', error instanceof Error ? error.message : error);
@@ -91,7 +100,7 @@ function mapEnvVars(): Record<string, string | undefined> {
     dataDir: process.env.DATA_DIR,
     
     // LLM
-    openrouterApiKey: process.env.OPENROUTER_API_KEY || secrets.openrouter_api_key,
+    openrouterApiKey: process.env.OPENROUTER_API_KEY || process.env.OPENROUTER || secrets.openrouter_api_key,
     llmModel: process.env.LLM_MODEL,
     llmTemperature: process.env.LLM_TEMPERATURE,
     llmHttpReferer: process.env.LLM_HTTP_REFERER,
@@ -104,12 +113,12 @@ function mapEnvVars(): Record<string, string | undefined> {
     proxyServer: process.env.PROXY_SERVER || process.env.HTTP_PROXY,
     
     // CAPTCHA
-    twocaptchaApiKey: process.env.TWOCAPTCHA_API_KEY || secrets.twocaptcha_api_key,
+    twocaptchaApiKey: process.env.TWOCAPTCHA_API_KEY || process.env.TWOCAPTCHA || secrets.twocaptcha_api_key,
     captchaDefaultTimeout: process.env.CAPTCHA_DEFAULT_TIMEOUT,
     captchaPollingInterval: process.env.CAPTCHA_POLLING_INTERVAL,
     
     // Auth
-    apiToken: process.env.API_TOKEN || secrets.api_token,
+    apiToken: process.env.API_TOKEN || process.env.SMART_SCRAPER || secrets.api_token,
     
     // Logging
     logLevel: process.env.LOG_LEVEL,

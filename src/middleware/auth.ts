@@ -2,6 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { getCookie, setCookie } from 'hono/cookie';
 import { createHash } from 'crypto';
 import { getApiToken, getNodeEnv } from '../config.js';
+import { logger } from '../utils/logger.js';
 
 const SESSION_COOKIE = 'ss_session';
 const SESSION_MAX_AGE = 86400;
@@ -47,6 +48,12 @@ export const dashboardAuthMiddleware = createMiddleware(async (c, next) => {
   const expectedHash = hashToken(apiToken);
 
   if (sessionCookie !== expectedHash) {
+    // Only log if a cookie was actually presented but failed (avoid noise on first visit)
+    if (sessionCookie) {
+      logger.warn('[AUTH] Invalid session cookie presented');
+    } else {
+      logger.info('[AUTH] No session cookie received');
+    }
     const path = c.req.path;
     return c.redirect(`/login?redirect=${encodeURIComponent(path)}`);
   }
@@ -62,6 +69,8 @@ export function createSession(c: any, token: string): void {
   // Secure cookies in production, unless running locally
   const isSecure = getNodeEnv() === 'production' && !isLocalhost;
   
+  logger.info(`[AUTH] Creating session. Secure: ${isSecure}, Domain: ${url.hostname}`);
+
   setCookie(c, SESSION_COOKIE, hash, {
     httpOnly: true,
     secure: isSecure,
@@ -73,7 +82,9 @@ export function createSession(c: any, token: string): void {
 
 export function validateToken(token: string): boolean {
   const configuredToken = getConfiguredApiToken();
-  console.log(`[AUTH-DEBUG] Expected token: "${configuredToken}"`);
-  console.log(`[AUTH-DEBUG] Provided token matches expected: ${token === configuredToken}`);
-  return token === configuredToken;
+  const isValid = token === configuredToken;
+  if (!isValid && token) {
+    logger.warn('[AUTH] Token validation failed');
+  }
+  return isValid;
 }

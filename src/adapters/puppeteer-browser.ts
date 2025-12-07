@@ -6,6 +6,7 @@ import type { BrowserPort } from '../ports/browser.js';
 import type { ElementDetails, LoadPageOptions } from '../domain/models.js';
 import { CAPTCHA_TYPES, DEFAULTS, type CaptchaTypeValue } from '../constants.js';
 import { getExecutablePath, getExtensionPaths, getProxyServer } from '../config.js';
+import { logger } from '../utils/logger.js';
 
 interface PageSession {
   page: Page;
@@ -51,7 +52,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     });
 
     const page = await browser.newPage();
-    page.on('console', msg => console.log('[BROWSER]', msg.text()));
+    page.on('console', msg => logger.debug(`[BROWSER] ${msg.text()}`));
     await page.setUserAgent(DEFAULTS.USER_AGENT);
     await page.setViewport({ width: DEFAULTS.VIEWPORT_WIDTH, height: DEFAULTS.VIEWPORT_HEIGHT });
 
@@ -131,7 +132,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
         }
       }, xpath);
     } catch (e) {
-      console.error('Puppeteer evaluate error:', e);
+      logger.error('Puppeteer evaluate error:', e);
       return null;
     }
   }

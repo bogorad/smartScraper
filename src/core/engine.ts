@@ -11,6 +11,7 @@ import { cleanHtml, extractText, toMarkdown } from '../utils/html-cleaner.js';
 import { scoreElement } from './scoring.js';
 import { recordScrape } from '../services/stats-storage.js';
 import { logScrape } from '../services/log-storage.js';
+import { logger } from '../utils/logger.js';
 
 export class CoreScraperEngine {
   private queue = new PQueue({ concurrency: 1 });
@@ -47,6 +48,7 @@ export class CoreScraperEngine {
 
     try {
       context.siteConfig = await this.knownSitesPort.getConfig(domain);
+      logger.debug(`[ENGINE] Site config for ${domain}: ${context.siteConfig ? 'FOUND' : 'MISSING'}`);
 
       const { pageId: pid } = await this.browserPort.loadPage(url, {
         timeout: options?.timeoutMs || DEFAULTS.TIMEOUT_MS
@@ -54,6 +56,8 @@ export class CoreScraperEngine {
       pageId = pid;
 
       const captchaType = await this.browserPort.detectCaptcha(pageId);
+      logger.debug(`[ENGINE] Captcha detection result: ${captchaType}`);
+
       if (captchaType !== CAPTCHA_TYPES.NONE) {
         const solveResult = await this.captchaPort.solveIfPresent({
           pageId,
@@ -62,6 +66,8 @@ export class CoreScraperEngine {
           proxyDetails: context.proxyDetails,
           userAgentString: context.userAgentString
         });
+
+        logger.debug(`[ENGINE] Captcha solve attempt: ${solveResult.solved ? 'SUCCESS' : 'FAILED'}`);
 
         if (!solveResult.solved) {
           result = {
@@ -89,14 +95,15 @@ export class CoreScraperEngine {
         
         if (!extracted || extracted.length === 0 || extracted[0].length < SCORING.MIN_CONTENT_CHARS) {
           needsDiscovery = true;
-          if (options?.debug) {
-             console.log(`[DEBUG] Existing XPath ${xpath} failed validation. Needs discovery.`);
-          }
+          logger.debug(`[ENGINE] Existing XPath ${xpath} failed validation (length: ${extracted?.[0]?.length || 0}). Needs discovery.`);
           await this.knownSitesPort.incrementFailure(domain);
+        } else {
+          logger.debug(`[ENGINE] Using cached XPath: ${xpath}`);
         }
       }
 
       if (needsDiscovery) {
+        logger.debug('[ENGINE] Starting discovery phase');
         const html = await this.browserPort.getPageHtml(pageId);
         const simplifiedDom = simplifyDom(html);
         const snippets = extractSnippets(html);
@@ -106,6 +113,8 @@ export class CoreScraperEngine {
           snippets,
           url
         });
+        
+        logger.debug(`[ENGINE] LLM returned ${suggestions.length} suggestions`);
 
         if (suggestions.length === 0) {
           result = { success: false, errorType: ERROR_TYPES.LLM, error: 'No XPath suggestions' };
@@ -118,8 +127,11 @@ export class CoreScraperEngine {
           if (!details) continue;
 
           const score = scoreElement(details);
+          logger.debug(`[ENGINE] Evaluating suggestion ${suggestion.xpath}: score=${score}, length=${details.textLength}`);
+          
           if (score >= SCORING.MIN_SCORE_THRESHOLD && details.textLength >= SCORING.MIN_CONTENT_CHARS) {
             xpath = suggestion.xpath;
+            logger.debug(`[ENGINE] Accepted new XPath: ${xpath}`);
 
             await this.knownSitesPort.saveConfig({
               domainPattern: domain,
@@ -141,15 +153,19 @@ export class CoreScraperEngine {
 
       const extracted = await this.browserPort.evaluateXPath(pageId, xpath!);
       
+      // Save debug snapshot if enabled via config (or options)
+      // Note: We use logger.debug to decide if we should log to console, but writing file is separate
+      // If user passed options.debug, we might want to force it, or stick to global config
+      // For now, we'll align with the previous logic but use logger for the print output
       if (options?.debug) {
           const fullHtml = await this.browserPort.getPageHtml(pageId);
           const debugDir = path.join(process.cwd(), 'data', 'logs', 'debug');
           await fs.promises.mkdir(debugDir, { recursive: true });
           const filename = `${context.normalizedDomain.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.html`;
           await fs.promises.writeFile(path.join(debugDir, filename), fullHtml);
-          console.log(`[DEBUG] Saved HTML snapshot to ${filename}`);
-          console.log(`[DEBUG] XPath used: ${xpath}`);
-          console.log(`[DEBUG] Extracted count: ${extracted ? extracted.length : 0}`);
+          logger.debug(`[DEBUG] Saved HTML snapshot to ${filename}`);
+          logger.debug(`[DEBUG] XPath used: ${xpath}`);
+          logger.debug(`[DEBUG] Extracted count: ${extracted ? extracted.length : 0}`);
       }
 
       if (!extracted || extracted.length === 0) {
@@ -193,6 +209,7 @@ export class CoreScraperEngine {
 
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error(`[ENGINE] Scrape failed for ${url}: ${message}`);
       result = { success: false, errorType: ERROR_TYPES.UNKNOWN, error: message };
       await this.recordResult(context, result, startTime);
       return result;

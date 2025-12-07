@@ -6,6 +6,7 @@ import type { SiteConfig } from '../domain/models.js';
 import { utcNow } from '../utils/date.js';
 import { Mutex } from '../utils/mutex.js';
 import { getDataDir } from '../config.js';
+import { logger } from '../utils/logger.js';
 
 function getSitesFile(): string {
   return path.join(getDataDir(), 'sites.jsonc');
@@ -29,6 +30,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
     await this.ensureFile();
     const content = await fs.readFile(getSitesFile(), 'utf-8');
     this.cache = parse(content) as unknown as SiteConfig[];
+    logger.debug(`[SITES] Loaded ${this.cache.length} site configs`);
     return this.cache;
   }
 

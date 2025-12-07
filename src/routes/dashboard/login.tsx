@@ -1,15 +1,18 @@
 import { Hono } from 'hono';
+import { getCookie } from 'hono/cookie';
 import { LoginLayout } from '../../components/layout.js';
 import { createSession, validateToken } from '../../middleware/auth.js';
+import { logger } from '../../utils/logger.js';
 
 export const loginRouter = new Hono();
 
 loginRouter.get('/', (c) => {
+  const theme = getCookie(c, 'theme') || 'light';
   const error = c.req.query('error');
   const redirect = c.req.query('redirect') || '/dashboard';
 
   return c.html(
-    <LoginLayout>
+    <LoginLayout theme={theme}>
       <div class="login-box">
         <div class="login-title">
           <h1>SmartScraper</h1>
@@ -50,9 +53,8 @@ loginRouter.post('/', async (c) => {
   const token = body.token as string;
   const redirect = c.req.query('redirect') || '/dashboard';
 
-  console.log(`[AUTH-DEBUG] Login attempt. Token provided: "${token}"`);
+  logger.info('[AUTH] Login attempt received');
   const isValid = validateToken(token);
-  console.log(`[AUTH-DEBUG] Token validation result: ${isValid}`);
 
   if (!isValid) {
     return c.redirect(`/login?error=invalid&redirect=${encodeURIComponent(redirect)}`);

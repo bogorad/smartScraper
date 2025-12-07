@@ -1,4 +1,4 @@
-# SmartScraper v0.1.5
+# SmartScraper v0.1.16
 
 default:
     @just --list
@@ -7,8 +7,8 @@ default:
 dev:
     #!/usr/bin/env bash
     set -e
-    eval "$(sops decrypt secrets.yaml --output-type=json | jq -r '.api_keys // {} | "export API_TOKEN=" + (.smart_scraper // "" | @sh), "export OPENROUTER_API_KEY=" + (.openrouter // "" | @sh), "export TWOCAPTCHA_API_KEY=" + (.twocaptcha // "" | @sh)')"
-    npm run dev
+    eval "$(sops decrypt secrets.yaml --output-type=json | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
+    LOG_LEVEL=DEBUG NODE_ENV=development npm run dev
 
 build:
     npm run build

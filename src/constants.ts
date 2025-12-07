@@ -1,4 +1,4 @@
-export const VERSION = '0.1.5';
+export const VERSION = '0.1.16';
 
 export const METHODS = {
   CURL: 'curl',

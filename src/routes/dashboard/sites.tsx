@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { getCookie } from 'hono/cookie';
 import { dashboardAuthMiddleware } from '../../middleware/auth.js';
 import { Layout } from '../../components/layout.js';
 import { SiteRow } from '../../components/site-row.js';
@@ -7,21 +8,26 @@ import { TestForm, TestResult } from '../../components/test-form.js';
 import { knownSitesAdapter } from '../../adapters/fs-known-sites.js';
 import { getDefaultEngine } from '../../core/engine.js';
 import type { SiteConfig } from '../../domain/models.js';
+import { logger } from '../../utils/logger.js';
 
 export const sitesRouter = new Hono();
 
 sitesRouter.use('/*', dashboardAuthMiddleware);
 
 sitesRouter.get('/', async (c) => {
+  const theme = getCookie(c, 'theme') || 'light';
+  logger.debug(`[SITES] Page render theme: ${theme}`);
   const q = c.req.query('q')?.toLowerCase() || '';
   const sort = c.req.query('sort') || 'domain';
   const limit = c.req.query('limit') || '10';
   const page = parseInt(c.req.query('page') || '1');
 
   let sites = await knownSitesAdapter.getAllConfigs();
+  logger.debug(`[SITES] Initial count: ${sites.length}, Query: "${q}", Limit: ${limit}, Page: ${page}`);
 
   if (q) {
     sites = sites.filter(s => s.domainPattern.toLowerCase().includes(q));
+    logger.debug(`[SITES] Count after filter: ${sites.length}`);
   }
 
   sites.sort((a, b) => {
@@ -44,6 +50,8 @@ sitesRouter.get('/', async (c) => {
   const startIndex = (page - 1) * limitNum;
   const endIndex = limit === 'all' ? totalSites : Math.min(startIndex + limitNum, totalSites);
   const paginatedSites = sites.slice(startIndex, endIndex);
+  
+  logger.debug(`[SITES] Displaying ${paginatedSites.length} sites (Index ${startIndex} to ${endIndex})`);
 
   const isHtmx = c.req.header('HX-Request') === 'true';
 
@@ -127,7 +135,7 @@ sitesRouter.get('/', async (c) => {
   }
 
   return c.html(
-    <Layout title="Sites - SmartScraper" activePath="/dashboard/sites">
+    <Layout title="Sites - SmartScraper" activePath="/dashboard/sites" theme={theme}>
       <div class="flex justify-between items-center mb-4">
         <h1 class="mb-0">Site Configurations</h1>
         <a href="/dashboard/sites/new" class="btn btn-primary">Add Site</a>
@@ -141,7 +149,11 @@ sitesRouter.get('/', async (c) => {
               name="q"
               placeholder="Search domains..."
               value={q}
-              hx-trigger="keyup changed delay:300ms"
+              hx-get="/dashboard/sites"
+              hx-target="#sites-container"
+              hx-push-url="true"
+              hx-include="closest form"
+              hx-trigger="keyup changed delay:300ms, search"
               style="flex: 1"
               onchange="this.form.page.value = 1"
             />
@@ -216,6 +228,7 @@ sitesRouter.get('/', async (c) => {
 });
 
 sitesRouter.get('/new', (c) => {
+  const theme = getCookie(c, 'theme') || 'light';
   const emptySite: SiteConfig = {
     domainPattern: '',
     xpathMainContent: '',
@@ -223,7 +236,7 @@ sitesRouter.get('/new', (c) => {
   };
 
   return c.html(
-    <Layout title="New Site - SmartScraper" activePath="/dashboard/sites">
+    <Layout title="New Site - SmartScraper" activePath="/dashboard/sites" theme={theme}>
       <h1>Add New Site</h1>
       <SiteForm site={emptySite} isNew={true} />
     </Layout>
@@ -231,12 +244,13 @@ sitesRouter.get('/new', (c) => {
 });
 
 sitesRouter.get('/:domain', async (c) => {
+  const theme = getCookie(c, 'theme') || 'light';
   const domain = decodeURIComponent(c.req.param('domain'));
   const site = await knownSitesAdapter.getConfig(domain);
 
   if (!site) {
     return c.html(
-      <Layout title="Not Found - SmartScraper" activePath="/dashboard/sites">
+      <Layout title="Not Found - SmartScraper" activePath="/dashboard/sites" theme={theme}>
         <div class="alert alert-error">Site configuration not found: {domain}</div>
         <a href="/dashboard/sites" class="btn btn-secondary">Back to Sites</a>
       </Layout>
@@ -244,7 +258,7 @@ sitesRouter.get('/:domain', async (c) => {
   }
 
   return c.html(
-    <Layout title={`${domain} - SmartScraper`} activePath="/dashboard/sites">
+    <Layout title={`${domain} - SmartScraper`} activePath="/dashboard/sites" theme={theme}>
       <h1>Edit Site</h1>
       <SiteForm site={site} />
       <TestForm domain={domain} />

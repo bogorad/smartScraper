@@ -18,6 +18,8 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 | [010](010-llm-prompt-design.md) | LLM Prompt Design for XPath Discovery | Accepted |
 | [011](011-backend-architecture.md) | Backend Architecture (Hono + HTMX) | Accepted |
 | [012](012-nix-deployment.md) | Nix Deployment Architecture | Accepted |
+| [013](013-centralized-configuration.md) | Centralized Configuration | Accepted |
+| [014](014-auth-security-strategy.md) | Authentication Security Strategy | Accepted |
 
 ## Overview
 
@@ -31,6 +33,7 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 - **[ADR-003](003-core-engine.md)** - `CoreScraperEngine` orchestration, pipeline phases, port dependencies
 - **[ADR-008](008-domain-models-ports.md)** - Port interfaces (`BrowserPort`, `LlmPort`, `CaptchaPort`, `KnownSitesPort`), domain models
 - **[ADR-009](009-decision-rules.md)** - Decision flow, known-config path vs discovery path, failure thresholds
+- **[ADR-013](013-centralized-configuration.md)** - Zod-based config validation, lazy loading, secrets management
 
 ### External Services
 - **[ADR-004](004-llm-xpath-discovery.md)** - OpenRouter LLM integration, XPath suggestion, content scoring
@@ -43,6 +46,7 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 
 ### Backend
 - **[ADR-011](011-backend-architecture.md)** - Hono + HTMX, API endpoints, dashboard, storage (sites.jsonc, stats.json, logs/*.jsonl)
+- **[ADR-014](014-auth-security-strategy.md)** - Token-based auth, session handling, adaptive cookie security
 
 ### Deployment
 - **[ADR-012](012-nix-deployment.md)** - Nix flake, devShell, NixOS module, sops-nix secrets
