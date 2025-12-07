@@ -416,4 +416,30 @@ button, .btn {
   text-align: center;
   margin-bottom: 24px;
 }
+
+.pagination-info {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.limit-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.limit-selector select {
+  width: 80px;
+}
+
+.limit-selector label {
+  margin-bottom: 0;
+  font-size: 0.85rem;
+}
 `;
