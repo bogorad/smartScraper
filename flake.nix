@@ -107,9 +107,9 @@
             if [ -f secrets.yaml ]; then
               echo "Loading secrets from secrets.yaml..."
               SECRETS_JSON=$(sops decrypt secrets.yaml --output-type=json 2>/dev/null) && {
-                export API_TOKEN=$(echo "$SECRETS_JSON" | jq -r '.api_keys.smart_scraper // empty')
-                export OPENROUTER_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.api_keys.openrouter // empty')
-                export TWOCAPTCHA_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.api_keys.twocaptcha // empty')
+                export API_TOKEN=$(echo "$SECRETS_JSON" | jq -r '.smart_scraper // empty')
+                export OPENROUTER_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.openrouter // empty')
+                export TWOCAPTCHA_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.twocaptcha // empty')
                 echo "Secrets loaded."
               } || echo "Warning: Failed to decrypt secrets.yaml (check sops config)"
             else
