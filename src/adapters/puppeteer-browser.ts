@@ -5,6 +5,7 @@ import path from 'path';
 import type { BrowserPort } from '../ports/browser.js';
 import type { ElementDetails, LoadPageOptions } from '../domain/models.js';
 import { CAPTCHA_TYPES, DEFAULTS, type CaptchaTypeValue } from '../constants.js';
+import { getExecutablePath, getExtensionPaths, getProxyServer } from '../config.js';
 
 interface PageSession {
   page: Page;
@@ -40,7 +41,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     const hasExtensions = extensionPaths.length > 0;
 
     const browser = await puppeteer.launch({
-      executablePath: process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium',
+      executablePath: getExecutablePath(),
       headless: true,
       pipe: true,
       userDataDir,
@@ -74,8 +75,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
   }
 
   private getExtensionPaths(): string[] {
-    if (!process.env.EXTENSION_PATHS) return [];
-    return process.env.EXTENSION_PATHS.split(',').map(p => p.trim()).filter(Boolean);
+    return getExtensionPaths();
   }
 
   private buildLaunchArgs(): string[] {
@@ -90,8 +90,9 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       '--font-render-hinting=none'
     ];
 
-    if (process.env.PROXY_SERVER) {
-      args.push(`--proxy-server=${process.env.PROXY_SERVER}`);
+    const proxyServer = getProxyServer();
+    if (proxyServer) {
+      args.push(`--proxy-server=${proxyServer}`);
     }
 
     return args;

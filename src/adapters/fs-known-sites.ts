@@ -5,8 +5,9 @@ import type { KnownSitesPort } from '../ports/known-sites.js';
 import type { SiteConfig } from '../domain/models.js';
 import { utcNow } from '../utils/date.js';
 import { Mutex } from '../utils/mutex.js';
+import { getDataDir } from '../config.js';
 
-const DATA_DIR = process.env.DATA_DIR || './data';
+const DATA_DIR = getDataDir();
 const SITES_FILE = path.join(DATA_DIR, 'sites.jsonc');
 
 export class FsKnownSitesAdapter implements KnownSitesPort {

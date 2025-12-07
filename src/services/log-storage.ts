@@ -3,8 +3,9 @@ import path from 'path';
 import type { LogEntry } from '../domain/models.js';
 import { utcToday, isOlderThanDays } from '../utils/date.js';
 import { DEFAULTS } from '../constants.js';
+import { getDataDir } from '../config.js';
 
-const DATA_DIR = process.env.DATA_DIR || './data';
+const DATA_DIR = getDataDir();
 const LOGS_DIR = path.join(DATA_DIR, 'logs');
 
 async function ensureDir(): Promise<void> {

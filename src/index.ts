@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import fs from 'fs';
 
+import { initConfig, getPort, getDataDir, getExecutablePath, getExtensionPaths } from './config.js';
 import { scrapeRouter } from './routes/api/scrape.js';
 import { loginRouter } from './routes/dashboard/login.js';
 import { dashboardRouter } from './routes/dashboard/index.js';
@@ -50,12 +51,15 @@ app.route('/dashboard/stats', statsRouter);
 app.get('/', (c) => c.redirect('/dashboard'));
 
 async function main() {
-  const PORT = Number(process.env.PORT) || 5555;
-  const DATA_DIR = process.env.DATA_DIR || './data';
+  // Initialize and validate all configuration at startup
+  initConfig();
+  
+  const PORT = getPort();
+  const DATA_DIR = getDataDir();
 
   await fs.promises.mkdir(`${DATA_DIR}/logs`, { recursive: true });
 
-  const execPath = process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium';
+  const execPath = getExecutablePath();
   try {
     await fs.promises.access(execPath);
     console.log(`[CHROMIUM] Found at: ${execPath}`);
@@ -63,8 +67,9 @@ async function main() {
     console.warn(`[WARNING] Chromium executable not found at: ${execPath}`);
   }
 
-  if (process.env.EXTENSION_PATHS) {
-    console.log(`[CHROMIUM] Extensions: ${process.env.EXTENSION_PATHS}`);
+  const extensionPaths = getExtensionPaths();
+  if (extensionPaths.length > 0) {
+    console.log(`[CHROMIUM] Extensions: ${extensionPaths.join(', ')}`);
   }
 
   initializeEngine(
