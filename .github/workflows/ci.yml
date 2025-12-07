@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+jobs:
+  test:
+    name: Test & Type Check
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [24.x]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run type checking
+        run: npm run typecheck
+      
+      - name: Run tests
+        run: npm test -- --run
+        env:
+          # Mock environment variables for tests
+          API_TOKEN: test-token
+          OPENROUTER_API_KEY: test-key
+          TWOCAPTCHA_API_KEY: test-key
+      
+      - name: Run tests with coverage
+        run: npm test -- --run --coverage
+        env:
+          API_TOKEN: test-token
+          OPENROUTER_API_KEY: test-key
+          TWOCAPTCHA_API_KEY: test-key

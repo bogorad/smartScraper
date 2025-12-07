@@ -9,3 +9,7 @@ repomix-output.xml
 dist/
 *.log
 data/logs/
+
+# Test coverage
+coverage/
+.vitest/
