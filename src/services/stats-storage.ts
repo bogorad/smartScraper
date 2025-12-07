@@ -3,8 +3,9 @@ import path from 'path';
 import type { Stats } from '../domain/models.js';
 import { utcToday } from '../utils/date.js';
 import { Mutex } from '../utils/mutex.js';
+import { getDataDir } from '../config.js';
 
-const DATA_DIR = process.env.DATA_DIR || './data';
+const DATA_DIR = getDataDir();
 const STATS_FILE = path.join(DATA_DIR, 'stats.json');
 const statsMutex = new Mutex();
 

@@ -3,6 +3,7 @@ import type { LlmPort, LlmSuggestInput } from '../ports/llm.js';
 import type { LlmXPathSuggestion } from '../domain/models.js';
 import { parseXPathResponse } from '../utils/xpath-parser.js';
 import { DEFAULTS } from '../constants.js';
+import { getOpenrouterApiKey, getLlmModel, getLlmTemperature, getLlmHttpReferer, getLlmXTitle } from '../config.js';
 
 const SYSTEM_PROMPT = `You are an expert web scraper. Your task is to analyze HTML structure and identify the XPath selector for the main article content.
 
@@ -23,9 +24,9 @@ export class OpenRouterLlmAdapter implements LlmPort {
   private temperature: number;
 
   constructor() {
-    this.apiKey = process.env.OPENROUTER_API_KEY || '';
-    this.model = process.env.LLM_MODEL || DEFAULTS.LLM_MODEL;
-    this.temperature = Number(process.env.LLM_TEMPERATURE) || DEFAULTS.LLM_TEMPERATURE;
+    this.apiKey = getOpenrouterApiKey();
+    this.model = getLlmModel();
+    this.temperature = getLlmTemperature();
   }
 
   async suggestXPaths(input: LlmSuggestInput): Promise<LlmXPathSuggestion[]> {
@@ -51,8 +52,8 @@ export class OpenRouterLlmAdapter implements LlmPort {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': process.env.LLM_HTTP_REFERER || 'https://github.com/bogorad/smartScraper',
-            'X-Title': process.env.LLM_X_TITLE || 'SmartScraper'
+            'HTTP-Referer': getLlmHttpReferer(),
+            'X-Title': getLlmXTitle()
           },
           timeout: 30000
         }

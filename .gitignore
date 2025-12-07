@@ -1,6 +1,8 @@
 .direnv/
 .env
+.env.local
 .gitconfig
+secrets.yaml
 node_modules/
 extensions/
 repomix-output.xml

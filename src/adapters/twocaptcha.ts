@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { CaptchaPort } from '../ports/captcha.js';
 import type { CaptchaSolveInput, CaptchaSolveResult } from '../domain/models.js';
 import { CAPTCHA_TYPES, DEFAULTS } from '../constants.js';
+import { getTwocaptchaApiKey, getCaptchaDefaultTimeout, getCaptchaPollingInterval } from '../config.js';
 
 export class TwoCaptchaAdapter implements CaptchaPort {
   private apiKey: string;
@@ -9,9 +10,9 @@ export class TwoCaptchaAdapter implements CaptchaPort {
   private pollingInterval: number;
 
   constructor() {
-    this.apiKey = process.env.TWOCAPTCHA_API_KEY || '';
-    this.timeout = Number(process.env.CAPTCHA_DEFAULT_TIMEOUT) || DEFAULTS.CAPTCHA_TIMEOUT;
-    this.pollingInterval = Number(process.env.CAPTCHA_POLLING_INTERVAL) || DEFAULTS.CAPTCHA_POLLING_INTERVAL;
+    this.apiKey = getTwocaptchaApiKey();
+    this.timeout = getCaptchaDefaultTimeout();
+    this.pollingInterval = getCaptchaPollingInterval();
   }
 
   async solveIfPresent(input: CaptchaSolveInput): Promise<CaptchaSolveResult> {
