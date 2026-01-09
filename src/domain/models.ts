@@ -1,4 +1,4 @@
-import type { MethodValue, OutputTypeValue, ErrorTypeValue, CaptchaTypeValue } from '../constants.js';
+import type { MethodValue, OutputTypeValue, ErrorTypeValue, CaptchaTypeValue, ProxyModeValue } from '../constants.js';
 
 export interface SiteConfig {
   domainPattern: string;
@@ -9,6 +9,7 @@ export interface SiteConfig {
   siteSpecificHeaders?: Record<string, string>;
   siteCleanupClasses?: string[];
   userAgent?: string;
+  needsProxy?: ProxyModeValue;
 }
 
 export interface ScrapeOptions {
@@ -64,6 +65,7 @@ export interface LlmXPathSuggestion {
 export interface LoadPageOptions {
   timeout?: number;
   waitUntil?: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2';
+  proxy?: string;
 }
 
 export interface CaptchaSolveInput {

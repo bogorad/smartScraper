@@ -3,6 +3,7 @@ import type { CaptchaPort } from '../ports/captcha.js';
 import type { CaptchaSolveInput, CaptchaSolveResult } from '../domain/models.js';
 import { CAPTCHA_TYPES, DEFAULTS } from '../constants.js';
 import { getTwocaptchaApiKey, getCaptchaDefaultTimeout, getCaptchaPollingInterval } from '../config.js';
+import { parseProxyUrl } from '../utils/proxy.js';
 
 export class TwoCaptchaAdapter implements CaptchaPort {
   private apiKey: string;
@@ -84,6 +85,8 @@ export class TwoCaptchaAdapter implements CaptchaPort {
 
   private async solveDataDome(input: CaptchaSolveInput): Promise<CaptchaSolveResult> {
     try {
+      const proxyFields = input.proxyDetails ? this.buildProxyFields(input.proxyDetails.server) : {};
+      
       const createResponse = await axios.post('https://api.2captcha.com/createTask', {
         clientKey: this.apiKey,
         task: {
@@ -91,10 +94,7 @@ export class TwoCaptchaAdapter implements CaptchaPort {
           websiteURL: input.pageUrl,
           captchaUrl: input.captchaUrl || input.pageUrl,
           userAgent: input.userAgentString || DEFAULTS.USER_AGENT,
-          ...(input.proxyDetails && {
-            proxyType: 'http',
-            proxyAddress: input.proxyDetails.server
-          })
+          ...proxyFields
         }
       });
 
@@ -130,5 +130,18 @@ export class TwoCaptchaAdapter implements CaptchaPort {
       const message = error instanceof Error ? error.message : 'Unknown error';
       return { solved: false, reason: message };
     }
+  }
+
+  private buildProxyFields(proxyUrl: string): Record<string, string | number> {
+    const parsed = parseProxyUrl(proxyUrl);
+    if (!parsed) return {};
+    
+    return {
+      proxyType: parsed.protocol,
+      proxyAddress: parsed.host,
+      proxyPort: parsed.port,
+      ...(parsed.username && { proxyLogin: parsed.username }),
+      ...(parsed.password && { proxyPassword: parsed.password })
+    };
   }
 }

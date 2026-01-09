@@ -40,6 +40,9 @@ const ConfigSchema = z.object({
   captchaDefaultTimeout: z.coerce.number().default(120),
   captchaPollingInterval: z.coerce.number().default(5000),
   
+  // DataDome proxy configuration
+  datadomeProxyUrl: z.string().default(''),
+  
   // Authentication
   apiToken: z.string().default(''),
   
@@ -118,6 +121,9 @@ function mapEnvVars(): Record<string, string | undefined> {
     twocaptchaApiKey: process.env.TWOCAPTCHA_API_KEY || process.env.TWOCAPTCHA || secrets.twocaptcha_api_key,
     captchaDefaultTimeout: process.env.CAPTCHA_DEFAULT_TIMEOUT,
     captchaPollingInterval: process.env.CAPTCHA_POLLING_INTERVAL,
+    
+    // DataDome proxy
+    datadomeProxyUrl: process.env.DATADOME_PROXY_URL,
     
     // Auth
     apiToken: process.env.API_TOKEN || process.env.SMART_SCRAPER || secrets.api_token,
@@ -264,4 +270,8 @@ export function getDomStructureMaxTextLength(): number {
 
 export function getDomStructureMinTextSizeToAnnotate(): number {
   return getConfig().domStructureMinTextSizeToAnnotate;
+}
+
+export function getDatadomeProxyUrl(): string {
+  return getConfig().datadomeProxyUrl;
 }

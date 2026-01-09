@@ -214,7 +214,8 @@ describe('TwoCaptchaAdapter', () => {
         expect.objectContaining({
           task: expect.objectContaining({
             proxyType: 'http',
-            proxyAddress: 'http://proxy.example.com:8080'
+            proxyAddress: 'proxy.example.com',
+            proxyPort: 8080
           })
         })
       );

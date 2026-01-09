@@ -80,6 +80,19 @@ export const SiteForm: FC<SiteFormProps> = ({ site, isNew }) => {
         <div class="form-hint">Leave empty to use default Windows Chrome UA</div>
       </div>
 
+      <div class="form-group">
+        <label for="needsProxy">Proxy Mode</label>
+        <select id="needsProxy" name="needsProxy">
+          <option value="off" selected={!site.needsProxy || site.needsProxy === 'off'}>
+            Off (use global if set)
+          </option>
+          <option value="datadome" selected={site.needsProxy === 'datadome'}>
+            DataDome (residential proxy)
+          </option>
+        </select>
+        <div class="form-hint">Use 'datadome' for sites protected by DataDome CAPTCHA</div>
+      </div>
+
       <div class="btn-group">
         <button type="submit" class="btn btn-primary">
           {isNew ? 'Create' : 'Save Changes'}

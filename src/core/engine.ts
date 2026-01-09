@@ -4,7 +4,7 @@ import path from 'path';
 import { EventEmitter } from 'events';
 import type { BrowserPort, LlmPort, CaptchaPort, KnownSitesPort } from '../ports/index.js';
 import type { ScrapeOptions, ScrapeResult, ScrapeContext, LogEntry } from '../domain/models.js';
-import { METHODS, OUTPUT_TYPES, ERROR_TYPES, CAPTCHA_TYPES, SCORING, DEFAULTS } from '../constants.js';
+import { METHODS, OUTPUT_TYPES, ERROR_TYPES, CAPTCHA_TYPES, SCORING, DEFAULTS, PROXY_MODES } from '../constants.js';
 import { extractDomain, isValidUrl } from '../utils/url.js';
 import { simplifyDom, extractSnippets } from '../utils/dom.js';
 import { utcNow } from '../utils/date.js';
@@ -13,6 +13,8 @@ import { scoreElement } from './scoring.js';
 import { recordScrape } from '../services/stats-storage.js';
 import { logScrape } from '../services/log-storage.js';
 import { logger } from '../utils/logger.js';
+import { buildSessionProxyUrl } from '../utils/proxy.js';
+import { getDatadomeProxyUrl } from '../config.js';
 
 export const workerEvents = new EventEmitter();
 
@@ -80,8 +82,22 @@ export class CoreScraperEngine {
       context.siteConfig = await this.knownSitesPort.getConfig(domain);
       logger.debug(`[ENGINE] Site config for ${domain}: ${context.siteConfig ? 'FOUND' : 'MISSING'}`);
 
+      // Check if site needs DataDome residential proxy
+      let proxyUrl: string | undefined;
+      if (context.siteConfig?.needsProxy === PROXY_MODES.DATADOME) {
+        const baseProxyUrl = getDatadomeProxyUrl();
+        if (!baseProxyUrl) {
+          logger.warn('[ENGINE] needsProxy=datadome but DATADOME_PROXY_URL not configured');
+        } else {
+          // Generate unique session URL for this scrape (2 min sticky IP)
+          proxyUrl = buildSessionProxyUrl(baseProxyUrl, DEFAULTS.PROXY_SESSION_MINUTES);
+          logger.debug(`[ENGINE] Using DataDome proxy with session (IP sticky for ${DEFAULTS.PROXY_SESSION_MINUTES}min)`);
+        }
+      }
+
       const { pageId: pid } = await this.browserPort.loadPage(url, {
-        timeout: options?.timeoutMs || DEFAULTS.TIMEOUT_MS
+        timeout: options?.timeoutMs || DEFAULTS.TIMEOUT_MS,
+        proxy: proxyUrl
       });
       pageId = pid;
 
@@ -93,7 +109,7 @@ export class CoreScraperEngine {
           pageId,
           pageUrl: url,
           captchaTypeHint: captchaType,
-          proxyDetails: context.proxyDetails,
+          proxyDetails: proxyUrl ? { server: proxyUrl } : context.proxyDetails,
           userAgentString: context.userAgentString
         });
 

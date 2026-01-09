@@ -284,6 +284,8 @@ sitesRouter.post('/:domain', async (c) => {
   const cleanupText = body.siteCleanupClasses as string || '';
   const siteCleanupClasses = cleanupText.split('\n').map(s => s.trim()).filter(Boolean);
 
+  const needsProxy = body.needsProxy as string;
+
   const existingConfig = await knownSitesAdapter.getConfig(actualDomain);
 
   const config: SiteConfig = {
@@ -294,7 +296,8 @@ sitesRouter.post('/:domain', async (c) => {
     discoveredByLlm: existingConfig?.discoveredByLlm,
     siteSpecificHeaders: Object.keys(siteSpecificHeaders).length > 0 ? siteSpecificHeaders : undefined,
     siteCleanupClasses: siteCleanupClasses.length > 0 ? siteCleanupClasses : undefined,
-    userAgent: (body.userAgent as string) || undefined
+    userAgent: (body.userAgent as string) || undefined,
+    needsProxy: needsProxy === 'datadome' ? 'datadome' : undefined
   };
 
   await knownSitesAdapter.saveConfig(config);

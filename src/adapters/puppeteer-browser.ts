@@ -46,7 +46,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       headless: true,
       pipe: true,
       userDataDir,
-      args: this.buildLaunchArgs(),
+      args: this.buildLaunchArgs(options?.proxy),
       timeout: options?.timeout || DEFAULTS.TIMEOUT_MS,
       ...(hasExtensions && { enableExtensions: extensionPaths })
     });
@@ -85,7 +85,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     return getExtensionPaths();
   }
 
-  private buildLaunchArgs(): string[] {
+  private buildLaunchArgs(explicitProxy?: string): string[] {
     const args = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -97,7 +97,8 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       '--font-render-hinting=none'
     ];
 
-    const proxyServer = getProxyServer();
+    // Priority: explicit proxy > global PROXY_SERVER
+    const proxyServer = explicitProxy || getProxyServer();
     if (proxyServer) {
       args.push(`--proxy-server=${proxyServer}`);
     }

@@ -46,6 +46,13 @@ export const SCORING = {
   MIN_CONTENT_CHARS: 200
 } as const;
 
+export const PROXY_MODES = {
+  OFF: 'off',
+  DATADOME: 'datadome'
+} as const;
+
+export type ProxyModeValue = (typeof PROXY_MODES)[keyof typeof PROXY_MODES];
+
 export const DEFAULTS = {
   TIMEOUT_MS: 60000,
   USER_AGENT: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
@@ -56,5 +63,6 @@ export const DEFAULTS = {
   CAPTCHA_TIMEOUT: 120,
   CAPTCHA_POLLING_INTERVAL: 5000,
   MAX_REDISCOVERY_FAILURES: 2,
-  LOG_RETENTION_DAYS: 7
+  LOG_RETENTION_DAYS: 7,
+  PROXY_SESSION_MINUTES: 2
 } as const;
