@@ -17,5 +17,5 @@ export interface BrowserPort {
   getElementDetails(pageId: string, xpath: string): Promise<ElementDetails | null>;
   getCookies(pageId: string): Promise<string>;
   setCookies(pageId: string, cookies: string): Promise<void>;
-  reload(pageId: string): Promise<void>;
+  reload(pageId: string, timeoutMs?: number): Promise<void>;
 }

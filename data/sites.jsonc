@@ -286,7 +286,10 @@
   {
     "domainPattern": "wsj.com",
     "xpathMainContent": "//div[contains(@class, 'paywall')]",
-    "failureCountSinceLastSuccess": 0
+    "failureCountSinceLastSuccess": 0,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+    "needsProxy": "datadome",
+    "lastSuccessfulScrapeTimestamp": "2026-01-09T23:08:15.086Z"
   },
   {
     "domainPattern": "yahoo.com",

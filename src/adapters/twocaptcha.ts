@@ -122,6 +122,9 @@ export class TwoCaptchaAdapter implements CaptchaPort {
           taskId
         });
 
+        // Log polling result
+        console.log(`[2CAPTCHA] Poll result for task ${taskId}:`, JSON.stringify(resultResponse.data));
+
         if (resultResponse.data?.status === 'ready') {
           const cookie = resultResponse.data?.solution?.cookie;
           if (cookie) {
@@ -130,8 +133,8 @@ export class TwoCaptchaAdapter implements CaptchaPort {
           return { solved: false, reason: 'Solution missing cookie' };
         }
 
-        if (resultResponse.data?.status === 'error') {
-          return { solved: false, reason: resultResponse.data?.errorDescription || 'Unknown error' };
+        if (resultResponse.data?.status === 'error' || (resultResponse.data?.errorId && resultResponse.data.errorId !== 0)) {
+          return { solved: false, reason: resultResponse.data?.errorDescription || resultResponse.data?.errorCode || 'Unknown error' };
         }
       }
 

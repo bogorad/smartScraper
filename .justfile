@@ -24,6 +24,10 @@ check:
 install:
     npm install
 
+# Update AdBlock Plus extension
+adblock:
+    scripts/update-adblock.sh
+
 # Clean build artifacts
 clean:
     rm -rf dist node_modules

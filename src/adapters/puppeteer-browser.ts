@@ -128,7 +128,8 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       '--disable-gpu',
       '--use-gl=swiftshader',
       '--window-size=1280,720',
-      '--font-render-hinting=none'
+      '--font-render-hinting=none',
+      '--blink-settings=imagesEnabled=false'
     ];
 
     // Priority: explicit proxy > global PROXY_SERVER
@@ -275,9 +276,9 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     await session.page.setCookie(...cookies);
   }
 
-  async reload(pageId: string): Promise<void> {
+  async reload(pageId: string, timeoutMs?: number): Promise<void> {
     const session = this.sessions.get(pageId);
     if (!session) return;
-    await session.page.reload({ waitUntil: 'networkidle2' });
+    await session.page.reload({ waitUntil: 'networkidle2', timeout: timeoutMs });
   }
 }

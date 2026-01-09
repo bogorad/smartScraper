@@ -154,7 +154,7 @@ export class CoreScraperEngine {
 
         if (solveResult.updatedCookie) {
           await this.browserPort.setCookies(pageId, solveResult.updatedCookie);
-          await this.browserPort.reload(pageId);
+          await this.browserPort.reload(pageId, options?.timeoutMs || DEFAULTS.TIMEOUT_MS);
         }
       }
 
