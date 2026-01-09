@@ -55,8 +55,10 @@ function renderWorkersHtml(stats: { active: number; max: number; activeUrls: str
 }
 
 function broadcast(data: { active: number; max: number; activeUrls: string[] }) {
+  logger.debug(`[SSE] Broadcasting: active=${data.active}, urls=${JSON.stringify(data.activeUrls)}`);
   const html = renderWorkersHtml(data);
   const event = `event: workers\ndata: ${html}\n\n`;
+  logger.debug(`[SSE] Sending to ${clients.size} clients`);
   for (const client of clients) {
     try {
       client.controller.enqueue(new TextEncoder().encode(event));
