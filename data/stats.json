@@ -1,12 +1,12 @@
 {
-  "scrapeTotal": 32,
+  "scrapeTotal": 90,
   "failTotal": 21,
-  "todayDate": "2025-12-07",
-  "scrapeToday": 15,
-  "failToday": 7,
+  "todayDate": "2026-01-09",
+  "scrapeToday": 58,
+  "failToday": 0,
   "domainCounts": {
-    "nypost.com": 17,
-    "example.com": 1,
+    "nypost.com": 18,
+    "example.com": 58,
     "unherd.com": 1,
     "variety.com": 1,
     "cjr.org": 1,
