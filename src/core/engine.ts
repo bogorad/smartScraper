@@ -18,7 +18,7 @@ export const workerEvents = new EventEmitter();
 
 export class CoreScraperEngine {
   private queue = new PQueue({ concurrency: 5 });
-  private activeUrls = new Set<string>();
+  private activeScrapes = new Map<string, string>(); // scrapeId -> url
 
   constructor(
     private browserPort: BrowserPort,
@@ -40,17 +40,18 @@ export class CoreScraperEngine {
   }
 
   getActiveUrls(): string[] {
-    return Array.from(this.activeUrls);
+    return Array.from(this.activeScrapes.values());
   }
 
   async scrapeUrl(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
     return await this.queue.add(async () => {
-      this.activeUrls.add(url);
+      const scrapeId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      this.activeScrapes.set(scrapeId, url);
       workerEvents.emit('change', { activeUrls: this.getActiveUrls(), active: this.getActiveWorkers(), max: this.getMaxWorkers() });
       try {
         return await this._executeScrape(url, options);
       } finally {
-        this.activeUrls.delete(url);
+        this.activeScrapes.delete(scrapeId);
         workerEvents.emit('change', { activeUrls: this.getActiveUrls(), active: this.getActiveWorkers(), max: this.getMaxWorkers() });
       }
     });
