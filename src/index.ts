@@ -30,7 +30,7 @@ process.on('uncaughtException', (error) => {
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  logger.error('[FATAL] Unhandled Rejection at:', promise, 'Reason:', reason);
+  logger.error('Unhandled Rejection', { reason, promise }, 'FATAL');
   process.exit(1);
 });
 

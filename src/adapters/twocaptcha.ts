@@ -87,7 +87,7 @@ export class TwoCaptchaAdapter implements CaptchaPort {
     try {
       const proxyFields = input.proxyDetails ? this.buildProxyFields(input.proxyDetails.server) : {};
       
-      const createResponse = await axios.post('https://api.2captcha.com/createTask', {
+      const taskPayload = {
         clientKey: this.apiKey,
         task: {
           type: 'DataDomeSliderTask',
@@ -96,7 +96,17 @@ export class TwoCaptchaAdapter implements CaptchaPort {
           userAgent: input.userAgentString || DEFAULTS.USER_AGENT,
           ...proxyFields
         }
-      });
+      };
+
+      // Log the payload (redact API key)
+      console.log('[2CAPTCHA] Creating DataDome task:', JSON.stringify({
+        ...taskPayload,
+        clientKey: '***REDACTED***'
+      }, null, 2));
+
+      const createResponse = await axios.post('https://api.2captcha.com/createTask', taskPayload);
+
+      console.log('[2CAPTCHA] Create response:', JSON.stringify(createResponse.data, null, 2));
 
       const taskId = createResponse.data?.taskId;
       if (!taskId) {

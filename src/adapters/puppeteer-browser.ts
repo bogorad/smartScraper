@@ -41,6 +41,33 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     const extensionPaths = this.getExtensionPaths();
     const hasExtensions = extensionPaths.length > 0;
 
+    const proxyServer = options?.proxy || getProxyServer();
+    let proxyAuth: { username: string; password: string } | null = null;
+    
+    if (proxyServer) {
+      logger.debug('Browser launching with proxy', {
+        url,
+        proxyRedacted: proxyServer.replace(/:([^:@]+)@/, ':***@'),
+        explicit: !!options?.proxy
+      }, 'BROWSER');
+      
+      // Extract auth credentials if present (http://user:pass@host:port)
+      try {
+        const proxyUrl = new URL(proxyServer);
+        if (proxyUrl.username && proxyUrl.password) {
+          proxyAuth = {
+            username: proxyUrl.username,
+            password: proxyUrl.password
+          };
+          logger.debug('Extracted proxy authentication', { username: proxyAuth.username }, 'BROWSER');
+        }
+      } catch (e) {
+        logger.warn('Failed to parse proxy URL for auth', { error: String(e) }, 'BROWSER');
+      }
+    } else {
+      logger.debug('Browser launching without proxy', { url }, 'BROWSER');
+    }
+
     const browser = await puppeteer.launch({
       executablePath: getExecutablePath(),
       headless: true,
@@ -52,6 +79,13 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     });
 
     const page = await browser.newPage();
+    
+    // Set proxy authentication if credentials are provided
+    if (proxyAuth) {
+      await page.authenticate(proxyAuth);
+      logger.debug('Proxy authentication set', { username: proxyAuth.username }, 'BROWSER');
+    }
+    
     page.on('console', msg => {
       const text = msg.text();
       // Ignore 404 errors from the page being scraped
@@ -100,7 +134,15 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     // Priority: explicit proxy > global PROXY_SERVER
     const proxyServer = explicitProxy || getProxyServer();
     if (proxyServer) {
-      args.push(`--proxy-server=${proxyServer}`);
+      // Extract host:port only (no credentials in --proxy-server flag)
+      try {
+        const proxyUrl = new URL(proxyServer);
+        const proxyHostPort = `${proxyUrl.hostname}:${proxyUrl.port || '80'}`;
+        args.push(`--proxy-server=${proxyHostPort}`);
+        logger.debug('Added proxy-server arg', { proxyHostPort }, 'BROWSER');
+      } catch (e) {
+        logger.warn('Failed to parse proxy URL', { proxyServer, error: String(e) }, 'BROWSER');
+      }
     }
 
     return args;
@@ -150,21 +192,29 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     return await session.page.content();
   }
 
-  async detectCaptcha(pageId: string): Promise<CaptchaTypeValue> {
+  async detectCaptcha(pageId: string): Promise<import('../ports/browser.js').CaptchaDetectionResult> {
     const session = this.sessions.get(pageId);
-    if (!session) return CAPTCHA_TYPES.NONE;
+    if (!session) return { type: CAPTCHA_TYPES.NONE };
 
     const html = await session.page.content();
 
+    // DataDome detection - extract iframe URL
     if (html.includes('captcha-delivery.com') || html.includes('geo.captcha-delivery.com')) {
-      return CAPTCHA_TYPES.DATADOME;
+      // Extract the iframe src URL
+      const captchaUrl = await session.page.evaluate(() => {
+        const iframe = document.querySelector('iframe[src*="captcha-delivery.com"]');
+        return iframe?.getAttribute('src') || undefined;
+      });
+      
+      logger.debug('DataDome iframe URL extracted', { captchaUrl }, 'CAPTCHA');
+      return { type: CAPTCHA_TYPES.DATADOME, captchaUrl };
     }
 
     if (html.includes('g-recaptcha') || html.includes('h-captcha') || html.includes('cf-turnstile')) {
-      return CAPTCHA_TYPES.GENERIC;
+      return { type: CAPTCHA_TYPES.GENERIC };
     }
 
-    return CAPTCHA_TYPES.NONE;
+    return { type: CAPTCHA_TYPES.NONE };
   }
 
   async getElementDetails(pageId: string, xpath: string): Promise<ElementDetails | null> {

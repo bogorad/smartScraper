@@ -40,8 +40,10 @@ const ConfigSchema = z.object({
   captchaDefaultTimeout: z.coerce.number().default(120),
   captchaPollingInterval: z.coerce.number().default(5000),
   
-  // DataDome proxy configuration
-  datadomeProxyUrl: z.string().default(''),
+  // DataDome proxy configuration (separate components)
+  datadomeProxyHost: z.string().default(''),
+  datadomeProxyLogin: z.string().default(''),
+  datadomeProxyPassword: z.string().default(''),
   
   // Authentication
   apiToken: z.string().default(''),
@@ -76,12 +78,18 @@ function loadSecretsFromYaml(): Record<string, string> {
       apiKeys.api_token = data.smart_scraper || '';
       apiKeys.openrouter_api_key = data.openrouter || '';
       apiKeys.twocaptcha_api_key = data.twocaptcha || '';
+      apiKeys.datadome_proxy_host = data.datadome_proxy_host || '';
+      apiKeys.datadome_proxy_login = data.datadome_proxy_login || '';
+      apiKeys.datadome_proxy_password = data.datadome_proxy_password || '';
     } 
     // Legacy nested check
     else if (data?.api_keys) {
       apiKeys.api_token = data.api_keys.smart_scraper || '';
       apiKeys.openrouter_api_key = data.api_keys.openrouter || '';
       apiKeys.twocaptcha_api_key = data.api_keys.twocaptcha || '';
+      apiKeys.datadome_proxy_host = data.api_keys.datadome_proxy_host || '';
+      apiKeys.datadome_proxy_login = data.api_keys.datadome_proxy_login || '';
+      apiKeys.datadome_proxy_password = data.api_keys.datadome_proxy_password || '';
     }
     
     return apiKeys;
@@ -122,8 +130,10 @@ function mapEnvVars(): Record<string, string | undefined> {
     captchaDefaultTimeout: process.env.CAPTCHA_DEFAULT_TIMEOUT,
     captchaPollingInterval: process.env.CAPTCHA_POLLING_INTERVAL,
     
-    // DataDome proxy
-    datadomeProxyUrl: process.env.DATADOME_PROXY_URL,
+    // DataDome proxy (ONLY from environment variables - sops exec-env decrypts these)
+    datadomeProxyHost: process.env.DATADOME_PROXY_HOST,
+    datadomeProxyLogin: process.env.DATADOME_PROXY_LOGIN,
+    datadomeProxyPassword: process.env.DATADOME_PROXY_PASSWORD,
     
     // Auth
     apiToken: process.env.API_TOKEN || process.env.SMART_SCRAPER || secrets.api_token,
@@ -272,6 +282,14 @@ export function getDomStructureMinTextSizeToAnnotate(): number {
   return getConfig().domStructureMinTextSizeToAnnotate;
 }
 
-export function getDatadomeProxyUrl(): string {
-  return getConfig().datadomeProxyUrl;
+export function getDatadomeProxyHost(): string {
+  return getConfig().datadomeProxyHost;
+}
+
+export function getDatadomeProxyLogin(): string {
+  return getConfig().datadomeProxyLogin;
+}
+
+export function getDatadomeProxyPassword(): string {
+  return getConfig().datadomeProxyPassword;
 }

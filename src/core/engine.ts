@@ -14,7 +14,7 @@ import { recordScrape } from '../services/stats-storage.js';
 import { logScrape } from '../services/log-storage.js';
 import { logger } from '../utils/logger.js';
 import { buildSessionProxyUrl } from '../utils/proxy.js';
-import { getDatadomeProxyUrl } from '../config.js';
+import { getDatadomeProxyHost, getDatadomeProxyLogin, getDatadomeProxyPassword } from '../config.js';
 
 export const workerEvents = new EventEmitter();
 
@@ -48,10 +48,24 @@ export class CoreScraperEngine {
   async scrapeUrl(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
     return await this.queue.add(async () => {
       const scrapeId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const domain = extractDomain(url);
+      
       this.activeScrapes.set(scrapeId, url);
       workerEvents.emit('change', { activeUrls: this.getActiveUrls(), active: this.getActiveWorkers(), max: this.getMaxWorkers() });
+      
+      logger.scrapeStart(scrapeId, url, domain || 'unknown', { outputType: options?.outputType });
+      
+      const startTime = Date.now();
       try {
-        return await this._executeScrape(url, options);
+        const result = await this._executeScrape(scrapeId, url, options);
+        const duration = Date.now() - startTime;
+        logger.scrapeEnd(scrapeId, url, domain || 'unknown', result.success, duration, result.error);
+        return result;
+      } catch (error) {
+        const duration = Date.now() - startTime;
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.scrapeEnd(scrapeId, url, domain || 'unknown', false, duration, errorMsg);
+        throw error;
       } finally {
         this.activeScrapes.delete(scrapeId);
         workerEvents.emit('change', { activeUrls: this.getActiveUrls(), active: this.getActiveWorkers(), max: this.getMaxWorkers() });
@@ -59,7 +73,7 @@ export class CoreScraperEngine {
     });
   }
 
-  private async _executeScrape(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
+  private async _executeScrape(scrapeId: string, url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
     const startTime = Date.now();
     const domain = extractDomain(url);
 
@@ -80,18 +94,22 @@ export class CoreScraperEngine {
 
     try {
       context.siteConfig = await this.knownSitesPort.getConfig(domain);
-      logger.debug(`[ENGINE] Site config for ${domain}: ${context.siteConfig ? 'FOUND' : 'MISSING'}`);
+      logger.debug(`Site config lookup for ${domain}`, { found: !!context.siteConfig, needsProxy: context.siteConfig?.needsProxy }, 'ENGINE');
 
       // Check if site needs DataDome residential proxy
       let proxyUrl: string | undefined;
       if (context.siteConfig?.needsProxy === PROXY_MODES.DATADOME) {
-        const baseProxyUrl = getDatadomeProxyUrl();
-        if (!baseProxyUrl) {
-          logger.warn('[ENGINE] needsProxy=datadome but DATADOME_PROXY_URL not configured');
+        const host = getDatadomeProxyHost();
+        const login = getDatadomeProxyLogin();
+        const password = getDatadomeProxyPassword();
+        
+        if (!host || !login || !password) {
+          logger.warn('needsProxy=datadome but DATADOME_PROXY_* credentials not configured', { domain }, 'ENGINE');
         } else {
           // Generate unique session URL for this scrape (2 min sticky IP)
-          proxyUrl = buildSessionProxyUrl(baseProxyUrl, DEFAULTS.PROXY_SESSION_MINUTES);
-          logger.debug(`[ENGINE] Using DataDome proxy with session (IP sticky for ${DEFAULTS.PROXY_SESSION_MINUTES}min)`);
+          proxyUrl = buildSessionProxyUrl(host, login, password, DEFAULTS.PROXY_SESSION_MINUTES);
+          const sessionId = proxyUrl.match(/session-([^-]+)/)?.[1] || 'unknown';
+          logger.proxySession(scrapeId, proxyUrl, sessionId, DEFAULTS.PROXY_SESSION_MINUTES);
         }
       }
 
@@ -101,19 +119,28 @@ export class CoreScraperEngine {
       });
       pageId = pid;
 
-      const captchaType = await this.browserPort.detectCaptcha(pageId);
-      logger.debug(`[ENGINE] Captcha detection result: ${captchaType}`);
+      const captchaDetection = await this.browserPort.detectCaptcha(pageId);
+      logger.debug('CAPTCHA detection result', { 
+        captchaType: captchaDetection.type, 
+        captchaUrl: captchaDetection.captchaUrl,
+        scrapeId 
+      }, 'ENGINE');
 
-      if (captchaType !== CAPTCHA_TYPES.NONE) {
+      if (captchaDetection.type !== CAPTCHA_TYPES.NONE) {
+        logger.captchaDetected(scrapeId, url, captchaDetection.type);
+        
+        const captchaStart = Date.now();
         const solveResult = await this.captchaPort.solveIfPresent({
           pageId,
           pageUrl: url,
-          captchaTypeHint: captchaType,
+          captchaUrl: captchaDetection.captchaUrl,
+          captchaTypeHint: captchaDetection.type,
           proxyDetails: proxyUrl ? { server: proxyUrl } : context.proxyDetails,
           userAgentString: context.userAgentString
         });
+        const captchaDuration = Date.now() - captchaStart;
 
-        logger.debug(`[ENGINE] Captcha solve attempt: ${solveResult.solved ? 'SUCCESS' : 'FAILED'}`);
+        logger.captchaSolved(scrapeId, url, solveResult.solved, captchaDuration, solveResult.reason);
 
         if (!solveResult.solved) {
           result = {
@@ -259,7 +286,8 @@ export class CoreScraperEngine {
 
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`[ENGINE] Scrape failed for ${url}: ${message}`);
+      const stack = error instanceof Error ? error.stack : '';
+      logger.error(`Scrape exception in engine`, { url, error: message, stack, scrapeId }, 'ENGINE');
       result = { success: false, errorType: ERROR_TYPES.UNKNOWN, error: message };
       await this.recordResult(context, result, startTime);
       return result;
