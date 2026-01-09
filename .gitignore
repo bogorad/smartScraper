@@ -9,6 +9,7 @@ repomix-output.xml
 dist/
 *.log
 data/logs/
+package-lock.json
 
 # Test coverage
 coverage/
