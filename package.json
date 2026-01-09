@@ -1,10 +1,10 @@
 {
   "name": "smart-scraper",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "description": "Intelligent web scraping service with LLM-assisted content extraction",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --watch src src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest",
