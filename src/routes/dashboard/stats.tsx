@@ -13,7 +13,8 @@ statsRouter.use('/*', dashboardAuthMiddleware);
 
 statsRouter.post('/reset', async (c) => {
   await resetStats();
-  return c.redirect('/dashboard/stats');
+  c.header('HX-Refresh', 'true');
+  return c.body(null);
 });
 
 statsRouter.get('/', async (c) => {
@@ -36,15 +37,14 @@ statsRouter.get('/', async (c) => {
     <Layout title="Stats - SmartScraper" activePath="/dashboard/stats" theme={theme}>
       <div class="flex justify-between items-center mb-4">
         <h1 class="mb-0">Statistics</h1>
-        <form method="post" action="/dashboard/stats/reset" style="margin: 0">
-          <button
-            type="submit"
-            class="btn btn-danger btn-sm"
-            onclick="return confirm('Reset all statistics? This cannot be undone.')"
-          >
-            Reset Stats
-          </button>
-        </form>
+        <button
+          type="button"
+          class="btn btn-danger btn-sm"
+          hx-post="/dashboard/stats/reset"
+          hx-swap="none"
+        >
+          Reset Stats
+        </button>
       </div>
 
       <div class="stats-grid">

@@ -1,6 +1,6 @@
 {
   "name": "smart-scraper",
-  "version": "0.1.28",
+  "version": "0.1.36",
   "description": "Intelligent web scraping service with LLM-assisted content extraction",
   "type": "module",
   "scripts": {

@@ -47,6 +47,11 @@ npm start
 - Use conventional commits: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
 - Reference issues when applicable
 
+### Versioning
+- **AFTER EACH CODE CHANGE**: Bump patch version in `package.json` (`xx.yy.zz` → `xx.yy.zz+1`)
+- Version bump is mandatory even for small fixes
+- Update `CHANGELOG.md` if it exists
+
 ### Branch Strategy
 - `main` is the default branch
 - Feature branches: `feat/description` or `fix/description`

@@ -12,7 +12,7 @@ import { dashboardRouter } from './routes/dashboard/index.js';
 import { sitesRouter } from './routes/dashboard/sites.js';
 import { statsRouter } from './routes/dashboard/stats.js';
 import { cleanupOldLogs } from './services/log-storage.js';
-import { initializeEngine } from './core/engine.js';
+import { initializeEngine, getDefaultEngine } from './core/engine.js';
 import { PuppeteerBrowserAdapter } from './adapters/puppeteer-browser.js';
 import { OpenRouterLlmAdapter } from './adapters/openrouter-llm.js';
 import { TwoCaptchaAdapter } from './adapters/twocaptcha.js';
@@ -21,6 +21,8 @@ import { VERSION } from './constants.js';
 
 export { scrapeUrl, getDefaultEngine } from './core/engine.js';
 export { METHODS, OUTPUT_TYPES, VERSION } from './constants.js';
+
+let browserAdapter: PuppeteerBrowserAdapter | null = null;
 
 process.on('uncaughtException', (error) => {
   logger.error('[FATAL] Uncaught Exception:', error);
@@ -32,11 +34,28 @@ process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
+async function shutdown(signal: string) {
+  logger.info(`[SHUTDOWN] Received ${signal}, closing browsers...`);
+  if (browserAdapter) {
+    try {
+      await browserAdapter.close();
+      logger.info('[SHUTDOWN] All browsers closed');
+    } catch (error) {
+      logger.error('[SHUTDOWN] Error closing browsers:', error);
+    }
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 const app = new Hono();
 
 app.use('*', honoLogger());
 
 app.use('/htmx.min.js', serveStatic({ path: './src/htmx.min.js' }));
+app.use('/sse.js', serveStatic({ path: './src/sse.js' }));
 
 app.get('/health', (c) => {
   return c.json({ status: 'alive', version: VERSION, timestamp: Date.now() });
@@ -81,8 +100,10 @@ async function main() {
     logger.info(`[CHROMIUM] Extensions: ${extensionPaths.join(', ')}`);
   }
 
+  browserAdapter = new PuppeteerBrowserAdapter();
+
   initializeEngine(
-    new PuppeteerBrowserAdapter(),
+    browserAdapter,
     new OpenRouterLlmAdapter(),
     new TwoCaptchaAdapter(),
     knownSitesAdapter

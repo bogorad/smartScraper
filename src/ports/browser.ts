@@ -4,6 +4,7 @@ import type { CaptchaTypeValue } from '../constants.js';
 export interface BrowserPort {
   open(): Promise<void>;
   close(): Promise<void>;
+  closePage(pageId: string): Promise<void>;
   loadPage(url: string, options?: LoadPageOptions): Promise<{ pageId: string }>;
   evaluateXPath(pageId: string, xpath: string): Promise<string[] | null>;
   getPageHtml(pageId: string): Promise<string>;

@@ -26,7 +26,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     }
   }
 
-  private async closePage(pageId: string): Promise<void> {
+  async closePage(pageId: string): Promise<void> {
     const session = this.sessions.get(pageId);
     if (!session) return;
 

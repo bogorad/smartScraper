@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { CoreScraperEngine, initializeEngine, getDefaultEngine } from './engine.js';
+import { CoreScraperEngine, initializeEngine, getDefaultEngine, getQueueStats } from './engine.js';
 import type { BrowserPort, LlmPort, CaptchaPort, KnownSitesPort } from '../ports/index.js';
 import { CAPTCHA_TYPES, ERROR_TYPES, OUTPUT_TYPES, METHODS } from '../constants.js';
 
@@ -29,6 +29,7 @@ describe('CoreScraperEngine', () => {
     mockBrowser = {
       open: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
+      closePage: vi.fn().mockResolvedValue(undefined),
       loadPage: vi.fn().mockResolvedValue({ pageId: 'page-123' }),
       evaluateXPath: vi.fn().mockResolvedValue(['<p>Extracted content</p>']),
       getPageHtml: vi.fn().mockResolvedValue('<html><body>Full HTML</body></html>'),
@@ -222,18 +223,18 @@ describe('CoreScraperEngine', () => {
       expect(mockKnownSites.incrementFailure).toHaveBeenCalled();
     });
 
-    it('should close browser on success', async () => {
+    it('should close browser page on success', async () => {
       await engine.scrapeUrl('https://example.com/article');
 
-      expect(mockBrowser.close).toHaveBeenCalled();
+      expect(mockBrowser.closePage).toHaveBeenCalledWith('page-123');
     });
 
-    it('should close browser on error', async () => {
+    it('should close browser page on error', async () => {
       mockBrowser.evaluateXPath = vi.fn().mockRejectedValue(new Error('Browser error'));
 
       await engine.scrapeUrl('https://example.com/article');
 
-      expect(mockBrowser.close).toHaveBeenCalled();
+      expect(mockBrowser.closePage).toHaveBeenCalledWith('page-123');
     });
 
     it('should handle unknown errors gracefully', async () => {
@@ -268,6 +269,35 @@ describe('CoreScraperEngine', () => {
 
       expect(order).toEqual([1, 2, 3]);
     });
+
+    it('should process scrapes in parallel with concurrency', async () => {
+      const startTimes: number[] = [];
+      let running = 0;
+      let maxConcurrent = 0;
+      
+      mockBrowser.loadPage = vi.fn().mockImplementation(async () => {
+        running++;
+        maxConcurrent = Math.max(maxConcurrent, running);
+        startTimes.push(Date.now());
+        await new Promise(resolve => setTimeout(resolve, 50));
+        running--;
+        return { pageId: 'page-123' };
+      });
+
+      const urls = [
+        'https://example.com/1',
+        'https://example.com/2',
+        'https://example.com/3',
+        'https://example.com/4',
+        'https://example.com/5'
+      ];
+
+      const promises = urls.map(url => engine.scrapeUrl(url));
+      await Promise.all(promises);
+
+      expect(maxConcurrent).toBeGreaterThan(1);
+      expect(mockBrowser.closePage).toHaveBeenCalledTimes(5);
+    });
   });
 
   describe('initializeEngine and getDefaultEngine', () => {
@@ -287,6 +317,55 @@ describe('CoreScraperEngine', () => {
           }
         }));
       }).toBeTruthy();
+    });
+  });
+
+  describe('queue stats', () => {
+    beforeEach(() => {
+      initializeEngine(mockBrowser, mockLlm, mockCaptcha, mockKnownSites);
+      engine = getDefaultEngine();
+    });
+
+    it('should return queue statistics', () => {
+      const stats = getQueueStats();
+      
+      expect(stats).toHaveProperty('size');
+      expect(stats).toHaveProperty('active');
+      expect(stats).toHaveProperty('max');
+      expect(stats).toHaveProperty('activeUrls');
+      expect(stats.max).toBe(5);
+      expect(stats.activeUrls).toBeInstanceOf(Array);
+    });
+
+    it('should return zero when queue is idle', () => {
+      const stats = getQueueStats();
+      
+      expect(stats.size).toBe(0);
+      expect(stats.active).toBe(0);
+      expect(stats.activeUrls).toEqual([]);
+    });
+
+    it('should track active URLs during scrape', async () => {
+      let resolveScrape: (() => void) | null = null;
+      const scrapePromise = new Promise<void>(resolve => { resolveScrape = resolve; });
+      
+      mockBrowser.loadPage = vi.fn().mockImplementation(async () => {
+        await new Promise(r => setTimeout(r, 100));
+        await scrapePromise;
+        return { pageId: 'page-123' };
+      });
+
+      const p1 = engine.scrapeUrl('https://example.com/1');
+      await new Promise(r => setTimeout(r, 50));
+      
+      let stats = getQueueStats();
+      expect(stats.activeUrls).toContain('https://example.com/1');
+      
+      resolveScrape!();
+      await p1;
+      
+      stats = getQueueStats();
+      expect(stats.activeUrls).not.toContain('https://example.com/1');
     });
   });
 });

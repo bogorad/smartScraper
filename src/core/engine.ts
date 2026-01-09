@@ -1,6 +1,7 @@
 import PQueue from 'p-queue';
 import fs from 'fs';
 import path from 'path';
+import { EventEmitter } from 'events';
 import type { BrowserPort, LlmPort, CaptchaPort, KnownSitesPort } from '../ports/index.js';
 import type { ScrapeOptions, ScrapeResult, ScrapeContext, LogEntry } from '../domain/models.js';
 import { METHODS, OUTPUT_TYPES, ERROR_TYPES, CAPTCHA_TYPES, SCORING, DEFAULTS } from '../constants.js';
@@ -13,8 +14,11 @@ import { recordScrape } from '../services/stats-storage.js';
 import { logScrape } from '../services/log-storage.js';
 import { logger } from '../utils/logger.js';
 
+export const workerEvents = new EventEmitter();
+
 export class CoreScraperEngine {
-  private queue = new PQueue({ concurrency: 1 });
+  private queue = new PQueue({ concurrency: 5 });
+  private activeUrls = new Set<string>();
 
   constructor(
     private browserPort: BrowserPort,
@@ -23,8 +27,31 @@ export class CoreScraperEngine {
     private knownSitesPort: KnownSitesPort
   ) {}
 
+  getQueueSize(): number {
+    return this.queue.size;
+  }
+
+  getActiveWorkers(): number {
+    return this.queue.pending;
+  }
+
+  getMaxWorkers(): number {
+    return 5;
+  }
+
+  getActiveUrls(): string[] {
+    return Array.from(this.activeUrls);
+  }
+
   async scrapeUrl(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
-    return this.queue.add(() => this._executeScrape(url, options)) as Promise<ScrapeResult>;
+    this.activeUrls.add(url);
+    workerEvents.emit('change', { activeUrls: this.getActiveUrls(), active: this.getActiveWorkers(), max: this.getMaxWorkers() });
+    try {
+      return await this.queue.add(() => this._executeScrape(url, options));
+    } finally {
+      this.activeUrls.delete(url);
+      workerEvents.emit('change', { activeUrls: this.getActiveUrls(), active: this.getActiveWorkers(), max: this.getMaxWorkers() });
+    }
   }
 
   private async _executeScrape(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
@@ -221,7 +248,7 @@ export class CoreScraperEngine {
     } finally {
       if (pageId) {
         try {
-          await this.browserPort.close();
+          await this.browserPort.closePage(pageId);
         } catch {}
       }
     }
@@ -273,4 +300,14 @@ export function initializeEngine(
 
 export async function scrapeUrl(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
   return getDefaultEngine().scrapeUrl(url, options);
+}
+
+export function getQueueStats(): { size: number; active: number; max: number; activeUrls: string[] } {
+  const engine = getDefaultEngine();
+  return {
+    size: engine.getQueueSize(),
+    active: engine.getActiveWorkers(),
+    max: engine.getMaxWorkers(),
+    activeUrls: engine.getActiveUrls()
+  };
 }
