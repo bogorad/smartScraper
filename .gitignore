@@ -16,5 +16,4 @@ coverage/
 .vitest/
 
 # Runtime data
-data/stats.json
 temp_test.crx
