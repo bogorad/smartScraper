@@ -44,14 +44,16 @@ export class CoreScraperEngine {
   }
 
   async scrapeUrl(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
-    this.activeUrls.add(url);
-    workerEvents.emit('change', { activeUrls: this.getActiveUrls(), active: this.getActiveWorkers(), max: this.getMaxWorkers() });
-    try {
-      return await this.queue.add(() => this._executeScrape(url, options));
-    } finally {
-      this.activeUrls.delete(url);
+    return await this.queue.add(async () => {
+      this.activeUrls.add(url);
       workerEvents.emit('change', { activeUrls: this.getActiveUrls(), active: this.getActiveWorkers(), max: this.getMaxWorkers() });
-    }
+      try {
+        return await this._executeScrape(url, options);
+      } finally {
+        this.activeUrls.delete(url);
+        workerEvents.emit('change', { activeUrls: this.getActiveUrls(), active: this.getActiveWorkers(), max: this.getMaxWorkers() });
+      }
+    });
   }
 
   private async _executeScrape(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
