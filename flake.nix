@@ -90,6 +90,8 @@
             pkgs.jq
           ];
 
+          shell = "${pkgs.zsh}/bin/zsh";
+
           shellHook = ''
             export EXECUTABLE_PATH="${chromium}/bin/chromium"
             export PATH="$PWD/node_modules/.bin:$PATH"
