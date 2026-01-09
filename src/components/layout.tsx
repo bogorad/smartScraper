@@ -36,7 +36,7 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({ children, title = '
         <script src="/htmx.min.js"></script>
         <script src="/sse.js"></script>
       </head>
-      <body>
+      <body hx-get="/dashboard" hx-trigger="every 300s" hx-swap="outerHTML" hx-select="body" hx-target="body">
         <nav class="nav">
           <div class="nav-inner">
             <a href="/dashboard" class="nav-brand">

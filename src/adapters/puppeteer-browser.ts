@@ -52,7 +52,13 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     });
 
     const page = await browser.newPage();
-    page.on('console', msg => logger.debug(`[BROWSER] ${msg.text()}`));
+    page.on('console', msg => {
+      const text = msg.text();
+      // Ignore 404 errors from the page being scraped
+      if (!text.includes('404') && !text.includes('Failed to load resource')) {
+        logger.debug(`[BROWSER] ${text}`);
+      }
+    });
     await page.setUserAgent(DEFAULTS.USER_AGENT);
     await page.setViewport({ width: DEFAULTS.VIEWPORT_WIDTH, height: DEFAULTS.VIEWPORT_HEIGHT });
 
