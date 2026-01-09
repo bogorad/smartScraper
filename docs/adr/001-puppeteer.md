@@ -26,7 +26,9 @@ SmartScraper requires a headless browser for scraping JavaScript-heavy sites and
 
 ### Session Management
 
-Each Puppeteer session uses a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode (new headless) while still supporting extensions via specific flags:
+Each Puppeteer session represents a unique scrape and uses a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode (new headless) while still supporting extensions via specific flags.
+
+**Concurrency:** The system supports parallel scraping (default: 5 concurrent workers). To optimize resource usage, the browser remains open while individual pages (sessions) are created and destroyed using `closePage(pageId)`.
 
 ```typescript
 import fs from 'fs';
@@ -48,7 +50,7 @@ const browser = await puppeteer.launch({
 });
 ```
 
-On session close, the profile directory is deleted:
+On session close, the browser page is closed and the profile directory is deleted:
 
 ```typescript
 async closePage(pageId: string) {

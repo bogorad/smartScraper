@@ -52,6 +52,21 @@ npm start
 - Version bump is mandatory even for small fixes
 - Update `CHANGELOG.md` if it exists
 
+### Concurrency & Performance
+- **Default Concurrency**: 5 parallel scrapes
+- **Queue Management**: Use `PQueue` in `CoreScraperEngine`
+- **Resource Cleanup**: Use `closePage(pageId)` for per-scrape browser cleanup; only close the whole browser on shutdown
+- **Tracking**: Use unique `scrapeId` (Map) instead of URLs (Set) to allow multiple concurrent scrapes of the same URL
+
+### Dashboard Interactivity (HTMX + SSE)
+- **Real-time Updates**: Use HTMX SSE extension for server-push (e.g., workers status)
+- **Named Events**: Use `event: <name>` in SSE stream and `sse-swap="<name>"` in HTML
+- **OOB Swaps**: Prefer `hx-swap-oob="true"` for granular multi-element updates via SSE
+- **Security**: Always use `escapeHtml()` when rendering user-provided data (like URLs) into SSE HTML fragments
+- **Keepalive**: SSE streams must include a `: keepalive\n\n` heartbeat (every 30s) to prevent proxy timeouts
+- **Fallbacks**: Dashboard body uses `hx-trigger="every 300s"` as a safety auto-refresh
+- **No Inline JS**: Use HTMX attributes (`hx-post`, `hx-confirm`, etc.) instead of `onclick` or `<script>` blocks
+
 ### Branch Strategy
 - `main` is the default branch
 - Feature branches: `feat/description` or `fix/description`

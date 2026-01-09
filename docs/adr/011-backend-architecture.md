@@ -20,7 +20,7 @@ SmartScraper needs a web backend for:
 | Framework | Hono |
 | Templating | JSX (server-rendered) |
 | Interactivity | HTMX (no client framework) |
-| Client JS | Minimal (confirmations, button states) |
+| Client JS | **Zero** (completely removed in favor of HTMX + SSE) |
 
 ### Directory Structure
 
@@ -495,14 +495,15 @@ app.listen(PORT, () => {
 ### Benefits
 - Server-rendered, minimal client complexity
 - HTMX provides SPA-like UX without framework overhead
+- **Real-time updates via SSE** for highly dynamic views (e.g., workers status)
 - JSONC allows annotating configs with comments
 - JSON Lines logs are append-safe and easy to process
 - Clear separation: routes/, services/, components/
 
 ### Trade-offs
-- No real-time updates (polling required if needed)
 - JSONC library adds dependency for comment preservation
 - File-based storage limits concurrent write throughput
+- SSE requires persistent connections (resource overhead on server)
 
 ### Implementation Requirements
 - Use `comment-json` package for JSONC handling

@@ -10,10 +10,14 @@ SmartScraper is an intelligent, self-learning web scraping service designed to r
   - Realistic browser fingerprinting (Puppeteer Stealth).
   - Integration with 2Captcha for solving generic and DataDome CAPTCHAs.
   - Extension support for ad-blocking and paywall bypass.
+- **Concurrency & Scaling**:
+  - High-performance queue processing with **5 parallel workers** by default.
+  - Granular resource management (per-scrape browser page cleanup).
 - **Backend & Dashboard**: 
   - REST API for programmatic access.
-  - Dashboard for managing site configs, viewing statistics, and testing.
-  - Persistent storage using JSONC (for human-editable configs) and JSON Lines (for logs).
+  - **Real-time Dashboard** powered by HTMX + SSE (Server-Sent Events) for live worker status.
+  - Statistical insights and site configuration management.
+  - Persistent storage using JSONC and JSON Lines.
 
 ## Architecture
 
@@ -236,7 +240,7 @@ Visit `http://localhost:5555/dashboard` (requires login) to:
 
 ## Testing
 
-SmartScraper has comprehensive test coverage using **Vitest** with 176 tests across 12 test files.
+SmartScraper has comprehensive test coverage using **Vitest** with 181 tests across 12 test files.
 
 ### Running Tests
 
