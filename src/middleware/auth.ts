@@ -64,12 +64,11 @@ export const dashboardAuthMiddleware = createMiddleware(async (c, next) => {
 export function createSession(c: any, token: string): void {
   const hash = hashToken(token);
   const url = new URL(c.req.url);
-  const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '0.0.0.0';
   
-  // Secure cookies in production, unless running locally
-  const isSecure = getNodeEnv() === 'production' && !isLocalhost;
+  // Only enforce secure cookies if we are actually on HTTPS
+  const isSecure = url.protocol === 'https:';
   
-  logger.info(`[AUTH] Creating session. Secure: ${isSecure}, Domain: ${url.hostname}`);
+  logger.info(`[AUTH] Creating session. Secure: ${isSecure}, Protocol: ${url.protocol}, Domain: ${url.hostname}`);
 
   setCookie(c, SESSION_COOKIE, hash, {
     httpOnly: true,
