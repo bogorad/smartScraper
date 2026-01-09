@@ -14,3 +14,7 @@ package-lock.json
 # Test coverage
 coverage/
 .vitest/
+
+# Runtime data
+data/stats.json
+temp_test.crx
