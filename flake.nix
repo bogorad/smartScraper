@@ -87,7 +87,7 @@
 
             # Secrets management
             pkgs.sops
-            pkgs.jq
+            pkgs.yq-go
           ];
 
           shell = "${pkgs.zsh}/bin/zsh";
@@ -108,10 +108,7 @@
             # Load secrets from sops-encrypted secrets.yaml
             if [ -f secrets.yaml ]; then
               echo "Loading secrets from secrets.yaml..."
-              SECRETS_JSON=$(sops decrypt secrets.yaml --output-type=json 2>/dev/null) && {
-                export API_TOKEN=$(echo "$SECRETS_JSON" | jq -r '.smart_scraper // empty')
-                export OPENROUTER_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.openrouter // empty')
-                export TWOCAPTCHA_API_KEY=$(echo "$SECRETS_JSON" | jq -r '.twocaptcha // empty')
+              eval "$(sops decrypt secrets.yaml 2>/dev/null | yq e 'to_entries | map("export " + (.key | upcase) + "=" + (.value | @sh)) | .[]' -)" && {
                 echo "Secrets loaded."
               } || echo "Warning: Failed to decrypt secrets.yaml (check sops config)"
             else
@@ -126,9 +123,7 @@
             echo "Chromium: ${chromium.version}"
             echo ""
             echo "EXECUTABLE_PATH=$EXECUTABLE_PATH"
-            [ -n "$API_TOKEN" ] && echo "API_TOKEN=<set>" || echo "API_TOKEN=<not set>"
-            [ -n "$OPENROUTER_API_KEY" ] && echo "OPENROUTER_API_KEY=<set>" || echo "OPENROUTER_API_KEY=<not set>"
-            [ -n "$TWOCAPTCHA_API_KEY" ] && echo "TWOCAPTCHA_API_KEY=<set>" || echo "TWOCAPTCHA_API_KEY=<not set>"
+
             [ -n "$EXTENSION_PATHS" ] && echo "EXTENSION_PATHS=<set>" || echo "EXTENSION_PATHS=<not set>"
             echo ""
             echo "Commands:"
