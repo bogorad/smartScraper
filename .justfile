@@ -52,3 +52,15 @@ test5:
     wait
     echo "---"
     echo "All 5 scrapes completed"
+
+# Test basin/reservoir scrape from Catalan government
+test-basin:
+    #!/usr/bin/env bash
+    set -e
+    eval "$(sops decrypt secrets.yaml --output-type=json | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
+    echo "Scraping basin reserves from Catalan government..."
+    echo "---"
+    curl -s -X POST "http://localhost:5555/api/scrape" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $SMART_SCRAPER" \
+      -d '{"url": "https://aca.gencat.cat/es/laigua/estat-del-medi-hidric/recursos-disponibles/estat-de-les-reserves-daigua-als-embassaments/index.html", "xpath": "//textarea[contains(@id, '\''result_'\'')]"}' | jq '.'

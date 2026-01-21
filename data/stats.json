@@ -1,9 +1,9 @@
 {
-  "scrapeTotal": 112,
-  "failTotal": 41,
-  "todayDate": "2026-01-09",
-  "scrapeToday": 80,
-  "failToday": 20,
+  "scrapeTotal": 114,
+  "failTotal": 42,
+  "todayDate": "2026-01-21",
+  "scrapeToday": 2,
+  "failToday": 1,
   "domainCounts": {
     "nypost.com": 18,
     "example.com": 58,
@@ -19,6 +19,7 @@
     "thelocal.es": 1,
     "thetimes.com": 1,
     "wsj.com": 20,
-    "marketwatch.com": 3
+    "marketwatch.com": 3,
+    "aca.gencat.cat": 2
   }
 }
