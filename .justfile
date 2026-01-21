@@ -63,4 +63,4 @@ test-basin:
     curl -s -X POST "http://localhost:5555/api/scrape" \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $SMART_SCRAPER" \
-      -d '{"url": "https://aca.gencat.cat/es/laigua/estat-del-medi-hidric/recursos-disponibles/estat-de-les-reserves-daigua-als-embassaments/index.html", "xpath": "//textarea[contains(@id, '\''result_'\'')]"}' | jq '.'
+      -d '{"url": "https://aca.gencat.cat/es/laigua/estat-del-medi-hidric/recursos-disponibles/estat-de-les-reserves-daigua-als-embassaments/index.html", "xpath": "substring-before(substring-after(//textarea[contains(@id, '\''result_'\'')]/text(), '\''porciento2='\''), '\''&'\'')"}' | jq '.'
