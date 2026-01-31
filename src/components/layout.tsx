@@ -6,6 +6,7 @@ interface LayoutProps {
   title?: string;
   activePath?: string;
   theme?: string;
+  csrfToken?: string;
 }
 
 const ThemeIcon = () => (
@@ -38,6 +39,7 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
   title = "SmartScraper",
   activePath,
   theme = "light",
+  csrfToken,
 }) => {
   return (
     <html lang="en" data-theme={theme}>
@@ -78,6 +80,13 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
         `}</style>
         <script src="/htmx.min.js"></script>
         <script src="/sse.js"></script>
+        {csrfToken && (
+          <script>{`
+            document.addEventListener('htmx:configRequest', function(evt) {
+              evt.detail.headers['X-CSRF-Token'] = '${csrfToken}';
+            });
+          `}</script>
+        )}
       </head>
       <body>
         <nav class="nav">

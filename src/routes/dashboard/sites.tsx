@@ -1,6 +1,10 @@
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
+import { zValidator } from '@hono/zod-validator';
+import { z } from 'zod';
 import { dashboardAuthMiddleware } from '../../middleware/auth.js';
+import { rateLimitMiddleware } from '../../middleware/rate-limit.js';
+import { csrfMiddleware, getCsrfToken } from '../../middleware/csrf.js';
 import { Layout } from '../../components/layout.js';
 import { SiteRow } from '../../components/site-row.js';
 import { SiteForm } from '../../components/site-form.js';
@@ -10,17 +14,29 @@ import { getDefaultEngine } from '../../core/engine.js';
 import type { SiteConfig } from '../../domain/models.js';
 import { logger } from '../../utils/logger.js';
 
+// Query parameter validation schema
+const querySchema = z.object({
+  q: z.string().optional().default(''),
+  sort: z.enum(['domain', 'failures', 'last']).optional().default('domain'),
+  limit: z.union([z.literal('all'), z.coerce.number().int().min(1).max(100)]).optional().default(10),
+  page: z.coerce.number().int().min(1).optional().default(1)
+});
+
 export const sitesRouter = new Hono();
 
+// Rate limit: 60 requests per minute per client (UI interactions)
+sitesRouter.use('/*', rateLimitMiddleware({ maxRequests: 60, windowMs: 60000 }));
+sitesRouter.use('/*', csrfMiddleware);
 sitesRouter.use('/*', dashboardAuthMiddleware);
 
-sitesRouter.get('/', async (c) => {
+sitesRouter.get('/', zValidator('query', querySchema), async (c) => {
   const theme = getCookie(c, 'theme') || 'light';
   logger.debug(`[SITES] Page render theme: ${theme}`);
-  const q = c.req.query('q')?.toLowerCase() || '';
-  const sort = c.req.query('sort') || 'domain';
-  const limit = c.req.query('limit') || '10';
-  const page = parseInt(c.req.query('page') || '1');
+  const query = c.req.valid('query');
+  const q = query.q.toLowerCase();
+  const sort = query.sort;
+  const limit = query.limit;
+  const page = query.page;
 
   let sites = await knownSitesAdapter.getAllConfigs();
   logger.debug(`[SITES] Initial count: ${sites.length}, Query: "${q}", Limit: ${limit}, Page: ${page}`);
@@ -45,7 +61,7 @@ sitesRouter.get('/', async (c) => {
 
   // Pagination logic
   const totalSites = sites.length;
-  const limitNum = limit === 'all' ? totalSites : parseInt(limit);
+  const limitNum = limit === 'all' ? totalSites : limit;
   const totalPages = limit === 'all' ? 1 : Math.ceil(totalSites / limitNum);
   const startIndex = (page - 1) * limitNum;
   const endIndex = limit === 'all' ? totalSites : Math.min(startIndex + limitNum, totalSites);

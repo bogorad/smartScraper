@@ -296,7 +296,9 @@ export class CoreScraperEngine {
       if (pageId) {
         try {
           await this.browserPort.closePage(pageId);
-        } catch {}
+        } catch (e) {
+          logger.debug('[ENGINE] Page cleanup failed in finally block', { error: String(e), pageId });
+        }
       }
     }
   }

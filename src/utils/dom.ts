@@ -4,8 +4,14 @@ const MAX_TEXT_LENGTH = 50;
 const MAX_SIBLINGS = 2;
 const MAX_DEPTH = 10;
 const MAX_DOM_LENGTH = 8000;
+const MAX_HTML_SIZE = 1024 * 1024; // 1MB limit to prevent ReDoS
 
 export function simplifyDom(html: string): string {
+  // Limit input size to prevent ReDoS attacks
+  if (html.length > MAX_HTML_SIZE) {
+    html = html.slice(0, MAX_HTML_SIZE);
+  }
+
   let simplified = html;
 
   for (const tag of REMOVE_TAGS) {

@@ -4,6 +4,7 @@ import type { CaptchaSolveInput, CaptchaSolveResult } from '../domain/models.js'
 import { CAPTCHA_TYPES, DEFAULTS } from '../constants.js';
 import { getTwocaptchaApiKey, getCaptchaDefaultTimeout, getCaptchaPollingInterval } from '../config.js';
 import { parseProxyUrl } from '../utils/proxy.js';
+import { logger } from '../utils/logger.js';
 
 export class TwoCaptchaAdapter implements CaptchaPort {
   private apiKey: string;
@@ -99,14 +100,17 @@ export class TwoCaptchaAdapter implements CaptchaPort {
       };
 
       // Log the payload (redact API key)
-      console.log('[2CAPTCHA] Creating DataDome task:', JSON.stringify({
-        ...taskPayload,
-        clientKey: '***REDACTED***'
-      }, null, 2));
+      logger.debug('[2CAPTCHA] Creating DataDome task:', {
+        task: {
+          ...taskPayload.task,
+          type: taskPayload.task.type,
+          websiteURL: taskPayload.task.websiteURL
+        }
+      });
 
       const createResponse = await axios.post('https://api.2captcha.com/createTask', taskPayload);
 
-      console.log('[2CAPTCHA] Create response:', JSON.stringify(createResponse.data, null, 2));
+      logger.debug('[2CAPTCHA] Create response:', { data: createResponse.data });
 
       const taskId = createResponse.data?.taskId;
       if (!taskId) {
@@ -123,7 +127,7 @@ export class TwoCaptchaAdapter implements CaptchaPort {
         });
 
         // Log polling result
-        console.log(`[2CAPTCHA] Poll result for task ${taskId}:`, JSON.stringify(resultResponse.data));
+        logger.debug(`[2CAPTCHA] Poll result for task ${taskId}:`, { data: resultResponse.data });
 
         if (resultResponse.data?.status === 'ready') {
           const cookie = resultResponse.data?.solution?.cookie;
@@ -133,8 +137,27 @@ export class TwoCaptchaAdapter implements CaptchaPort {
           return { solved: false, reason: 'Solution missing cookie' };
         }
 
-        if (resultResponse.data?.status === 'error' || (resultResponse.data?.errorId && resultResponse.data.errorId !== 0)) {
-          return { solved: false, reason: resultResponse.data?.errorDescription || resultResponse.data?.errorCode || 'Unknown error' };
+        // Check for fatal errors (including errorCode regardless of status)
+        const hasError = resultResponse.data?.status === 'error' ||
+                        (resultResponse.data?.errorId && resultResponse.data.errorId !== 0) ||
+                        resultResponse.data?.errorCode;
+
+        if (hasError) {
+          const errorCode = resultResponse.data?.errorCode;
+          const errorDesc = resultResponse.data?.errorDescription;
+
+          // Map known fatal error codes
+          const fatalErrors: Record<string, string> = {
+            'ERROR_CAPTCHA_UNSOLVABLE': 'CAPTCHA could not be solved',
+            'ERROR_WRONG_CAPTCHA_ID': 'Invalid CAPTCHA ID',
+            'ERROR_BAD_TOKEN_OR_PAGEURL': 'Invalid token or page URL',
+            'ERROR_EMPTY_ACTION': 'Empty action parameter',
+            'ERROR_PROXY_CONNECTION_FAILED': 'Proxy connection failed',
+            'ERROR_PROXY_NOT_AUTHORIZED': 'Proxy authentication failed'
+          };
+
+          const reason = fatalErrors[errorCode] || errorDesc || errorCode || 'Unknown error';
+          return { solved: false, reason };
         }
       }
 

@@ -31,6 +31,10 @@ export const apiAuthMiddleware = createMiddleware(async (c, next) => {
   }
 
   if (token !== apiToken) {
+    logger.warn('[AUTH] API authentication failed', {
+      ip: c.req.header('x-forwarded-for') || 'unknown',
+      userAgent: c.req.header('user-agent')?.slice(0, 100) || 'unknown'
+    });
     return c.json({ error: 'Unauthorized' }, 401);
   }
 
@@ -50,9 +54,13 @@ export const dashboardAuthMiddleware = createMiddleware(async (c, next) => {
   if (sessionCookie !== expectedHash) {
     // Only log if a cookie was actually presented but failed (avoid noise on first visit)
     if (sessionCookie) {
-      logger.warn('[AUTH] Invalid session cookie presented');
+      logger.warn('[AUTH] Invalid session cookie presented', {
+        ip: c.req.header('x-forwarded-for') || 'unknown',
+        userAgent: c.req.header('user-agent')?.slice(0, 100) || 'unknown',
+        path: c.req.path
+      });
     } else {
-      logger.info('[AUTH] No session cookie received');
+      logger.info('[AUTH] No session cookie received', { path: c.req.path });
     }
     const path = c.req.path;
     return c.redirect(`/login?redirect=${encodeURIComponent(path)}`);
@@ -63,11 +71,14 @@ export const dashboardAuthMiddleware = createMiddleware(async (c, next) => {
 
 export function createSession(c: any, token: string): void {
   const hash = hashToken(token);
-  
-  // Force secure: false for now to ensure it works on LAN/HTTP
-  const isSecure = false;
-  
-  logger.info(`[AUTH] Creating session. Secure: ${isSecure}`);
+
+  // Adaptive security: secure=true only in production on non-localhost
+  const hostname = c.req.header('host')?.split(':')[0] || '';
+  const isLocalhost = ['localhost', '127.0.0.1', '0.0.0.0'].includes(hostname);
+  const isProduction = getNodeEnv() === 'production';
+  const isSecure = isProduction && !isLocalhost;
+
+  logger.info(`[AUTH] Creating session. Secure: ${isSecure}, Host: ${hostname}`);
 
   setCookie(c, SESSION_COOKIE, hash, {
     httpOnly: true,

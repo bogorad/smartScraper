@@ -17,3 +17,6 @@ coverage/
 
 # Runtime data
 temp_test.crx
+
+# bv (beads viewer) local config and caches
+.bv/

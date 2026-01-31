@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { dashboardAuthMiddleware } from "../../middleware/auth.js";
+import { rateLimitMiddleware } from "../../middleware/rate-limit.js";
+import { csrfMiddleware, getCsrfToken } from "../../middleware/csrf.js";
 import { Layout } from "../../components/layout.js";
 import { StatsCard } from "../../components/stats-card.js";
 import {
@@ -15,6 +17,9 @@ import { logger } from "../../utils/logger.js";
 
 export const dashboardRouter = new Hono();
 
+// Rate limit: 60 requests per minute per client (UI interactions)
+dashboardRouter.use("/*", rateLimitMiddleware({ maxRequests: 60, windowMs: 60000 }));
+dashboardRouter.use("/*", csrfMiddleware);
 dashboardRouter.use("/*", dashboardAuthMiddleware);
 
 dashboardRouter.post("/theme", (c) => {
@@ -39,9 +44,27 @@ dashboardRouter.post("/theme", (c) => {
 interface Client {
   controller: ReadableStreamDefaultController;
   id: symbol;
+  connectedAt: number;
 }
 
 const clients = new Set<Client>();
+const MAX_SSE_CLIENTS = 100;
+const SSE_CONNECTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+// Periodic cleanup of stale connections
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const client of clients) {
+    if (now - client.connectedAt > SSE_CONNECTION_TIMEOUT_MS) {
+      clients.delete(client);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    logger.debug(`[SSE] Cleaned up ${cleaned} stale connections`);
+  }
+}, 60000); // Run every minute
 
 function escapeHtml(text: string): string {
   return text
@@ -106,13 +129,19 @@ workerEvents.on("change", (data) => {
 });
 
 dashboardRouter.get("/events", async (c) => {
+  // Check connection limit
+  if (clients.size >= MAX_SSE_CLIENTS) {
+    logger.warn(`[SSE] Connection limit reached: ${MAX_SSE_CLIENTS}`);
+    return c.json({ error: 'Server connection limit reached' }, 503);
+  }
+
   let clientId: symbol | null = null;
   let keepaliveInterval: NodeJS.Timeout | null = null;
 
   const stream = new ReadableStream({
     start(controller) {
       clientId = Symbol("client");
-      clients.add({ controller, id: clientId });
+      clients.add({ controller, id: clientId, connectedAt: Date.now() });
       logger.debug(
         `[SSE] Client connected, total clients: ${clients.size}`,
       );
@@ -173,11 +202,14 @@ dashboardRouter.get("/", async (c) => {
   const topDomains = await getTopDomains(5);
   const queueStats = getQueueStats();
 
+  const csrfToken = getCsrfToken(c);
+
   return c.html(
     <Layout
       title="Dashboard - SmartScraper"
       activePath="/dashboard"
       theme={theme}
+      csrfToken={csrfToken}
     >
       <h1>Dashboard</h1>
 

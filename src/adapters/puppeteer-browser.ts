@@ -30,9 +30,15 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     const session = this.sessions.get(pageId);
     if (!session) return;
 
-    try { await session.page.close(); } catch {}
-    try { await session.browser.close(); } catch {}
-    try { await fs.promises.rm(session.userDataDir, { recursive: true, force: true }); } catch {}
+    try { await session.page.close(); } catch (e) {
+      logger.debug('[BROWSER] Page close failed (may already be closed)', { error: String(e) });
+    }
+    try { await session.browser.close(); } catch (e) {
+      logger.debug('[BROWSER] Browser close failed (may already be closed)', { error: String(e) });
+    }
+    try { await fs.promises.rm(session.userDataDir, { recursive: true, force: true }); } catch (e) {
+      logger.debug('[BROWSER] User data dir cleanup failed', { error: String(e) });
+    }
     this.sessions.delete(pageId);
   }
 
@@ -102,7 +108,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
 
     await page.goto(url, {
       waitUntil: options?.waitUntil || 'networkidle2',
-      timeout: options?.timeout || 45000
+      timeout: options?.timeout || DEFAULTS.TIMEOUT_MS
     });
 
     await page.mouse.move(100, 100);
@@ -149,7 +155,22 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     return args;
   }
 
+  // XPath validation constants
+  private static readonly MAX_XPATH_LENGTH = 500;
+  private static readonly ALLOWED_XPATH_PATTERN = /^[\w\-\/\[\]@="'\s\.\(\)\|\*\:]+$/;
+
+  private validateXPath(xpath: string): boolean {
+    if (!xpath || xpath.length > PuppeteerBrowserAdapter.MAX_XPATH_LENGTH) return false;
+    return PuppeteerBrowserAdapter.ALLOWED_XPATH_PATTERN.test(xpath);
+  }
+
   async evaluateXPath(pageId: string, xpath: string): Promise<string[] | null> {
+    // Validate XPath before processing
+    if (!this.validateXPath(xpath)) {
+      logger.warn('[BROWSER] Invalid XPath rejected', { xpath: xpath.slice(0, 50) });
+      return null;
+    }
+
     const session = this.sessions.get(pageId);
     if (!session) return null;
 
@@ -279,6 +300,9 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
   async reload(pageId: string, timeoutMs?: number): Promise<void> {
     const session = this.sessions.get(pageId);
     if (!session) return;
-    await session.page.reload({ waitUntil: 'networkidle2', timeout: timeoutMs });
+    await session.page.reload({
+      waitUntil: 'networkidle2',
+      timeout: timeoutMs ?? DEFAULTS.TIMEOUT_MS
+    });
   }
 }
