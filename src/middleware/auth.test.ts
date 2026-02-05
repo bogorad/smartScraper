@@ -139,17 +139,17 @@ describe('auth middleware', () => {
   });
 
   describe('createSession', () => {
-    it('should set session cookie', () => {
-      const mockContext = {
-        header: vi.fn(),
-        req: {
-          url: 'http://localhost'
-        }
-      };
+    it('should set session cookie', async () => {
+      const testApp = new Hono();
+      testApp.post('/login', (c) => {
+        createSession(c, 'test-token');
+        return c.text('OK');
+      });
 
-      createSession(mockContext, 'test-token');
+      const req = new Request('http://localhost/login', { method: 'POST' });
+      const res = await testApp.request(req);
 
-      expect(true).toBe(true);
+      expect(res.headers.get('Set-Cookie')).toContain('ss_session=');
     });
   });
 });

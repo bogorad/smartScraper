@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { scrapeRouter } from './scrape.js';
 
 vi.mock('../../config.js', () => ({
-  getApiToken: () => 'test-api-token'
+  getApiToken: () => 'test-api-token',
+  getLogLevel: () => 'NONE'
+}));
+
+// Bypass rate limiting in tests
+vi.mock('../../middleware/rate-limit.js', () => ({
+  rateLimitMiddleware: () => async (_c: unknown, next: () => Promise<void>) => next()
 }));
 
 vi.mock('../../core/engine.js', () => ({

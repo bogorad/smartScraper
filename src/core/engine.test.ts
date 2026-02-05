@@ -128,7 +128,7 @@ describe('CoreScraperEngine', () => {
 
       expect(mockCaptcha.solveIfPresent).toHaveBeenCalled();
       expect(mockBrowser.setCookies).toHaveBeenCalledWith('page-123', 'session=abc123');
-      expect(mockBrowser.reload).toHaveBeenCalledWith('page-123');
+      expect(mockBrowser.reload).toHaveBeenCalledWith('page-123', expect.any(Number));
       expect(result.success).toBe(true);
     });
 

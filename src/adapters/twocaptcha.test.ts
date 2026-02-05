@@ -7,7 +7,8 @@ vi.mock('axios');
 vi.mock('../config.js', () => ({
   getTwocaptchaApiKey: () => 'test-api-key',
   getCaptchaDefaultTimeout: () => 120,
-  getCaptchaPollingInterval: () => 100
+  getCaptchaPollingInterval: () => 100,
+  getLogLevel: () => 'NONE'
 }));
 
 describe('TwoCaptchaAdapter', () => {
