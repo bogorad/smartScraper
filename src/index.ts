@@ -33,7 +33,9 @@ process.on('unhandledRejection', (reason, promise) => {
   // Check for benign Puppeteer extension cleanup error (see ADR-001, issue smartScraper-b9a)
   // This occurs when browser.close() is called while extensions are still loading
   // due to a race condition in Puppeteer's extension installation.
-  const reasonStr = reason instanceof Error ? reason.message : String(reason);
+  const reasonStr = reason instanceof Error 
+    ? `${reason.name}: ${reason.message}` 
+    : String(reason);
   const isBenignExtensionError =
     reasonStr.includes('TargetCloseError') && reasonStr.includes('Extensions.loadUnpacked');
 

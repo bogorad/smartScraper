@@ -33,7 +33,13 @@ async function ensureFile(): Promise<void> {
 async function loadStatsInternal(): Promise<Stats> {
   await ensureFile();
   const content = await fs.readFile(getStatsFile(), 'utf-8');
-  return JSON.parse(content) as Stats;
+  const parsed = JSON.parse(content) as Partial<Stats>;
+  // Ensure domainCounts is always initialized (defensive against malformed JSON)
+  return {
+    ...DEFAULT_STATS,
+    ...parsed,
+    domainCounts: parsed.domainCounts || {}
+  };
 }
 
 async function saveStatsInternal(stats: Stats): Promise<void> {
@@ -76,7 +82,7 @@ export async function recordScrape(domain: string, success: boolean): Promise<vo
 export async function getTopDomains(limit = 5): Promise<{ domain: string; count: number }[]> {
   return statsMutex.runExclusive(async () => {
     const stats = await loadStatsInternal();
-    return Object.entries(stats.domainCounts)
+    return Object.entries(stats.domainCounts || {})
       .sort(([, a], [, b]) => b - a)
       .slice(0, limit)
       .map(([domain, count]) => ({ domain, count }));

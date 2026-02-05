@@ -1,7 +1,10 @@
 package e2e
 
 import (
+	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -94,16 +97,32 @@ func TestApiScrapeInvalidUrl(t *testing.T) {
 func TestDashboardRequiresAuth(t *testing.T) {
 	baseURL := GetBaseURL(t)
 
-	// Use standard http client without auth
-	resp, err := http.Get(baseURL + "/dashboard/sites")
+	// Create a client that doesn't follow redirects
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	req, err := http.NewRequest("GET", baseURL+"/dashboard/sites", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// Should redirect to login or return 401
-	if resp.StatusCode != 401 && resp.StatusCode != 302 {
-		t.Errorf("Expected 401 or 302 without auth, got %d", resp.StatusCode)
+	// Should redirect to login (302) since there's no session cookie
+	if resp.StatusCode != 302 {
+		t.Errorf("Expected 302 redirect to login without auth, got %d", resp.StatusCode)
+	}
+
+	location := resp.Header.Get("Location")
+	if location == "" || !strings.Contains(location, "/login") {
+		t.Errorf("Expected redirect Location to contain /login, got: %s", location)
 	}
 }
 
@@ -111,7 +130,7 @@ func TestDashboardRequiresAuth(t *testing.T) {
 func TestDashboardSitesRenders(t *testing.T) {
 	baseURL := GetBaseURL(t)
 	dataDir := GetDataDir(t)
-	client := NewTestClient(GetAPIToken(t))
+	token := GetAPIToken(t)
 
 	// Seed test data
 	WriteSites(t, dataDir, []SiteConfig{
@@ -121,12 +140,39 @@ func TestDashboardSitesRenders(t *testing.T) {
 		},
 	})
 
-	resp, err := client.Get(baseURL + "/dashboard/sites")
+	// Dashboard requires session cookie, not Bearer token
+	// First login to get session cookie
+	jar, err := cookiejar.New(nil)
 	if err != nil {
-		t.Fatalf("Request failed: %v", err)
+		t.Fatalf("Failed to create cookie jar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+
+	// Login via POST
+	loginURL := baseURL + "/login"
+	form := url.Values{}
+	form.Set("token", token)
+	resp, err := client.PostForm(loginURL, form)
+	if err != nil {
+		t.Fatalf("Login request failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 200 && resp.StatusCode != 302 {
+		t.Fatalf("Login failed with status: %d", resp.StatusCode)
 	}
 
-	AssertStatus(t, resp, 200)
+	// Now access dashboard with session cookie
+	resp, err = client.Get(baseURL + "/dashboard/sites")
+	if err != nil {
+		t.Fatalf("Dashboard request failed: %v", err)
+	}
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, string(body))
+	}
 
 	body := ReadBody(t, resp)
 
