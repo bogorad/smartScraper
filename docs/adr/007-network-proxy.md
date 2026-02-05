@@ -13,7 +13,7 @@ SmartScraper must support HTTP proxies for bypassing restrictions and improving 
 
 ```dotenv
 PROXY_SERVER=http://username:password@hostname:port
-# Legacy alias (also supported):
+# Fallback (also supported):
 HTTP_PROXY=http://username:password@hostname:port
 ```
 

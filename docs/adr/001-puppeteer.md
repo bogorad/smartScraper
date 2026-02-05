@@ -64,6 +64,7 @@ async closePage(pageId: string) {
 Extensions are loaded via Puppeteer's `enableExtensions` option:
 
 ```typescript
+// extensionPaths from this.getExtensionPaths() (parses EXTENSION_PATHS env var)
 const hasExtensions = extensionPaths.length > 0;
 
 const browser = await puppeteer.launch({
