@@ -25,7 +25,8 @@ export { METHODS, OUTPUT_TYPES, VERSION } from './constants.js';
 let browserAdapter: PuppeteerBrowserAdapter | null = null;
 
 process.on('uncaughtException', (error) => {
-  logger.error('[FATAL] Uncaught Exception:', error);
+  // Use console directly - logger may depend on uninitialized config
+  console.error('[FATAL] Uncaught Exception:', error);
   process.exit(1);
 });
 
@@ -40,11 +41,13 @@ process.on('unhandledRejection', (reason, promise) => {
     reasonStr.includes('TargetCloseError') && reasonStr.includes('Extensions.loadUnpacked');
 
   if (isBenignExtensionError) {
-    logger.warn('[PUPPETEER] Ignoring benign extension cleanup error during browser close');
+    // Use console directly - logger may depend on uninitialized config
+    console.warn('[PUPPETEER] Ignoring benign extension cleanup error during browser close');
     return;
   }
 
-  logger.error('Unhandled Rejection', { reason, promise }, 'FATAL');
+  // Use console directly - logger may depend on uninitialized config
+  console.error('[FATAL] Unhandled Rejection:', reason);
   process.exit(1);
 });
 

@@ -126,7 +126,51 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
 
       await page.mouse.move(100, 100);
       await page.evaluate(() => window.scrollBy(0, 200));
-      await new Promise(r => setTimeout(r, 1000));
+      
+      // Wait for extension content injection (e.g., bypass-paywalls fetching from archive.is)
+      // Poll for substantial content appearing, with timeout
+      if (hasExtensions) {
+        const maxWaitMs = 15000;
+        const pollIntervalMs = 500;
+        const minContentLength = 1000;
+        let waited = 0;
+        
+        while (waited < maxWaitMs) {
+          const contentLength = await page.evaluate(() => {
+            // Check common article selectors for content
+            const selectors = [
+              'article',
+              '[data-testid="article-content-body"]',
+              '[itemprop="articleBody"]',
+              '.article-body',
+              '.article-content',
+              'main article'
+            ];
+            for (const sel of selectors) {
+              const el = document.querySelector(sel) as HTMLElement | null;
+              if (el?.innerText && el.innerText.length > 500) {
+                return el.innerText.length;
+              }
+            }
+            return (document.body as HTMLElement)?.innerText?.length || 0;
+          });
+          
+          if (contentLength >= minContentLength) {
+            logger.debug(`Extension content ready after ${waited}ms`, { contentLength }, 'BROWSER');
+            break;
+          }
+          
+          await new Promise(r => setTimeout(r, pollIntervalMs));
+          waited += pollIntervalMs;
+        }
+        
+        if (waited >= maxWaitMs) {
+          logger.debug(`Extension content wait timeout after ${maxWaitMs}ms`, {}, 'BROWSER');
+        }
+      } else {
+        // Original wait time for non-extension pages
+        await new Promise(r => setTimeout(r, 3000));
+      }
 
       const pageId = `page-${++this.pageCounter}`;
       this.sessions.set(pageId, { page, browser, userDataDir });
@@ -178,6 +222,9 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-web-security',
+      
+      // Suppress D-Bus errors in headless Linux environments
+      '--disable-features=Translate,OptimizationHints,MediaRouter',
       
       // Disable images for speed
       '--blink-settings=imagesEnabled=false'
@@ -286,29 +333,42 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       return { type: CAPTCHA_TYPES.DATADOME, captchaUrl };
     }
 
-    // Cloudflare detection
-    if (html.includes('cf-turnstile') || 
-        html.includes('cf-challenge') || 
-        html.includes('challenges.cloudflare.com')) {
-      // Extract Turnstile sitekey
+    // Cloudflare Turnstile detection - only if we can find a sitekey
+    // (other Cloudflare challenges like IUAM don't have sitekeys)
+    if (html.includes('cf-turnstile') || html.includes('turnstile')) {
       const siteKey = await session.page.evaluate(() => {
-        const el = document.querySelector('[data-sitekey]');
+        const el = document.querySelector('.cf-turnstile[data-sitekey], [data-sitekey]');
         return el?.getAttribute('data-sitekey') || undefined;
       });
-      return { type: CAPTCHA_TYPES.CLOUDFLARE, siteKey };
+      if (siteKey) {
+        return { type: CAPTCHA_TYPES.CLOUDFLARE, siteKey };
+      }
+      // No sitekey found - fall through to check other captcha types
     }
 
     // Only treat reCAPTCHA/hCaptcha as blocking if it's a challenge page
     // (visible captcha in a minimal page), not just present for comments/login
     if (html.includes('g-recaptcha') || html.includes('h-captcha')) {
       const isBlockingCaptcha = await session.page.evaluate(() => {
+        // Guard against non-HTML pages (PDFs, etc.)
+        if (!document.body || typeof document.body.innerText !== 'string') {
+          return false;
+        }
+        
         // Check if page has minimal content (likely a challenge page)
-        const bodyText = document.body?.innerText?.trim() || '';
+        const bodyText = document.body.innerText.trim();
         const hasMinimalContent = bodyText.length < 500;
         
-        // Check if recaptcha is visible and prominent
-        const recaptcha = document.querySelector('.g-recaptcha, .h-captcha, [data-sitekey]');
+        // Check if recaptcha/hcaptcha is visible and prominent
+        // Use specific selectors that require data-sitekey attribute
+        const recaptcha = document.querySelector('.g-recaptcha[data-sitekey], .h-captcha[data-sitekey]');
         if (!recaptcha) return false;
+        
+        // Check computed visibility (display/visibility CSS)
+        const style = window.getComputedStyle(recaptcha);
+        if (style.display === 'none' || style.visibility === 'hidden') {
+          return false;
+        }
         
         const rect = recaptcha.getBoundingClientRect();
         const isVisible = rect.width > 0 && rect.height > 0;
@@ -419,5 +479,102 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     }, token);
 
     logger.debug('Injected Turnstile token', { pageId }, 'BROWSER');
+  }
+
+  /**
+   * Extract article content from embedded JSON (Apollo State, JSON-LD, etc.)
+   * Used as fallback when paywall bypass fails but content is in page JSON
+   */
+  async extractEmbeddedArticle(pageId: string): Promise<string | null> {
+    const session = this.sessions.get(pageId);
+    if (!session) return null;
+
+    try {
+      // Use evaluate with a string to bypass esbuild transformations
+      const result = await session.page.evaluate(`
+        (function() {
+          function extractFromNode(node) {
+            var parts = [];
+            if (node && node.attributes && node.attributes.value) {
+              parts.push(node.attributes.value);
+            }
+            if (node && Array.isArray(node.children)) {
+              for (var i = 0; i < node.children.length; i++) {
+                parts.push(extractFromNode(node.children[i]));
+              }
+            }
+            return parts.filter(Boolean).join('');
+          }
+
+          // Method 1: Try Apollo State (The Times, etc.)
+          var apolloState = window.__APOLLO_STATE__;
+          if (apolloState) {
+            var articleKey = Object.keys(apolloState).find(function(k) { return k.startsWith('Article:'); });
+            if (articleKey) {
+              var article = apolloState[articleKey];
+              
+              if (article && article.paywalledContent && article.paywalledContent.json) {
+                var paragraphs = article.paywalledContent.json
+                  .map(function(n) { return extractFromNode(n); })
+                  .filter(Boolean);
+                if (paragraphs.length > 0) {
+                  return paragraphs.join('\\n\\n');
+                }
+              }
+              
+              if (article && article.body && article.body.json) {
+                var bodyParagraphs = article.body.json
+                  .map(function(n) { return extractFromNode(n); })
+                  .filter(Boolean);
+                if (bodyParagraphs.length > 0) {
+                  return bodyParagraphs.join('\\n\\n');
+                }
+              }
+            }
+          }
+
+          // Method 2: Try JSON-LD articleBody
+          var jsonLdScripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+          for (var j = 0; j < jsonLdScripts.length; j++) {
+            try {
+              var data = JSON.parse(jsonLdScripts[j].textContent || '');
+              var items = Array.isArray(data) ? data : [data];
+              for (var k = 0; k < items.length; k++) {
+                if (items[k].articleBody && typeof items[k].articleBody === 'string' && items[k].articleBody.length > 200) {
+                  return items[k].articleBody;
+                }
+                if (items[k]['@graph']) {
+                  for (var m = 0; m < items[k]['@graph'].length; m++) {
+                    var graphItem = items[k]['@graph'][m];
+                    if (graphItem.articleBody && typeof graphItem.articleBody === 'string' && graphItem.articleBody.length > 200) {
+                      return graphItem.articleBody;
+                    }
+                  }
+                }
+              }
+            } catch (e) {}
+          }
+
+          // Method 3: Try __NEXT_DATA__
+          var nextData = window.__NEXT_DATA__;
+          if (nextData && nextData.props && nextData.props.pageProps && nextData.props.pageProps.article) {
+            var body = nextData.props.pageProps.article.body;
+            if (typeof body === 'string' && body.length > 200) {
+              return body;
+            }
+          }
+
+          return null;
+        })()
+      `) as string | null;
+
+      if (result) {
+        logger.debug('Extracted article from embedded JSON', { length: result.length }, 'BROWSER');
+      }
+      return result;
+    } catch (e) {
+      logger.debug('Failed to extract embedded article', { error: String(e) }, 'BROWSER');
+      return null;
+    }
   }
 }

@@ -5,7 +5,8 @@ import { CAPTCHA_TYPES, ERROR_TYPES, OUTPUT_TYPES, METHODS } from '../constants.
 
 vi.mock('../config.js', () => ({
   getDataDir: () => './data',
-  getLogLevel: () => 'NONE'
+  getLogLevel: () => 'NONE',
+  getConcurrency: () => 1
 }));
 
 vi.mock('../services/stats-storage.js', () => ({
@@ -48,7 +49,8 @@ describe('CoreScraperEngine', () => {
       getCookies: vi.fn().mockResolvedValue(''),
       setCookies: vi.fn().mockResolvedValue(undefined),
       reload: vi.fn().mockResolvedValue(undefined),
-      injectTurnstileToken: vi.fn().mockResolvedValue(undefined)
+      injectTurnstileToken: vi.fn().mockResolvedValue(undefined),
+      extractEmbeddedArticle: vi.fn().mockResolvedValue(null)
     };
 
     mockLlm = {

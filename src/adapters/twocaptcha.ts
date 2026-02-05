@@ -227,7 +227,18 @@ export class TwoCaptchaAdapter implements CaptchaPort {
         if (hasError) {
           const errorCode = resultResponse.data?.errorCode;
           const errorDesc = resultResponse.data?.errorDescription;
-          const reason = errorDesc || errorCode || 'Unknown Turnstile error';
+
+          // Map known fatal error codes (same as DataDome)
+          const fatalErrors: Record<string, string> = {
+            'ERROR_CAPTCHA_UNSOLVABLE': 'CAPTCHA could not be solved',
+            'ERROR_WRONG_CAPTCHA_ID': 'Invalid CAPTCHA ID',
+            'ERROR_BAD_TOKEN_OR_PAGEURL': 'Invalid token or page URL',
+            'ERROR_EMPTY_ACTION': 'Empty action parameter',
+            'ERROR_PROXY_CONNECTION_FAILED': 'Proxy connection failed',
+            'ERROR_PROXY_NOT_AUTHORIZED': 'Proxy authentication failed'
+          };
+
+          const reason = fatalErrors[errorCode] || errorDesc || errorCode || 'Unknown Turnstile error';
           return { solved: false, reason };
         }
       }

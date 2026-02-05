@@ -66,7 +66,13 @@ function initLogFile() {
 }
 
 function shouldLog(level: LogLevel): boolean {
-  const currentLevel = getLogLevel() as LogLevel;
+  let currentLevel: LogLevel;
+  try {
+    currentLevel = getLogLevel() as LogLevel;
+  } catch {
+    // Config not initialized yet - default to showing all logs
+    currentLevel = 'DEBUG';
+  }
   return LEVELS[level] >= LEVELS[currentLevel];
 }
 

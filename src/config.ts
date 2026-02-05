@@ -57,7 +57,10 @@ const ConfigSchema = z.object({
   
   // Logging & Debug
   logLevel: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR', 'NONE']).default('INFO'),
-  saveHtmlOnSuccessNav: z.boolean().default(false),
+  saveHtmlOnSuccessNav: z.preprocess(
+    (val) => val === 'true' || val === '1' || val === true,
+    z.boolean()
+  ).default(false),
   
   // DOM structure extraction
   domStructureMaxTextLength: z.coerce.number().default(15),

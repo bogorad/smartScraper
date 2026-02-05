@@ -246,6 +246,45 @@ export class CoreScraperEngine {
         }
 
         if (!xpath) {
+          // Fallback: Try extracting from embedded JSON (Apollo State, JSON-LD)
+          logger.debug('[ENGINE] XPath discovery failed, trying embedded JSON extraction');
+          const embeddedContent = await this.browserPort.extractEmbeddedArticle(pageId);
+          
+          if (embeddedContent && embeddedContent.length >= SCORING.MIN_CONTENT_CHARS) {
+            logger.info(`[ENGINE] Extracted ${embeddedContent.length} chars from embedded JSON`);
+            
+            const outputType = options?.outputType || OUTPUT_TYPES.CONTENT_ONLY;
+            let data: string | object = embeddedContent;
+            
+            if (outputType === OUTPUT_TYPES.FULL_HTML) {
+              data = await this.browserPort.getPageHtml(pageId);
+            } else if (outputType === OUTPUT_TYPES.METADATA_ONLY) {
+              data = { xpath: 'embedded_json', contentLength: embeddedContent.length };
+            } else if (outputType === OUTPUT_TYPES.MARKDOWN) {
+              // Content is already plain text, just format paragraphs
+              data = embeddedContent;
+            }
+            
+            result = {
+              success: true,
+              method: METHODS.PUPPETEER_STEALTH,
+              xpath: 'embedded_json',
+              data
+            };
+            
+            await this.recordResult(context, result, startTime, embeddedContent.length);
+            return result;
+          }
+          
+          // Save debug snapshot on discovery failure if debug enabled
+          if (options?.debug) {
+            const fullHtml = await this.browserPort.getPageHtml(pageId);
+            const debugDir = path.join(process.cwd(), 'data', 'logs', 'debug');
+            await fs.promises.mkdir(debugDir, { recursive: true });
+            const filename = `FAILED_${context.normalizedDomain.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.html`;
+            await fs.promises.writeFile(path.join(debugDir, filename), fullHtml);
+            logger.debug(`[DEBUG] Saved FAILED HTML snapshot to ${filename}`);
+          }
           result = { success: false, errorType: ERROR_TYPES.EXTRACTION, error: 'No valid XPath found' };
           await this.recordResult(context, result, startTime);
           return result;
