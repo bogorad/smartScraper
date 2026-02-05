@@ -183,7 +183,12 @@ if [[ $FAILED -gt 0 ]]; then
         for domain in "${FAILED_DOMAINS[@]}"; do
             echo ""
             echo "--- $domain ---"
-            grep "\"$domain\"" "$LOG_FILE" | tail -10 | jq -c '{level: .level, msg: .message, err: .error}' 2>/dev/null || echo "(no log entries found)"
+            entries=$(grep -F "\"$domain\"" "$LOG_FILE" | tail -10)
+            if [[ -z "$entries" ]]; then
+                echo "(no log entries found)"
+            else
+                echo "$entries" | jq -c '{level: .level, msg: .message, err: .error}' 2>/dev/null || echo "(log parse error)"
+            fi
         done
     else
         echo "(log file not found: $LOG_FILE)"
