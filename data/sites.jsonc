@@ -313,14 +313,14 @@
   {
     "domainPattern": "thelocal.es",
     "xpathMainContent": "//div[@id='articleBody']",
-    "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:36.784Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:41:29.990Z",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "cjr.org",
     "xpathMainContent": "//div[contains(@class, 'entry-content')]",
     "lastSuccessfulScrapeTimestamp": "2025-12-07T14:02:44.577Z",
-    "failureCountSinceLastSuccess": 0
+    "failureCountSinceLastSuccess": 2
   },
   {
     "domainPattern": "thetimes.com",

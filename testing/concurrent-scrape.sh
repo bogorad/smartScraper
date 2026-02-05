@@ -13,10 +13,23 @@ SERVER="${SMART_SCRAPER_SERVER:-http://localhost:5555}"
 TIMEOUT="${SMART_SCRAPER_TIMEOUT:-120}"
 URLS_FILE="testing/urls_for_testing.txt"
 
-# Decrypt secrets using sops -d | yq
-SMART_SCRAPER=$(sops -d secrets.yaml | yq -r '.smart_scraper')
-if [[ -z "$SMART_SCRAPER" ]]; then
-    echo "Error: Failed to get smart_scraper token from secrets.yaml"
+# Temp files - declare early for cleanup trap
+OUT1="" OUT2="" TIME1="" TIME2=""
+
+# Cleanup on exit (normal or interrupted)
+cleanup() {
+    rm -f "$OUT1" "$OUT2" "$TIME1" "$TIME2" "$TIME1.exit" "$TIME2.exit" 2>/dev/null
+}
+trap cleanup EXIT
+
+# Decrypt secrets using sops -d | yq with proper error handling
+SECRETS=$(sops -d secrets.yaml 2>/dev/null) || {
+    echo "Error: Failed to decrypt secrets.yaml"
+    exit 1
+}
+SMART_SCRAPER=$(echo "$SECRETS" | yq -r '.smart_scraper')
+if [[ -z "$SMART_SCRAPER" || "$SMART_SCRAPER" == "null" ]]; then
+    echo "Error: smart_scraper key not found in secrets.yaml"
     exit 1
 fi
 
@@ -51,7 +64,7 @@ echo "Server: $SERVER"
 echo "Timeout: ${TIMEOUT}s"
 echo ""
 
-# Temp files for output
+# Create temp files
 OUT1=$(mktemp)
 OUT2=$(mktemp)
 TIME1=$(mktemp)
@@ -66,20 +79,20 @@ CURL_BASE=(-sf -X POST "$SERVER/api/scrape"
     -H "Content-Type: application/json"
     --max-time "$TIMEOUT")
 
-# Launch both in parallel using process substitution
+# Launch both in parallel
 {
     start=$(date +%s)
     curl "${CURL_BASE[@]}" -d "{\"url\": \"$URL1\", \"outputType\": \"metadata_only\"}" > "$OUT1" 2>&1
-    echo $? > "$TIME1.exit"
-    echo $(($(date +%s) - start)) > "$TIME1"
+    echo "$?" > "$TIME1.exit"
+    echo "$(($(date +%s) - start))" > "$TIME1"
 } &
 PID1=$!
 
 {
     start=$(date +%s)
     curl "${CURL_BASE[@]}" -d "{\"url\": \"$URL2\", \"outputType\": \"metadata_only\"}" > "$OUT2" 2>&1
-    echo $? > "$TIME2.exit"
-    echo $(($(date +%s) - start)) > "$TIME2"
+    echo "$?" > "$TIME2.exit"
+    echo "$(($(date +%s) - start))" > "$TIME2"
 } &
 PID2=$!
 
@@ -95,7 +108,7 @@ DUR2=$(cat "$TIME2")
 RESP1=$(cat "$OUT1")
 RESP2=$(cat "$OUT2")
 
-# Parse results
+# Parse results with jq validation
 parse_result() {
     local label="$1"
     local exit_code="$2"
@@ -104,6 +117,12 @@ parse_result() {
     
     if [[ $exit_code -ne 0 ]]; then
         echo "$label: FAILED (curl exit $exit_code) [${duration}s]"
+        return 1
+    fi
+    
+    # Validate JSON before parsing
+    if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+        echo "$label: FAILED (invalid JSON response) [${duration}s]"
         return 1
     fi
     
@@ -123,9 +142,6 @@ parse_result "URL1" "$EXIT1" "$RESP1" "$DUR1"
 R1=$?
 parse_result "URL2" "$EXIT2" "$RESP2" "$DUR2"
 R2=$?
-
-# Cleanup
-rm -f "$OUT1" "$OUT2" "$TIME1" "$TIME2" "$TIME1.exit" "$TIME2.exit"
 
 echo ""
 echo "=== Results ==="
