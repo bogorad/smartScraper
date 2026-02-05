@@ -77,32 +77,20 @@ function escapeHtml(text: string): string {
 
 function renderWorkersHtml(stats: {
   active: number;
-  max: number;
-  activeUrls: string[];
+  activeUrl?: string;
 }): string {
-  const list =
-    stats.activeUrls.length > 0
-      ? `<ul style="margin: 0; padding-left: 16px;">${stats.activeUrls
-          .map(
-            (url) =>
-              `<li class="code text-sm" style="word-break: break-all;">${escapeHtml(url)}</li>`,
-          )
-          .join("")}</ul>`
-      : `<p class="text-muted text-sm" style="margin: 0;">No active scrapes</p>`;
-
-  return `<div class="card-header">${stats.active} of ${stats.max} Workers</div>${list}`.replace(
-    /\n/g,
-    "",
-  );
+  if (stats.active > 0 && stats.activeUrl) {
+    return `<div class="card-header">Scraping</div><p class="code text-sm" style="margin: 0; word-break: break-all;">${escapeHtml(stats.activeUrl)}</p>`;
+  }
+  return `<div class="card-header">Status</div><p class="text-muted text-sm" style="margin: 0;">Idle</p>`;
 }
 
 function broadcast(data: {
   active: number;
-  max: number;
-  activeUrls: string[];
+  activeUrl?: string;
 }) {
   logger.debug(
-    `[SSE] Broadcasting: active=${data.active}, urls=${JSON.stringify(data.activeUrls)}`,
+    `[SSE] Broadcasting: active=${data.active}, url=${data.activeUrl || 'none'}`,
   );
   const html = renderWorkersHtml(data);
   logger.debug(
@@ -124,8 +112,11 @@ function broadcast(data: {
   }
 }
 
-workerEvents.on("change", (data) => {
-  broadcast(data);
+workerEvents.on("change", (data: { activeUrls: string[]; active: number }) => {
+  broadcast({
+    active: data.active,
+    activeUrl: data.activeUrls[0],
+  });
 });
 
 dashboardRouter.get("/events", async (c) => {
@@ -147,7 +138,10 @@ dashboardRouter.get("/events", async (c) => {
       );
 
       const stats = getQueueStats();
-      const html = renderWorkersHtml(stats);
+      const html = renderWorkersHtml({
+        active: stats.active,
+        activeUrl: stats.activeUrls[0],
+      });
       controller.enqueue(
         new TextEncoder().encode(
           `event: workers\ndata: ${html}\n\n`,
@@ -236,24 +230,23 @@ dashboardRouter.get("/", async (c) => {
         sse-connect="/dashboard/events"
         sse-swap="workers"
       >
-        <div class="card-header">
-          {queueStats.active} of {queueStats.max} Workers
-        </div>
         {queueStats.activeUrls.length > 0 ? (
-          <ul style="margin: 0; padding-left: 16px;">
-            {queueStats.activeUrls.map((url) => (
-              <li
-                class="code text-sm"
-                style="word-break: break-all;"
-              >
-                {url}
-              </li>
-            ))}
-          </ul>
+          <>
+            <div class="card-header">Scraping</div>
+            <p
+              class="code text-sm"
+              style="margin: 0; word-break: break-all;"
+            >
+              {queueStats.activeUrls[0]}
+            </p>
+          </>
         ) : (
-          <p class="text-muted text-sm" style="margin: 0;">
-            No active scrapes
-          </p>
+          <>
+            <div class="card-header">Status</div>
+            <p class="text-muted text-sm" style="margin: 0;">
+              Idle
+            </p>
+          </>
         )}
       </div>
 
