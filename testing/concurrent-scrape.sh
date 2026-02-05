@@ -33,15 +33,22 @@ if ! curl -sf "$SERVER/health" > /dev/null 2>&1; then
     exit 1
 fi
 
-# Read first 2 non-comment URLs
+# Read all non-comment URLs and pick 2 random ones
 mapfile -t ALL_URLS < <(grep -v '^#' "$URLS_FILE" | grep -v '^$' | tr -d '\r')
 if [[ ${#ALL_URLS[@]} -lt 2 ]]; then
     echo "Error: Need at least 2 URLs in $URLS_FILE"
     exit 1
 fi
 
-URL1="${ALL_URLS[0]}"
-URL2="${ALL_URLS[1]}"
+# Pick 2 random unique indices
+IDX1=$((RANDOM % ${#ALL_URLS[@]}))
+IDX2=$((RANDOM % ${#ALL_URLS[@]}))
+while [[ $IDX2 -eq $IDX1 ]]; do
+    IDX2=$((RANDOM % ${#ALL_URLS[@]}))
+done
+
+URL1="${ALL_URLS[$IDX1]}"
+URL2="${ALL_URLS[$IDX2]}"
 
 echo "=== Concurrent Scrape Test ==="
 echo "URL 1: $URL1"
