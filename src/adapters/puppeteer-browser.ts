@@ -150,8 +150,9 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
             for (const sel of selectors) {
               const el = document.querySelector(sel) as HTMLElement | null;
               // Check trimmed content to avoid whitespace-only matches
-              if (el?.innerText && el.innerText.trim().length > 500) {
-                return el.innerText.trim().length;
+              const trimmedText = el?.innerText?.trim();
+              if (trimmedText && trimmedText.length > 500) {
+                return trimmedText.length;
               }
             }
             const bodyText = (document.body as HTMLElement)?.innerText?.trim();

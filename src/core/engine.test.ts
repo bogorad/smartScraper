@@ -369,6 +369,22 @@ describe('CoreScraperEngine', () => {
       expect(result.success).toBe(true);
       expect(result.data).toEqual({ xpath: 'embedded_json', contentLength: 300 });
     });
+
+    it('should handle exceptions from extractEmbeddedArticle gracefully', async () => {
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue(undefined);
+      mockBrowser.getPageHtml = vi.fn().mockResolvedValue('<html><body>Content</body></html>');
+      mockLlm.suggestXPaths = vi.fn().mockResolvedValue([
+        { xpath: '//article', explanation: 'Main article' }
+      ]);
+      mockBrowser.getElementDetails = vi.fn().mockResolvedValue(null);
+      mockBrowser.extractEmbeddedArticle = vi.fn().mockRejectedValue(new Error('Browser context error'));
+
+      const result = await engine.scrapeUrl('https://example.com/article');
+
+      // Engine should handle the exception and return an error result
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBeDefined();
+    });
   });
 
   describe('initializeEngine and getDefaultEngine', () => {
