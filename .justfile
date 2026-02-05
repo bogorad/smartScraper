@@ -25,6 +25,10 @@ install:
 adblock:
     scripts/update-adblock.sh
 
+# Update bypass-paywalls-chrome-clean extension
+update-bp-clean:
+    scripts/upd-bp-clean.sh
+
 # Clean build artifacts
 clean:
     rm -rf dist node_modules
