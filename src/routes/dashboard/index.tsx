@@ -79,8 +79,11 @@ function renderWorkersHtml(stats: {
   active: number;
   activeUrl?: string;
 }): string {
-  if (stats.active > 0 && stats.activeUrl) {
-    return `<div class="card-header">Scraping</div><p class="code text-sm" style="margin: 0; word-break: break-all;">${escapeHtml(stats.activeUrl)}</p>`;
+  if (stats.active > 0) {
+    if (stats.activeUrl) {
+      return `<div class="card-header">Scraping</div><p class="code text-sm" style="margin: 0; word-break: break-all;">${escapeHtml(stats.activeUrl)}</p>`;
+    }
+    return `<div class="card-header">Status</div><p class="text-muted text-sm" style="margin: 0;">Starting...</p>`;
   }
   return `<div class="card-header">Status</div><p class="text-muted text-sm" style="margin: 0;">Idle</p>`;
 }
@@ -115,7 +118,7 @@ function broadcast(data: {
 workerEvents.on("change", (data: { activeUrls: string[]; active: number }) => {
   broadcast({
     active: data.active,
-    activeUrl: data.activeUrls[0],
+    activeUrl: data.activeUrls.length > 0 ? data.activeUrls[0] : undefined,
   });
 });
 
@@ -140,7 +143,7 @@ dashboardRouter.get("/events", async (c) => {
       const stats = getQueueStats();
       const html = renderWorkersHtml({
         active: stats.active,
-        activeUrl: stats.activeUrls[0],
+        activeUrl: stats.activeUrls.length > 0 ? stats.activeUrls[0] : undefined,
       });
       controller.enqueue(
         new TextEncoder().encode(
@@ -230,7 +233,7 @@ dashboardRouter.get("/", async (c) => {
         sse-connect="/dashboard/events"
         sse-swap="workers"
       >
-        {queueStats.activeUrls.length > 0 ? (
+        {queueStats.active > 0 && queueStats.activeUrls.length > 0 ? (
           <>
             <div class="card-header">Scraping</div>
             <p
@@ -238,6 +241,13 @@ dashboardRouter.get("/", async (c) => {
               style="margin: 0; word-break: break-all;"
             >
               {queueStats.activeUrls[0]}
+            </p>
+          </>
+        ) : queueStats.active > 0 ? (
+          <>
+            <div class="card-header">Status</div>
+            <p class="text-muted text-sm" style="margin: 0;">
+              Starting...
             </p>
           </>
         ) : (

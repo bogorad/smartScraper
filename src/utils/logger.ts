@@ -26,7 +26,7 @@ const LEVELS: Record<LogLevel, number> = {
 };
 
 let logFileStream: fs.WriteStream | null = null;
-let isDebugMode = false;
+let debugEnabled = false;
 
 function initLogFile() {
   if (logFileStream) return;
@@ -47,17 +47,17 @@ function initLogFile() {
     });
     
     // Check if DEBUG env var is set (can be checked before config is initialized)
-    isDebugMode = configIsDebugMode();
+    debugEnabled = configIsDebugMode();
     // Also check LOG_LEVEL if config is available
     try {
       if (getLogLevel() === 'DEBUG') {
-        isDebugMode = true;
+        debugEnabled = true;
       }
     } catch {
       // Config not initialized yet, use env var only
     }
     
-    if (isDebugMode) {
+    if (debugEnabled) {
       console.log(`[LOGGER] Debug mode enabled, logging to: ${logFile}`);
     }
   } catch (error) {
@@ -75,7 +75,7 @@ function writeToFile(entry: LogEntry) {
     initLogFile();
   }
   
-  if (logFileStream && isDebugMode) {
+  if (logFileStream && debugEnabled) {
     try {
       logFileStream.write(JSON.stringify(entry) + '\n');
     } catch (error) {

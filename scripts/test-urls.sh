@@ -3,7 +3,8 @@
 # Run e2e tests against URLs from testing/urls_for_testing.txt
 #
 
-PROXY="socks5://r5s.bruc:1080"
+# Proxy configuration: override with SMART_SCRAPER_PROXY env var
+PROXY="${SMART_SCRAPER_PROXY:-socks5://r5s.bruc:1080}"
 
 if ! sops decrypt secrets.yaml --output-type=json > /dev/null 2>&1; then
     echo "Error: Failed to decrypt secrets.yaml"
@@ -51,7 +52,17 @@ for url in "${URLS[@]}"; do
     CURL_EXIT=$?
     
     if [[ $CURL_EXIT -ne 0 ]]; then
-        RESPONSE='{"success":false,"error":"Request failed"}'
+        # Map common curl exit codes to human-readable errors
+        case $CURL_EXIT in
+            6)  CURL_ERROR="Could not resolve host" ;;
+            7)  CURL_ERROR="Failed to connect" ;;
+            28) CURL_ERROR="Operation timeout" ;;
+            35) CURL_ERROR="SSL connect error" ;;
+            52) CURL_ERROR="Empty reply from server" ;;
+            56) CURL_ERROR="Failure receiving network data" ;;
+            *)  CURL_ERROR="curl exit code $CURL_EXIT" ;;
+        esac
+        RESPONSE="{\"success\":false,\"error\":\"$CURL_ERROR\"}"
     fi
     
     SUCCESS=$(echo "$RESPONSE" | jq -r '.success // false')
