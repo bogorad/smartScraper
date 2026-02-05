@@ -1,4 +1,4 @@
-# SmartScraper v0.1.69
+# SmartScraper v0.1.70
 
 default:
     @just --list

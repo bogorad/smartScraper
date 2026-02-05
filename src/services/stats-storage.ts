@@ -1,11 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
+import PQueue from 'p-queue';
 import type { Stats } from '../domain/models.js';
 import { utcToday } from '../utils/date.js';
-import { Mutex } from '../utils/mutex.js';
 import { getDataDir } from '../config.js';
 
-const statsMutex = new Mutex();
+const writeQueue = new PQueue({ concurrency: 1 });
+let cache: Stats | null = null;
 
 const DEFAULT_STATS: Stats = {
   scrapeTotal: 0,
@@ -30,34 +31,45 @@ async function ensureFile(): Promise<void> {
   }
 }
 
-async function loadStatsInternal(): Promise<Stats> {
+async function loadFromDisk(): Promise<Stats> {
   await ensureFile();
   const content = await fs.readFile(getStatsFile(), 'utf-8');
   const parsed = JSON.parse(content) as Partial<Stats>;
   // Ensure domainCounts is always initialized (defensive against malformed JSON)
-  return {
+  cache = {
     ...DEFAULT_STATS,
     ...parsed,
     domainCounts: parsed.domainCounts || {}
   };
+  return cache;
 }
 
-async function saveStatsInternal(stats: Stats): Promise<void> {
+async function flush(): Promise<void> {
+  if (!cache) return;
   await ensureFile();
-  await fs.writeFile(getStatsFile(), JSON.stringify(stats, null, 2));
+  const tempFile = getStatsFile() + '.tmp';
+  await fs.writeFile(tempFile, JSON.stringify(cache, null, 2));
+  await fs.rename(tempFile, getStatsFile());
 }
 
+// Reads use cache directly - no queue needed
 export async function loadStats(): Promise<Stats> {
-  return statsMutex.runExclusive(() => loadStatsInternal());
+  if (cache) return cache;
+  return await loadFromDisk();
 }
 
+// Writes go through queue for serialization
 export async function saveStats(stats: Stats): Promise<void> {
-  return statsMutex.runExclusive(() => saveStatsInternal(stats));
+  return writeQueue.add(async () => {
+    cache = stats;
+    await flush();
+  });
 }
 
 export async function recordScrape(domain: string, success: boolean): Promise<void> {
-  return statsMutex.runExclusive(async () => {
-    const stats = await loadStatsInternal();
+  return writeQueue.add(async () => {
+    if (!cache) await loadFromDisk();
+    const stats = cache!;
     const today = utcToday();
 
     if (stats.todayDate !== today) {
@@ -75,23 +87,23 @@ export async function recordScrape(domain: string, success: boolean): Promise<vo
       stats.failToday++;
     }
 
-    await saveStatsInternal(stats);
+    await flush();
   });
 }
 
+// Reads use cache directly
 export async function getTopDomains(limit = 5): Promise<{ domain: string; count: number }[]> {
-  return statsMutex.runExclusive(async () => {
-    const stats = await loadStatsInternal();
-    return Object.entries(stats.domainCounts || {})
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, limit)
-      .map(([domain, count]) => ({ domain, count }));
-  });
+  if (!cache) await loadFromDisk();
+  const stats = cache!;
+  return Object.entries(stats.domainCounts || {})
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, limit)
+    .map(([domain, count]) => ({ domain, count }));
 }
 
 export async function resetStats(): Promise<void> {
-  return statsMutex.runExclusive(async () => {
-    const fresh: Stats = {
+  return writeQueue.add(async () => {
+    cache = {
       scrapeTotal: 0,
       failTotal: 0,
       todayDate: utcToday(),
@@ -99,6 +111,6 @@ export async function resetStats(): Promise<void> {
       failToday: 0,
       domainCounts: {}
     };
-    await saveStatsInternal(fresh);
+    await flush();
   });
 }

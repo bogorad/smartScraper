@@ -1,10 +1,10 @@
 import fs from 'fs/promises';
 import path from 'path';
+import PQueue from 'p-queue';
 import { parse, stringify } from 'comment-json';
 import type { KnownSitesPort } from '../ports/known-sites.js';
 import type { SiteConfig } from '../domain/models.js';
 import { utcNow } from '../utils/date.js';
-import { Mutex } from '../utils/mutex.js';
 import { getDataDir } from '../config.js';
 import { logger } from '../utils/logger.js';
 
@@ -14,7 +14,7 @@ function getSitesFile(): string {
 
 export class FsKnownSitesAdapter implements KnownSitesPort {
   private cache: SiteConfig[] | null = null;
-  private mutex = new Mutex();
+  private writeQueue = new PQueue({ concurrency: 1 });
 
   private async ensureFile(): Promise<void> {
     const sitesFile = getSitesFile();
@@ -27,6 +27,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   }
 
   private async load(): Promise<SiteConfig[]> {
+    if (this.cache) return this.cache;
     await this.ensureFile();
     const content = await fs.readFile(getSitesFile(), 'utf-8');
     this.cache = parse(content) as unknown as SiteConfig[];
@@ -34,22 +35,23 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
     return this.cache;
   }
 
-  private async save(configs: SiteConfig[]): Promise<void> {
+  private async flush(): Promise<void> {
     await this.ensureFile();
-    const content = stringify(configs, null, 2);
-    await fs.writeFile(getSitesFile(), content);
-    this.cache = configs;
+    const tempFile = getSitesFile() + '.tmp';
+    const content = stringify(this.cache, null, 2);
+    await fs.writeFile(tempFile, content);
+    await fs.rename(tempFile, getSitesFile());
   }
 
+  // Reads use cache directly - no queue needed
   async getConfig(domain: string): Promise<SiteConfig | undefined> {
-    return this.mutex.runExclusive(async () => {
-      const configs = await this.load();
-      return configs.find(c => c.domainPattern === domain);
-    });
+    const configs = await this.load();
+    return configs.find(c => c.domainPattern === domain);
   }
 
+  // Writes go through queue for serialization
   async saveConfig(config: SiteConfig): Promise<void> {
-    return this.mutex.runExclusive(async () => {
+    return this.writeQueue.add(async () => {
       const configs = await this.load();
       const index = configs.findIndex(c => c.domainPattern === config.domainPattern);
       
@@ -59,47 +61,47 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
         configs.push(config);
       }
       
-      await this.save(configs);
+      await this.flush();
     });
   }
 
   async incrementFailure(domain: string): Promise<void> {
-    return this.mutex.runExclusive(async () => {
+    return this.writeQueue.add(async () => {
       const configs = await this.load();
       const config = configs.find(c => c.domainPattern === domain);
       
       if (config) {
         config.failureCountSinceLastSuccess++;
-        await this.save(configs);
+        await this.flush();
       }
     });
   }
 
   async markSuccess(domain: string): Promise<void> {
-    return this.mutex.runExclusive(async () => {
+    return this.writeQueue.add(async () => {
       const configs = await this.load();
       const config = configs.find(c => c.domainPattern === domain);
       
       if (config) {
         config.failureCountSinceLastSuccess = 0;
         config.lastSuccessfulScrapeTimestamp = utcNow();
-        await this.save(configs);
+        await this.flush();
       }
     });
   }
 
   async deleteConfig(domain: string): Promise<void> {
-    return this.mutex.runExclusive(async () => {
+    return this.writeQueue.add(async () => {
       const configs = await this.load();
       const filtered = configs.filter(c => c.domainPattern !== domain);
-      await this.save(filtered);
+      this.cache = filtered;
+      await this.flush();
     });
   }
 
+  // Reads use cache directly
   async getAllConfigs(): Promise<SiteConfig[]> {
-    return this.mutex.runExclusive(async () => {
-      return await this.load();
-    });
+    return await this.load();
   }
 }
 
