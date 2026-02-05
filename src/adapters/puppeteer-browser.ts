@@ -298,8 +298,31 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       return { type: CAPTCHA_TYPES.CLOUDFLARE, siteKey };
     }
 
+    // Only treat reCAPTCHA/hCaptcha as blocking if it's a challenge page
+    // (visible captcha in a minimal page), not just present for comments/login
     if (html.includes('g-recaptcha') || html.includes('h-captcha')) {
-      return { type: CAPTCHA_TYPES.GENERIC };
+      const isBlockingCaptcha = await session.page.evaluate(() => {
+        // Check if page has minimal content (likely a challenge page)
+        const bodyText = document.body?.innerText?.trim() || '';
+        const hasMinimalContent = bodyText.length < 500;
+        
+        // Check if recaptcha is visible and prominent
+        const recaptcha = document.querySelector('.g-recaptcha, .h-captcha, [data-sitekey]');
+        if (!recaptcha) return false;
+        
+        const rect = recaptcha.getBoundingClientRect();
+        const isVisible = rect.width > 0 && rect.height > 0;
+        
+        return hasMinimalContent && isVisible;
+      });
+      
+      if (isBlockingCaptcha) {
+        const siteKey = await session.page.evaluate(() => {
+          const el = document.querySelector('.g-recaptcha[data-sitekey], .h-captcha[data-sitekey], [data-sitekey]');
+          return el?.getAttribute('data-sitekey') || undefined;
+        });
+        return { type: CAPTCHA_TYPES.GENERIC, siteKey };
+      }
     }
 
     return { type: CAPTCHA_TYPES.NONE };
