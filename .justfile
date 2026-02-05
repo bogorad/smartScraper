@@ -77,6 +77,52 @@ test-file pattern:
 test-full:
     cd test-orchestrator && go run . --workers 4 --full
 
+# Run e2e tests against URLs from testing/urls_for_testing.txt
+test-urls:
+    #!/usr/bin/env bash
+    set -e
+    eval "$(sops decrypt secrets.yaml --output-type=json | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
+    
+    URLS_FILE="testing/urls_for_testing.txt"
+    SERVER="http://localhost:5555"
+    
+    # Check server health
+    if ! curl -sf "$SERVER/health" > /dev/null 2>&1; then
+        echo "Error: Server not responding at $SERVER"
+        echo "Start with: just dev"
+        exit 1
+    fi
+    
+    mapfile -t URLS < <(grep -v '^#' "$URLS_FILE" | grep -v '^$' | tr -d '\r')
+    echo "Testing ${#URLS[@]} URLs..."
+    echo "================================================"
+    
+    PASSED=0
+    FAILED=0
+    
+    for url in "${URLS[@]}"; do
+        printf "Testing: %s ... " "$url"
+        RESPONSE=$(curl -sf -X POST "$SERVER/api/scrape" \
+            -H "Authorization: Bearer $SMART_SCRAPER" \
+            -H "Content-Type: application/json" \
+            -d "{\"url\": \"$url\", \"outputType\": \"metadata_only\"}" \
+            --max-time 120 2>&1) || RESPONSE='{"success":false,"error":"Request failed"}'
+        
+        SUCCESS=$(echo "$RESPONSE" | jq -r '.success // false')
+        if [[ "$SUCCESS" == "true" ]]; then
+            echo "PASS"
+            ((PASSED++))
+        else
+            ERROR=$(echo "$RESPONSE" | jq -r '.error // "Unknown error"')
+            echo "FAIL ($ERROR)"
+            ((FAILED++))
+        fi
+    done
+    
+    echo "================================================"
+    echo "Passed: $PASSED, Failed: $FAILED"
+    [[ $FAILED -eq 0 ]] || exit 1
+
 # Clean up orphan processes and cache
 test-clean:
     #!/usr/bin/env bash

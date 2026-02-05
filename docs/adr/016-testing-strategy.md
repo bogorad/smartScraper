@@ -20,12 +20,12 @@ The challenge is balancing test coverage with:
 
 ### Test Levels
 
-| Level | Location | Runner | Frequency |
-|-------|----------|--------|-----------|
-| Unit | `src/**/*.test.ts` (colocated) | Vitest | Every commit |
-| Integration | `src/**/*.test.ts` | Vitest | Every commit |
-| E2E (Go) | `test-orchestrator/e2e/*.go` | Go test | CI/manual |
-| E2E (manual) | `testing/run-e2e.sh` | Bash + curl | Manual |
+| Level | Command | Location | Frequency |
+|-------|---------|----------|-----------|
+| Unit | `npm test` | `src/**/*.test.ts` (colocated) | Every commit |
+| Integration | `npm test` | `src/**/*.test.ts` | Every commit |
+| E2E (Go) | `just test` | `test-orchestrator/e2e/*.go` | CI/manual |
+| E2E (URLs) | `just test-urls` | `testing/urls_for_testing.txt` | Manual |
 
 ### Unit & Integration Tests
 
@@ -36,44 +36,40 @@ The challenge is balancing test coverage with:
 
 ### End-to-End Tests
 
-#### Go-based E2E (`test-orchestrator/`)
+#### Go-based E2E (`just test`)
 
-Full test framework with:
-- Worker pool management
-- Health checks
-- Parallel test execution
-- Detailed reporting
+Full test framework with worker pool management:
 
-Run via:
 ```bash
-cd test-orchestrator && go test ./e2e/...
+just test           # Run with 4 parallel workers
+just test-full      # Bypass cache, full run
+just test-file api  # Run specific test pattern
+just test-clean     # Clean orphan processes
 ```
 
-#### Manual E2E (`testing/run-e2e.sh`)
+#### URL-based E2E (`just test-urls`)
 
-Lightweight bash script for quick validation:
+Quick validation against real URLs:
+
+```bash
+just test-urls      # Test all URLs in testing/urls_for_testing.txt
+```
+
 - Reads URLs from `testing/urls_for_testing.txt`
-- Calls the HTTP API with proper auth
-- Reports success/failure per URL
-- **Never logs or stores tokens** - uses inline `$(sops -d ...)` substitution
-
-Run via:
-```bash
-./testing/run-e2e.sh
-```
+- Requires server running (`just dev`)
+- Reports PASS/FAIL per URL with summary
 
 ### Secret Handling
 
-**CRITICAL: Tokens must be transient only**
+All justfile recipes use the standard pattern:
 
 ```bash
-# CORRECT - token never stored in variable or logs
-curl -H "Authorization: Bearer $(sops -d secrets.yaml | yq '.smart_scraper')" ...
-
-# WRONG - token stored in variable (can leak via set -x, logs, etc.)
-TOKEN=$(sops -d secrets.yaml | yq '.smart_scraper')
-curl -H "Authorization: Bearer $TOKEN" ...
+eval "$(sops decrypt secrets.yaml --output-type=json | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
 ```
+
+This exports secrets as uppercase env vars (e.g., `$SMART_SCRAPER`).
+
+**CRITICAL**: Secrets are exported into the shell environment for that recipe only - never logged, never committed.
 
 ### Test URL Management
 
@@ -89,14 +85,14 @@ Test URLs are stored in `testing/urls_for_testing.txt`:
 
 - Clear separation of test levels
 - Fast feedback from unit tests
-- Realistic E2E validation
-- Secure token handling
+- Consistent secret handling via justfile
+- All test commands discoverable via `just --list`
 
 ### Negative
 
 - E2E tests can be flaky (network, site changes)
-- Manual E2E requires server to be running
-- Multiple test frameworks (Vitest, Go, bash)
+- E2E requires server to be running
+- Multiple test frameworks (Vitest, Go)
 
 ## Related
 
