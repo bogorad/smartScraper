@@ -24,3 +24,4 @@ temp_test.crx
 # Test orchestrator binary and logs
 test-orchestrator/test-orchestrator
 test-orchestrator/logs/
+.test-cache.json

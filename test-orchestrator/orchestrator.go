@@ -308,16 +308,20 @@ func (o *Orchestrator) runParallelTests(ctx context.Context, tests []TestInfo, c
 // runSingleTest executes a single test function and returns pass/fail/skip counts.
 func (o *Orchestrator) runSingleTest(ctx context.Context, worker *Worker, test TestInfo) (passed, failed, skipped int) {
 	// Build the go test command
-	// Run from project root, target ./test-orchestrator/e2e with -run filter
+	// Run from test-orchestrator directory, target ./e2e with -run filter
 	args := []string{
 		"test",
-		"./test-orchestrator/e2e",
+		"./e2e",
 		"-run", fmt.Sprintf("^%s$", test.FuncName),
 		"-v",
 		"-count=1", // Disable test caching
 	}
 
 	cmd := exec.CommandContext(ctx, "go", args...)
+
+	// Run from test-orchestrator directory (where go.mod is)
+	cwd, _ := os.Getwd()
+	cmd.Dir = filepath.Join(cwd, "test-orchestrator")
 
 	// Set environment:
 	// - Worker environment (TEST_BASE_URL, DATA_DIR, API_TOKEN)
