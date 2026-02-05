@@ -306,5 +306,122 @@ describe('TwoCaptchaAdapter', () => {
 
       vi.useRealTimers();
     });
+
+    it('should map known error codes to user-friendly messages', async () => {
+      mockAxios.post = vi.fn()
+        .mockResolvedValueOnce({ data: { taskId: 'task-123' } })
+        .mockResolvedValueOnce({ data: { errorCode: 'ERROR_CAPTCHA_UNSOLVABLE', errorId: 1 } });
+
+      const result = await adapter.solveIfPresent({
+        pageId: 'page-123',
+        pageUrl: 'https://example.com',
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+      });
+
+      expect(result.solved).toBe(false);
+      expect(result.reason).toBe('CAPTCHA could not be solved');
+    });
+  });
+
+  describe('solveTurnstile', () => {
+    it('should successfully solve Turnstile CAPTCHA', async () => {
+      mockAxios.post = vi.fn()
+        .mockResolvedValueOnce({ data: { taskId: 'task-123' } })
+        .mockResolvedValueOnce({ data: { status: 'ready', solution: { token: 'turnstile-token-abc' } } });
+
+      const result = await adapter.solveIfPresent({
+        pageId: 'page-123',
+        pageUrl: 'https://example.com',
+        captchaTypeHint: CAPTCHA_TYPES.CLOUDFLARE,
+        siteKey: 'test-site-key'
+      });
+
+      expect(result.solved).toBe(true);
+      expect(result.token).toBe('turnstile-token-abc');
+    });
+
+    it('should fail when siteKey is missing', async () => {
+      const result = await adapter.solveIfPresent({
+        pageId: 'page-123',
+        pageUrl: 'https://example.com',
+        captchaTypeHint: CAPTCHA_TYPES.CLOUDFLARE
+      });
+
+      expect(result.solved).toBe(false);
+      expect(result.reason).toContain('siteKey');
+    });
+
+    it('should create Turnstile task with correct parameters', async () => {
+      mockAxios.post = vi.fn()
+        .mockResolvedValueOnce({ data: { taskId: 'task-123' } })
+        .mockResolvedValueOnce({ data: { status: 'ready', solution: { token: 'token' } } });
+
+      await adapter.solveIfPresent({
+        pageId: 'page-123',
+        pageUrl: 'https://example.com',
+        captchaTypeHint: CAPTCHA_TYPES.CLOUDFLARE,
+        siteKey: 'turnstile-site-key'
+      });
+
+      expect(mockAxios.post).toHaveBeenCalledWith(
+        'https://api.2captcha.com/createTask',
+        expect.objectContaining({
+          clientKey: 'test-api-key',
+          task: expect.objectContaining({
+            type: 'TurnstileTaskProxyless',
+            websiteURL: 'https://example.com',
+            websiteKey: 'turnstile-site-key'
+          })
+        })
+      );
+    });
+
+    it('should map known error codes to user-friendly messages', async () => {
+      mockAxios.post = vi.fn()
+        .mockResolvedValueOnce({ data: { taskId: 'task-123' } })
+        .mockResolvedValueOnce({ data: { errorCode: 'ERROR_CAPTCHA_UNSOLVABLE', errorId: 1 } });
+
+      const result = await adapter.solveIfPresent({
+        pageId: 'page-123',
+        pageUrl: 'https://example.com',
+        captchaTypeHint: CAPTCHA_TYPES.CLOUDFLARE,
+        siteKey: 'test-site-key'
+      });
+
+      expect(result.solved).toBe(false);
+      expect(result.reason).toBe('CAPTCHA could not be solved');
+    });
+
+    it('should map proxy error codes correctly', async () => {
+      mockAxios.post = vi.fn()
+        .mockResolvedValueOnce({ data: { taskId: 'task-123' } })
+        .mockResolvedValueOnce({ data: { errorCode: 'ERROR_PROXY_CONNECTION_FAILED', errorId: 1 } });
+
+      const result = await adapter.solveIfPresent({
+        pageId: 'page-123',
+        pageUrl: 'https://example.com',
+        captchaTypeHint: CAPTCHA_TYPES.CLOUDFLARE,
+        siteKey: 'test-site-key'
+      });
+
+      expect(result.solved).toBe(false);
+      expect(result.reason).toBe('Proxy connection failed');
+    });
+
+    it('should fall back to errorDescription when code is unknown', async () => {
+      mockAxios.post = vi.fn()
+        .mockResolvedValueOnce({ data: { taskId: 'task-123' } })
+        .mockResolvedValueOnce({ data: { errorCode: 'NEW_ERROR_CODE', errorDescription: 'Custom error message', errorId: 1 } });
+
+      const result = await adapter.solveIfPresent({
+        pageId: 'page-123',
+        pageUrl: 'https://example.com',
+        captchaTypeHint: CAPTCHA_TYPES.CLOUDFLARE,
+        siteKey: 'test-site-key'
+      });
+
+      expect(result.solved).toBe(false);
+      expect(result.reason).toBe('Custom error message');
+    });
   });
 });

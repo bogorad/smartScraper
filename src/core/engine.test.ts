@@ -302,6 +302,75 @@ describe('CoreScraperEngine', () => {
     });
   });
 
+  describe('embedded JSON fallback', () => {
+    it('should use embedded JSON when LLM suggestions fail validation', async () => {
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue(undefined);
+      mockBrowser.getPageHtml = vi.fn().mockResolvedValue('<html><body>Content</body></html>');
+      // LLM returns suggestions, but they all fail validation (getElementDetails returns null)
+      mockLlm.suggestXPaths = vi.fn().mockResolvedValue([
+        { xpath: '//article', explanation: 'Main article' }
+      ]);
+      mockBrowser.getElementDetails = vi.fn().mockResolvedValue(null); // All suggestions fail
+      // Content must be >= 200 chars (SCORING.MIN_CONTENT_CHARS)
+      const longContent = 'This is a long article extracted from embedded JSON. '.repeat(10);
+      mockBrowser.extractEmbeddedArticle = vi.fn().mockResolvedValue(longContent);
+
+      const result = await engine.scrapeUrl('https://example.com/article');
+
+      expect(result.success).toBe(true);
+      expect(result.xpath).toBe('embedded_json');
+      expect(mockBrowser.extractEmbeddedArticle).toHaveBeenCalledWith('page-123');
+    });
+
+    it('should fail when embedded JSON content is too short', async () => {
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue(undefined);
+      mockBrowser.getPageHtml = vi.fn().mockResolvedValue('<html><body>Content</body></html>');
+      mockLlm.suggestXPaths = vi.fn().mockResolvedValue([
+        { xpath: '//article', explanation: 'Main article' }
+      ]);
+      mockBrowser.getElementDetails = vi.fn().mockResolvedValue(null);
+      mockBrowser.extractEmbeddedArticle = vi.fn().mockResolvedValue('Too short');
+
+      const result = await engine.scrapeUrl('https://example.com/article');
+
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(ERROR_TYPES.EXTRACTION);
+    });
+
+    it('should fail when embedded JSON returns null', async () => {
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue(undefined);
+      mockBrowser.getPageHtml = vi.fn().mockResolvedValue('<html><body>Content</body></html>');
+      mockLlm.suggestXPaths = vi.fn().mockResolvedValue([
+        { xpath: '//article', explanation: 'Main article' }
+      ]);
+      mockBrowser.getElementDetails = vi.fn().mockResolvedValue(null);
+      mockBrowser.extractEmbeddedArticle = vi.fn().mockResolvedValue(null);
+
+      const result = await engine.scrapeUrl('https://example.com/article');
+
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(ERROR_TYPES.EXTRACTION);
+    });
+
+    it('should return metadata_only format for embedded JSON', async () => {
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue(undefined);
+      mockBrowser.getPageHtml = vi.fn().mockResolvedValue('<html><body>Content</body></html>');
+      mockLlm.suggestXPaths = vi.fn().mockResolvedValue([
+        { xpath: '//article', explanation: 'Main article' }
+      ]);
+      mockBrowser.getElementDetails = vi.fn().mockResolvedValue(null);
+      const content = 'A'.repeat(300); // Long enough content
+      mockBrowser.extractEmbeddedArticle = vi.fn().mockResolvedValue(content);
+
+      const result = await engine.scrapeUrl('https://example.com/article', {
+        outputType: OUTPUT_TYPES.METADATA_ONLY
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ xpath: 'embedded_json', contentLength: 300 });
+    });
+  });
+
   describe('initializeEngine and getDefaultEngine', () => {
     it('should initialize and retrieve default engine', () => {
       const engine = initializeEngine(mockBrowser, mockLlm, mockCaptcha, mockKnownSites);
