@@ -56,6 +56,10 @@ test-full:
 test-urls:
     scripts/test-urls.sh
 
+# Run concurrent scrape test (2 URLs in parallel)
+test-concurrent:
+    testing/concurrent-scrape.sh
+
 # Clean up orphan processes and cache
 test-clean:
     scripts/test-clean.sh
