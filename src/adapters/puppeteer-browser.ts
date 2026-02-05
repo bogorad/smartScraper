@@ -79,11 +79,10 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       browser = await puppeteer.launch({
         executablePath: getExecutablePath(),
         headless: true,
-        pipe: true,
         userDataDir,
         args: this.buildLaunchArgs(options?.proxy),
-        timeout: options?.timeout || DEFAULTS.TIMEOUT_MS,
-        ...(hasExtensions && { enableExtensions: extensionPaths })
+        dumpio: true,
+        timeout: options?.timeout || DEFAULTS.TIMEOUT_MS
       });
 
       const page = await browser.newPage();
@@ -106,6 +105,18 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
 
       if (hasExtensions) {
         await new Promise(r => setTimeout(r, 2000));
+        
+        // Verify extensions loaded by checking browser targets
+        const targets = await browser.targets();
+        const extensionTargets = targets.filter(t => t.url().includes('chrome-extension://'));
+        logger.debug('Extension targets after launch', { 
+          count: extensionTargets.length,
+          urls: extensionTargets.map(t => t.url().split('/').slice(0, 4).join('/'))
+        }, 'BROWSER');
+        
+        if (extensionTargets.length === 0) {
+          logger.warn('No extension targets found - extensions may not have loaded', {}, 'BROWSER');
+        }
       }
 
       await page.goto(url, {
@@ -138,23 +149,47 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
   private buildLaunchArgs(explicitProxy?: string): string[] {
     const extensionPaths = this.getExtensionPaths();
     
+    // Base args matching reference implementation
     const args = [
+      // Security/sandbox
       '--no-sandbox',
       '--disable-setuid-sandbox',
+      
+      // Performance
       '--disable-dev-shm-usage',
       '--disable-accelerated-2d-canvas',
       '--disable-gpu',
       '--use-gl=swiftshader',
+      
+      // Display
       '--window-size=1280,720',
       '--font-render-hinting=none',
+      
+      // Extension support (Chrome native flags)
+      '--enable-extensions',
+      '--enable-extension-assets',
+      
+      // Stability flags from reference
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--disable-sync',
+      '--disable-translate',
+      '--disable-notifications',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-web-security',
+      
+      // Disable images for speed
       '--blink-settings=imagesEnabled=false'
     ];
 
-    // Add extension flags if extensions are configured
-    // These flags work alongside Puppeteer's enableExtensions option
+    // Add extension loading flags if extensions are configured
+    // Use Chrome's native --disable-extensions-except and --load-extension flags
     if (extensionPaths.length > 0) {
-      args.push('--enable-extensions');
-      args.push(`--disable-extensions-except=${extensionPaths.join(',')}`);
+      const pathList = extensionPaths.join(',');
+      args.push(`--disable-extensions-except=${pathList}`);
+      args.push(`--load-extension=${pathList}`);
+      logger.debug('Extension flags added', { count: extensionPaths.length, paths: extensionPaths }, 'BROWSER');
     }
 
     // Priority: explicit proxy > global PROXY_SERVER
@@ -251,7 +286,19 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       return { type: CAPTCHA_TYPES.DATADOME, captchaUrl };
     }
 
-    if (html.includes('g-recaptcha') || html.includes('h-captcha') || html.includes('cf-turnstile')) {
+    // Cloudflare detection
+    if (html.includes('cf-turnstile') || 
+        html.includes('cf-challenge') || 
+        html.includes('challenges.cloudflare.com')) {
+      // Extract Turnstile sitekey
+      const siteKey = await session.page.evaluate(() => {
+        const el = document.querySelector('[data-sitekey]');
+        return el?.getAttribute('data-sitekey') || undefined;
+      });
+      return { type: CAPTCHA_TYPES.CLOUDFLARE, siteKey };
+    }
+
+    if (html.includes('g-recaptcha') || html.includes('h-captcha')) {
       return { type: CAPTCHA_TYPES.GENERIC };
     }
 
@@ -323,5 +370,31 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       waitUntil: 'networkidle2',
       timeout: timeoutMs ?? DEFAULTS.TIMEOUT_MS
     });
+  }
+
+  async injectTurnstileToken(pageId: string, token: string): Promise<void> {
+    const session = this.sessions.get(pageId);
+    if (!session) return;
+
+    await session.page.evaluate((turnstileToken) => {
+      // Try cf-turnstile-response input first
+      const cfInput = document.querySelector('input[name="cf-turnstile-response"]');
+      if (cfInput) {
+        (cfInput as HTMLInputElement).value = turnstileToken;
+      }
+      
+      // Also try g-recaptcha-response for compatibility mode
+      const gInput = document.querySelector('input[name="g-recaptcha-response"]');
+      if (gInput) {
+        (gInput as HTMLInputElement).value = turnstileToken;
+      }
+
+      // Try to find and execute callback if available
+      if ((window as unknown as { tsCallback?: (token: string) => void }).tsCallback) {
+        (window as unknown as { tsCallback: (token: string) => void }).tsCallback(turnstileToken);
+      }
+    }, token);
+
+    logger.debug('Injected Turnstile token', { pageId }, 'BROWSER');
   }
 }

@@ -7,7 +7,8 @@ export const VERSION = pkg.version;
 export const METHODS = {
   CURL: 'curl',
   PUPPETEER_STEALTH: 'puppeteer_stealth',
-  PUPPETEER_CAPTCHA: 'puppeteer_captcha'
+  PUPPETEER_CAPTCHA: 'puppeteer_captcha',
+  FLARESOLVERR: 'flaresolverr'
 } as const;
 
 export type MethodValue = (typeof METHODS)[keyof typeof METHODS];
@@ -36,7 +37,8 @@ export type ErrorTypeValue = (typeof ERROR_TYPES)[keyof typeof ERROR_TYPES];
 export const CAPTCHA_TYPES = {
   NONE: 'none',
   GENERIC: 'generic',
-  DATADOME: 'datadome'
+  DATADOME: 'datadome',
+  CLOUDFLARE: 'cloudflare'
 } as const;
 
 export type CaptchaTypeValue = (typeof CAPTCHA_TYPES)[keyof typeof CAPTCHA_TYPES];

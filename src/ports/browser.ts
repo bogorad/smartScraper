@@ -4,6 +4,7 @@ import type { CaptchaTypeValue } from '../constants.js';
 export interface CaptchaDetectionResult {
   type: CaptchaTypeValue;
   captchaUrl?: string;
+  siteKey?: string;
 }
 
 export interface BrowserPort {
@@ -18,4 +19,5 @@ export interface BrowserPort {
   getCookies(pageId: string): Promise<string>;
   setCookies(pageId: string, cookies: string): Promise<void>;
   reload(pageId: string, timeoutMs?: number): Promise<void>;
+  injectTurnstileToken(pageId: string, token: string): Promise<void>;
 }

@@ -26,6 +26,10 @@ export class TwoCaptchaAdapter implements CaptchaPort {
       return this.solveDataDome(input);
     }
 
+    if (input.captchaTypeHint === CAPTCHA_TYPES.CLOUDFLARE) {
+      return this.solveTurnstile(input);
+    }
+
     if (input.captchaTypeHint === CAPTCHA_TYPES.GENERIC) {
       return this.solveGeneric(input);
     }
@@ -162,6 +166,73 @@ export class TwoCaptchaAdapter implements CaptchaPort {
       }
 
       return { solved: false, reason: 'Timeout waiting for solution' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { solved: false, reason: message };
+    }
+  }
+
+  private async solveTurnstile(input: CaptchaSolveInput): Promise<CaptchaSolveResult> {
+    if (!input.siteKey) {
+      return { solved: false, reason: 'Turnstile requires siteKey' };
+    }
+
+    try {
+      const taskPayload = {
+        clientKey: this.apiKey,
+        task: {
+          type: 'TurnstileTaskProxyless',
+          websiteURL: input.pageUrl,
+          websiteKey: input.siteKey
+        }
+      };
+
+      logger.debug('[2CAPTCHA] Creating Turnstile task:', {
+        task: taskPayload.task
+      });
+
+      const createResponse = await axios.post('https://api.2captcha.com/createTask', taskPayload);
+
+      logger.debug('[2CAPTCHA] Turnstile create response:', { data: createResponse.data });
+
+      const taskId = createResponse.data?.taskId;
+      if (!taskId) {
+        return { solved: false, reason: createResponse.data?.errorDescription || 'Failed to create Turnstile task' };
+      }
+
+      const startTime = Date.now();
+      while (Date.now() - startTime < this.timeout * 1000) {
+        await new Promise(r => setTimeout(r, this.pollingInterval));
+
+        const resultResponse = await axios.post('https://api.2captcha.com/getTaskResult', {
+          clientKey: this.apiKey,
+          taskId
+        });
+
+        logger.debug(`[2CAPTCHA] Turnstile poll result for task ${taskId}:`, { data: resultResponse.data });
+
+        if (resultResponse.data?.status === 'ready') {
+          const token = resultResponse.data?.solution?.token;
+          if (token) {
+            return { solved: true, token };
+          }
+          return { solved: false, reason: 'Solution missing token' };
+        }
+
+        // Check for fatal errors
+        const hasError = resultResponse.data?.status === 'error' ||
+                        (resultResponse.data?.errorId && resultResponse.data.errorId !== 0) ||
+                        resultResponse.data?.errorCode;
+
+        if (hasError) {
+          const errorCode = resultResponse.data?.errorCode;
+          const errorDesc = resultResponse.data?.errorDescription;
+          const reason = errorDesc || errorCode || 'Unknown Turnstile error';
+          return { solved: false, reason };
+        }
+      }
+
+      return { solved: false, reason: 'Timeout waiting for Turnstile solution' };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       return { solved: false, reason: message };

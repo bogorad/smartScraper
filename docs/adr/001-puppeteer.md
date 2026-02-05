@@ -27,7 +27,7 @@ SmartScraper requires a headless browser for scraping JavaScript-heavy sites and
 
 ### Session Management
 
-Each scrape gets a **fresh browser instance** with a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode with extension support via Puppeteer's `enableExtensions` option.
+Each scrape gets a **fresh browser instance** with a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode with extension support via Chrome's native `--load-extension` flag.
 
 **Execution Model:** Scrapes are processed with **configurable concurrency** (via `CONCURRENCY` env var, default: 1). Multiple scrapes can run in parallel, each with its own browser instance. Each scrape follows this lifecycle:
 
@@ -50,11 +50,10 @@ const userDataDir = fs.mkdtempSync(
 const browser = await puppeteer.launch({
   executablePath: process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium',
   headless: true,
-  pipe: true,
   userDataDir,
-  args: launchArgs,
-  timeout: 60000,
-  ...(hasExtensions && { enableExtensions: extensionPaths })
+  args: launchArgs,  // includes --load-extension if extensions configured
+  dumpio: true,
+  timeout: 60000
 });
 ```
 
@@ -74,15 +73,33 @@ async closePage(pageId: string) {
 
 ### Extension Architecture
 
-Extensions are loaded via Puppeteer's `enableExtensions` option:
+Extensions are loaded via Chrome's native command-line flags (NOT Puppeteer's `enableExtensions` option):
 
 ```typescript
 // extensionPaths from this.getExtensionPaths() (parses EXTENSION_PATHS env var)
 const hasExtensions = extensionPaths.length > 0;
 
+// Build launch args with Chrome native extension flags
+const args = [
+  // ... other flags ...
+  '--enable-extensions',
+  '--enable-extension-assets',
+  // ... stability flags ...
+];
+
+if (hasExtensions) {
+  const pathList = extensionPaths.join(',');
+  args.push(`--disable-extensions-except=${pathList}`);
+  args.push(`--load-extension=${pathList}`);
+}
+
 const browser = await puppeteer.launch({
-  // ... other options
-  ...(hasExtensions && { enableExtensions: extensionPaths })
+  executablePath: getExecutablePath(),
+  headless: true,
+  userDataDir,
+  args,
+  dumpio: true,
+  timeout: 60000
 });
 
 // Wait for extensions to initialize (if any)
@@ -90,6 +107,12 @@ if (hasExtensions) {
   await new Promise(resolve => setTimeout(resolve, 2000));
 }
 ```
+
+**Key Flags for Extension Loading:**
+- `--enable-extensions` - Enable the extension system
+- `--enable-extension-assets` - Allow extension asset loading
+- `--disable-extensions-except=${paths}` - Whitelist only specified extensions
+- `--load-extension=${paths}` - Actually load the extensions
 
 **Required Extensions:**
 
@@ -197,18 +220,37 @@ const launchArgs = [
   '--window-size=1280,720',
   '--font-render-hinting=none',
   
+  // Extension support (Chrome native flags)
+  '--enable-extensions',
+  '--enable-extension-assets',
+  
+  // Stability flags
+  '--disable-background-networking',
+  '--disable-default-apps',
+  '--disable-sync',
+  '--disable-translate',
+  '--disable-notifications',
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--disable-web-security',
+  
   // Proxy (if configured)
-  ...(process.env.PROXY_SERVER ? [`--proxy-server=${process.env.PROXY_SERVER}`] : []),
+  ...(process.env.PROXY_SERVER ? [`--proxy-server=${proxyHostPort}`] : []),
+  
+  // Extension loading (if configured)
+  ...(hasExtensions ? [
+    `--disable-extensions-except=${extensionPaths.join(',')}`,
+    `--load-extension=${extensionPaths.join(',')}`
+  ] : [])
 ];
 
 const browser = await puppeteer.launch({
   executablePath: process.env.EXECUTABLE_PATH || '/usr/lib/chromium/chromium',
-  headless: true, 
-  pipe: true,
+  headless: true,
   userDataDir,
   args: launchArgs,
-  timeout: 60000,
-  ...(hasExtensions && { enableExtensions: extensionPaths })
+  dumpio: true,
+  timeout: 60000
 });
 ```
 
@@ -306,7 +348,7 @@ if (error.name === 'TimeoutError' ||
 
 - **Memory usage**: Each browser uses ~200-400MB; plan for N×400MB at concurrency N
 - **Browser startup overhead**: ~15-20 seconds per scrape with extensions (acceptable for quality over speed)
-- **Extension support**: Uses Puppeteer's `enableExtensions` option with `headless: true`
+- **Extension support**: Uses Chrome's native `--load-extension` and `--disable-extensions-except` flags with `headless: true`
 - **Profile cleanup overhead**: Directory deletion adds ~50-100ms per session
 - **Extension maintenance**: Extensions may need updates for browser compatibility
 

@@ -10,6 +10,7 @@ export interface SiteConfig {
   siteCleanupClasses?: string[];
   userAgent?: string;
   needsProxy?: ProxyModeValue;
+  needsFlaresolverr?: boolean;
 }
 
 export interface ScrapeOptions {
@@ -82,6 +83,7 @@ export interface CaptchaSolveResult {
   solved: boolean;
   updatedCookie?: string;
   reason?: string;
+  token?: string;
 }
 
 export interface Stats {
@@ -100,6 +102,7 @@ export interface LogEntry {
   success: boolean;
   method?: MethodValue;
   xpath?: string;
+  contentLength?: number;
   errorType?: ErrorTypeValue;
   error?: string;
   ms: number;

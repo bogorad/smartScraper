@@ -153,6 +153,7 @@ export class CoreScraperEngine {
           pageUrl: url,
           captchaUrl: captchaDetection.captchaUrl,
           captchaTypeHint: captchaDetection.type,
+          siteKey: captchaDetection.siteKey,
           proxyDetails: proxyUrl ? { server: proxyUrl } : context.proxyDetails,
           userAgentString: context.userAgentString
         });
@@ -170,7 +171,11 @@ export class CoreScraperEngine {
           return result;
         }
 
-        if (solveResult.updatedCookie) {
+        // Handle Cloudflare Turnstile token injection
+        if (captchaDetection.type === CAPTCHA_TYPES.CLOUDFLARE && solveResult.token) {
+          await this.browserPort.injectTurnstileToken(pageId, solveResult.token);
+          await this.browserPort.reload(pageId, options?.timeoutMs || DEFAULTS.TIMEOUT_MS);
+        } else if (solveResult.updatedCookie) {
           await this.browserPort.setCookies(pageId, solveResult.updatedCookie);
           await this.browserPort.reload(pageId, options?.timeoutMs || DEFAULTS.TIMEOUT_MS);
         }
@@ -299,7 +304,7 @@ export class CoreScraperEngine {
         data
       };
 
-      await this.recordResult(context, result, startTime);
+      await this.recordResult(context, result, startTime, rawHtml.length);
       return result;
 
     } catch (error) {
@@ -324,7 +329,8 @@ export class CoreScraperEngine {
   private async recordResult(
     context: ScrapeContext,
     result: ScrapeResult,
-    startTime: number
+    startTime: number,
+    contentLength?: number
   ): Promise<void> {
     const ms = Date.now() - startTime;
 
@@ -337,6 +343,7 @@ export class CoreScraperEngine {
       success: result.success,
       method: result.method,
       xpath: result.xpath,
+      contentLength,
       errorType: result.errorType,
       error: result.error,
       ms

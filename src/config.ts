@@ -43,6 +43,10 @@ const ConfigSchema = z.object({
   captchaDefaultTimeout: z.coerce.number().default(120),
   captchaPollingInterval: z.coerce.number().default(5000),
   
+  // FlareSolverr configuration
+  flaresolverrUrl: z.string().default(''),
+  flaresolverrTimeout: z.coerce.number().default(60000),
+  
   // DataDome proxy configuration (separate components)
   datadomeProxyHost: z.string().default(''),
   datadomeProxyLogin: z.string().default(''),
@@ -139,6 +143,10 @@ function mapEnvVars(): Record<string, string | undefined> {
     twocaptchaApiKey: process.env.TWOCAPTCHA_API_KEY || process.env.TWOCAPTCHA || secrets.twocaptcha_api_key,
     captchaDefaultTimeout: process.env.CAPTCHA_DEFAULT_TIMEOUT,
     captchaPollingInterval: process.env.CAPTCHA_POLLING_INTERVAL,
+    
+    // FlareSolverr
+    flaresolverrUrl: process.env.FLARESOLVERR_URL,
+    flaresolverrTimeout: process.env.FLARESOLVERR_TIMEOUT,
     
     // DataDome proxy (ONLY from environment variables - sops exec-env decrypts these)
     datadomeProxyHost: process.env.DATADOME_PROXY_HOST,
@@ -323,4 +331,12 @@ export function isDebugMode(): boolean {
 
 export function getConcurrency(): number {
   return getConfig().concurrency;
+}
+
+export function getFlaresolverrUrl(): string {
+  return getConfig().flaresolverrUrl;
+}
+
+export function getFlaresolverrTimeout(): number {
+  return getConfig().flaresolverrTimeout;
 }

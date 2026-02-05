@@ -47,7 +47,8 @@ describe('CoreScraperEngine', () => {
       }),
       getCookies: vi.fn().mockResolvedValue(''),
       setCookies: vi.fn().mockResolvedValue(undefined),
-      reload: vi.fn().mockResolvedValue(undefined)
+      reload: vi.fn().mockResolvedValue(undefined),
+      injectTurnstileToken: vi.fn().mockResolvedValue(undefined)
     };
 
     mockLlm = {
