@@ -20,7 +20,7 @@ export const workerEvents = new EventEmitter();
 
 export class CoreScraperEngine {
   private static readonly MAX_QUEUE_SIZE = 100;
-  private queue = new PQueue({ concurrency: 5 });
+  private queue = new PQueue({ concurrency: 1 });
   private activeScrapes = new Map<string, string>(); // scrapeId -> url
 
   constructor(
@@ -39,7 +39,7 @@ export class CoreScraperEngine {
   }
 
   getMaxWorkers(): number {
-    return 5;
+    return 1;
   }
 
   getActiveUrls(): string[] {

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { getLogLevel, getDataDir } from '../config.js';
+import { getLogLevel, getDataDir, isDebugMode as configIsDebugMode } from '../config.js';
 
 type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'NONE';
 
@@ -46,8 +46,16 @@ function initLogFile() {
       logFileStream = null; // Disable file logging, continue with console
     });
     
-    // Check if DEBUG env var is set
-    isDebugMode = process.env.DEBUG === 'true' || process.env.DEBUG === '1' || getLogLevel() === 'DEBUG';
+    // Check if DEBUG env var is set (can be checked before config is initialized)
+    isDebugMode = configIsDebugMode();
+    // Also check LOG_LEVEL if config is available
+    try {
+      if (getLogLevel() === 'DEBUG') {
+        isDebugMode = true;
+      }
+    } catch {
+      // Config not initialized yet, use env var only
+    }
     
     if (isDebugMode) {
       console.log(`[LOGGER] Debug mode enabled, logging to: ${logFile}`);

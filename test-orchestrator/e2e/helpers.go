@@ -63,7 +63,7 @@ func NewTestClient(apiToken string) *TestClient {
 	return &TestClient{
 		http: &http.Client{
 			Jar:     jar,
-			Timeout: 30 * time.Second,
+			Timeout: 45 * time.Second,
 		},
 		token: apiToken,
 	}

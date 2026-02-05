@@ -57,10 +57,11 @@ npm start
 
 ### Concurrency & Performance
 
-- **Default Concurrency**: 5 parallel scrapes
-- **Queue Management**: Use `PQueue` in `CoreScraperEngine`
-- **Resource Cleanup**: Use `closePage(pageId)` for per-scrape browser cleanup; only close the whole browser on shutdown
-- **Tracking**: Use unique `scrapeId` (Map) instead of URLs (Set) to allow multiple concurrent scrapes of the same URL
+- **Execution Model**: Sequential (one scrape at a time)
+- **Queue Management**: Use `PQueue` in `CoreScraperEngine` with `concurrency: 1`
+- **Browser Lifecycle**: Fresh browser instance per scrape; launch → scrape → destroy
+- **Resource Cleanup**: Browser and temp profile destroyed after each scrape in `finally` block
+- **Tracking**: Use unique `scrapeId` (Map) for tracking active scrape
 
 ### Dashboard Interactivity (HTMX + SSE)
 

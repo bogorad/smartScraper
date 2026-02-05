@@ -231,7 +231,7 @@ rg -n "logger\.(info|debug|error|warn)" .
 1. **ESM Extensions Required**: Always use `.js` in imports even for `.ts` files
 2. **Config Initialization**: Call `initConfig()` before accessing getters
 3. **Engine Initialization**: Call `initializeEngine()` before `scrapeUrl()`
-4. **Queue Concurrency**: `CoreScraperEngine` uses `PQueue({ concurrency: 5 })`
+4. **Queue Concurrency**: `CoreScraperEngine` uses `PQueue({ concurrency: 1 })` - sequential execution
 5. **Queue Size Limit**: Max 100 pending requests (`MAX_QUEUE_SIZE`)
 6. **Chromium Path**: Set `EXECUTABLE_PATH` env var or Nix handles it
 

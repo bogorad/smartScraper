@@ -270,15 +270,13 @@ describe('CoreScraperEngine', () => {
       expect(order).toEqual([1, 2, 3]);
     });
 
-    it('should process scrapes in parallel with concurrency', async () => {
-      const startTimes: number[] = [];
+    it('should process scrapes sequentially with concurrency of 1', async () => {
       let running = 0;
       let maxConcurrent = 0;
       
       mockBrowser.loadPage = vi.fn().mockImplementation(async () => {
         running++;
         maxConcurrent = Math.max(maxConcurrent, running);
-        startTimes.push(Date.now());
         await new Promise(resolve => setTimeout(resolve, 50));
         running--;
         return { pageId: 'page-123' };
@@ -295,7 +293,8 @@ describe('CoreScraperEngine', () => {
       const promises = urls.map(url => engine.scrapeUrl(url));
       await Promise.all(promises);
 
-      expect(maxConcurrent).toBeGreaterThan(1);
+      // Sequential execution: max concurrent should be exactly 1
+      expect(maxConcurrent).toBe(1);
       expect(mockBrowser.closePage).toHaveBeenCalledTimes(5);
     });
   });
@@ -333,7 +332,7 @@ describe('CoreScraperEngine', () => {
       expect(stats).toHaveProperty('active');
       expect(stats).toHaveProperty('max');
       expect(stats).toHaveProperty('activeUrls');
-      expect(stats.max).toBe(5);
+      expect(stats.max).toBe(1);
       expect(stats.activeUrls).toBeInstanceOf(Array);
     });
 

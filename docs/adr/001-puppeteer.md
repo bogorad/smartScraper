@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2025-12-05
+- Updated: 2026-02-05
 
 ## Context
 
@@ -26,9 +27,16 @@ SmartScraper requires a headless browser for scraping JavaScript-heavy sites and
 
 ### Session Management
 
-Each Puppeteer session represents a unique scrape and uses a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode with extension support via Puppeteer's `enableExtensions` option.
+Each scrape gets a **fresh browser instance** with a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode with extension support via Puppeteer's `enableExtensions` option.
 
-**Concurrency:** The system supports parallel scraping (default: 5 concurrent workers). To optimize resource usage, the browser remains open while individual pages (sessions) are created and destroyed using `closePage(pageId)`.
+**Execution Model:** Scrapes are processed **sequentially** (one at a time). Each scrape follows this lifecycle:
+
+1. Launch new browser instance with fresh profile
+2. Navigate to target URL
+3. Extract content
+4. Close browser and delete profile directory
+
+There is **no browser reuse** between scrapes. This ensures complete isolation and prevents state leakage between requests.
 
 ```typescript
 import fs from 'fs';
@@ -54,8 +62,13 @@ On session close, the browser page is closed and the profile directory is delete
 
 ```typescript
 async closePage(pageId: string) {
-  // ...
-  try { await fs.promises.rm(session.userDataDir, { recursive: true, force: true }); } catch {}
+  const session = this.sessions.get(pageId);
+  if (!session) return;
+  
+  await session.page.close();
+  await session.browser.close();
+  await fs.promises.rm(session.userDataDir, { recursive: true, force: true });
+  this.sessions.delete(pageId);
 }
 ```
 
@@ -282,7 +295,8 @@ if (error.name === 'TimeoutError' ||
 
 ### Benefits
 
-- **Session isolation**: Fresh profile per scrape prevents fingerprint accumulation and cookie contamination
+- **Complete isolation**: Fresh browser instance per scrape prevents any state leakage
+- **Predictable resource usage**: Only one browser running at a time
 - **Real Chrome extensions**: Use battle-tested extensions like uBlock Origin instead of maintaining custom plugins
 - **Realistic fingerprint**: Windows UA + viewport + mouse movement avoids headless detection
 - **Flexible extraction**: XPath with full result type support
@@ -290,10 +304,11 @@ if (error.name === 'TimeoutError' ||
 
 ### Trade-offs
 
+- **Sequential execution**: One scrape at a time; throughput limited by scrape duration
+- **Browser startup overhead**: ~15-20 seconds per scrape with extensions (acceptable for quality over speed)
 - **Extension support**: Uses Puppeteer's `enableExtensions` option with `headless: true`
 - **Profile cleanup overhead**: Directory deletion adds ~50-100ms per session
 - **Extension maintenance**: Extensions may need updates for browser compatibility
-- **Extension initialization delay**: 2-second pre-navigation delay when extensions are loaded
 
 ### Implementation Requirements
 

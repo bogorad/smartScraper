@@ -2,10 +2,11 @@
 
 - Status: Accepted
 - Date: 2026-01-09
+- Updated: 2026-02-05
 
 ## Context
 
-The SmartScraper dashboard needs to provide real-time visibility into the status of active scraping workers. As the system evolved to support concurrency, users needed a way to see which URLs are currently in flight without manually refreshing the page.
+The SmartScraper dashboard needs to provide real-time visibility into the current scraping status. Users need to see when a scrape is in progress and which URL is being processed without manually refreshing the page.
 
 ## Decision
 

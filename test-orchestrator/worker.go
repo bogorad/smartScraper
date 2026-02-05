@@ -126,7 +126,8 @@ func (w *Worker) StartHono(verbose bool) error {
 	}
 
 	// Build the command with environment variables
-	cmd := fmt.Sprintf("cd %s && DATA_DIR=%s PORT=%d API_TOKEN=test-token-%d npm run dev",
+	// LOG_LEVEL=DEBUG enables verbose logging for test debugging
+	cmd := fmt.Sprintf("cd %s && DATA_DIR=%s PORT=%d API_TOKEN=test-token-%d LOG_LEVEL=DEBUG npm run dev",
 		cwd,
 		w.IsolatedEnv.DataDir,
 		w.Port,

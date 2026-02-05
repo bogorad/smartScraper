@@ -79,8 +79,9 @@ Log at INFO/DEBUG:
 
 ### 6. Concurrency Rules
 
-- BrowserPort may be reused across scrapes
-- KnownSitesPort operations must be concurrency-safe
+- Scrapes are processed sequentially (one at a time)
+- BrowserPort creates a fresh instance per scrape (no reuse)
+- KnownSitesPort operations must handle concurrent reads gracefully
 
 ## Consequences
 

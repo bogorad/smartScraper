@@ -103,6 +103,10 @@ function loadSecretsFromYaml(): Record<string, string> {
 function mapEnvVars(): Record<string, string | undefined> {
   const secrets = loadSecretsFromYaml();
   
+  // Check if DEBUG is set - if so, override LOG_LEVEL to DEBUG
+  const debugMode = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
+  const effectiveLogLevel = debugMode ? 'DEBUG' : process.env.LOG_LEVEL;
+  
   return {
     // Server
     port: process.env.PORT,
@@ -139,7 +143,7 @@ function mapEnvVars(): Record<string, string | undefined> {
     apiToken: process.env.API_TOKEN || process.env.SMART_SCRAPER || secrets.api_token,
     
     // Logging
-    logLevel: process.env.LOG_LEVEL,
+    logLevel: effectiveLogLevel,
     saveHtmlOnSuccessNav: process.env.SAVE_HTML_ON_SUCCESS_NAV,
     
     // DOM
@@ -292,4 +296,12 @@ export function getDatadomeProxyLogin(): string {
 
 export function getDatadomeProxyPassword(): string {
   return getConfig().datadomeProxyPassword;
+}
+
+/**
+ * Check if debug mode is enabled via DEBUG env var.
+ * This can be called before config is initialized.
+ */
+export function isDebugMode(): boolean {
+  return process.env.DEBUG === 'true' || process.env.DEBUG === '1';
 }
