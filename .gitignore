@@ -20,3 +20,7 @@ temp_test.crx
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Test orchestrator binary and logs
+test-orchestrator/test-orchestrator
+test-orchestrator/logs/

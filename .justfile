@@ -63,4 +63,26 @@ test-basin:
     curl -s -X POST "http://localhost:5555/api/scrape" \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $SMART_SCRAPER" \
-      -d '{"url": "https://aca.gencat.cat/es/laigua/estat-del-medi-hidric/recursos-disponibles/estat-de-les-reserves-daigua-als-embassaments/index.html", "xpath": "substring-before(substring-after(//textarea[contains(@id, '\''result_'\'')]/text(), '\''porciento2='\''), '\''&'\'')"}' | jq '.'
+      -d '{"url": "https://aca.gencat.cat/es/laigua/estat-del-medi-hidric/recursos-disponibles/estat-de-les-reserves-daigua-als-embassaments/index.html", "xpath": "substring-before(substring-after(//textarea[contains(@id, '\''result_'\'')]/text(), '\''porciento2='\''), '\''\&'\'')"}' | jq '.'
+
+# Run tests with parallel workers
+test:
+    cd test-orchestrator && go run . --workers 4
+
+# Run specific test by pattern
+test-file pattern:
+    cd test-orchestrator && go run . --workers 1 --file {{pattern}}
+
+# Force full test run (bypass cache)
+test-full:
+    cd test-orchestrator && go run . --workers 4 --full
+
+# Clean up orphan processes and cache
+test-clean:
+    #!/usr/bin/env bash
+    rm -f .test-cache.json
+    rm -rf test-orchestrator/logs/*
+    rm -rf /tmp/smartscraper-test-*
+    for port in 9000 9001 9002 9003 9004 9005 9006 9007; do \
+        lsof -ti:$port 2>/dev/null | xargs -r kill -9 2>/dev/null || true; \
+    done
