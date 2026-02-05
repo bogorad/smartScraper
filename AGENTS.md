@@ -47,10 +47,11 @@ just test-urls    # E2E tests against real URLs
 
 ### Concurrency & Performance
 
-- **Execution Model**: Sequential (one scrape at a time)
-- **Queue Management**: `PQueue` with `concurrency: 1`
+- **Execution Model**: Configurable concurrency via `CONCURRENCY` env var (default: 1, max: 20)
+- **Queue Management**: `PQueue` with `concurrency: N`
 - **Browser Lifecycle**: Fresh browser instance per scrape; launch → scrape → destroy
 - **Resource Cleanup**: Browser and temp profile destroyed in `finally` block
+- **Memory Planning**: ~400MB per concurrent browser; size server accordingly
 
 ### Dashboard (HTMX + SSE)
 

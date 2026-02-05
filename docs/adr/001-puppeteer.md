@@ -29,7 +29,7 @@ SmartScraper requires a headless browser for scraping JavaScript-heavy sites and
 
 Each scrape gets a **fresh browser instance** with a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode with extension support via Puppeteer's `enableExtensions` option.
 
-**Execution Model:** Scrapes are processed **sequentially** (one at a time). Each scrape follows this lifecycle:
+**Execution Model:** Scrapes are processed with **configurable concurrency** (via `CONCURRENCY` env var, default: 1). Multiple scrapes can run in parallel, each with its own browser instance. Each scrape follows this lifecycle:
 
 1. Launch new browser instance with fresh profile
 2. Navigate to target URL
@@ -296,7 +296,7 @@ if (error.name === 'TimeoutError' ||
 ### Benefits
 
 - **Complete isolation**: Fresh browser instance per scrape prevents any state leakage
-- **Predictable resource usage**: Only one browser running at a time
+- **Configurable concurrency**: Adjust throughput via `CONCURRENCY` env var
 - **Real Chrome extensions**: Use battle-tested extensions like uBlock Origin instead of maintaining custom plugins
 - **Realistic fingerprint**: Windows UA + viewport + mouse movement avoids headless detection
 - **Flexible extraction**: XPath with full result type support
@@ -304,7 +304,7 @@ if (error.name === 'TimeoutError' ||
 
 ### Trade-offs
 
-- **Sequential execution**: One scrape at a time; throughput limited by scrape duration
+- **Memory usage**: Each browser uses ~200-400MB; plan for N×400MB at concurrency N
 - **Browser startup overhead**: ~15-20 seconds per scrape with extensions (acceptable for quality over speed)
 - **Extension support**: Uses Puppeteer's `enableExtensions` option with `headless: true`
 - **Profile cleanup overhead**: Directory deletion adds ~50-100ms per session

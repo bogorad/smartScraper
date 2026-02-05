@@ -112,7 +112,7 @@ import { scrapeUrl } from './core/engine.js';  // Correct
 1. **ESM Extensions**: Always use `.js` in imports for `.ts` files
 2. **Config Init**: Call `initConfig()` before accessing getters
 3. **Engine Init**: Call `initializeEngine()` before `scrapeUrl()`
-4. **Queue**: `concurrency: 1` - sequential execution only
+4. **Queue**: Configurable via `CONCURRENCY` env var (default: 1, max: 20)
 5. **Queue Limit**: Max 100 pending requests
 
 ---

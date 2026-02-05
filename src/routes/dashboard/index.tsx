@@ -77,23 +77,28 @@ function escapeHtml(text: string): string {
 
 function renderWorkersHtml(stats: {
   active: number;
-  activeUrl?: string;
+  max: number;
+  activeUrls: string[];
 }): string {
+  if (stats.active > 0 && stats.activeUrls.length > 0) {
+    const urlList = stats.activeUrls
+      .map(url => `<p class="code text-sm" style="margin: 0 0 4px 0; word-break: break-all;">${escapeHtml(url)}</p>`)
+      .join('');
+    return `<div class="card-header">Scraping (${stats.active}/${stats.max})</div>${urlList}`;
+  }
   if (stats.active > 0) {
-    if (stats.activeUrl) {
-      return `<div class="card-header">Scraping</div><p class="code text-sm" style="margin: 0; word-break: break-all;">${escapeHtml(stats.activeUrl)}</p>`;
-    }
     return `<div class="card-header">Status</div><p class="text-muted text-sm" style="margin: 0;">Starting...</p>`;
   }
-  return `<div class="card-header">Status</div><p class="text-muted text-sm" style="margin: 0;">Idle</p>`;
+  return `<div class="card-header">Status</div><p class="text-muted text-sm" style="margin: 0;">Idle (0/${stats.max})</p>`;
 }
 
 function broadcast(data: {
   active: number;
-  activeUrl?: string;
+  max: number;
+  activeUrls: string[];
 }) {
   logger.debug(
-    `[SSE] Broadcasting: active=${data.active}, url=${data.activeUrl || 'none'}`,
+    `[SSE] Broadcasting: active=${data.active}/${data.max}, urls=${data.activeUrls.length}`,
   );
   const html = renderWorkersHtml(data);
   logger.debug(
@@ -115,10 +120,11 @@ function broadcast(data: {
   }
 }
 
-workerEvents.on("change", (data: { activeUrls: string[]; active: number }) => {
+workerEvents.on("change", (data: { activeUrls: string[]; active: number; max: number }) => {
   broadcast({
     active: data.active,
-    activeUrl: data.activeUrls.length > 0 ? data.activeUrls[0] : undefined,
+    max: data.max,
+    activeUrls: data.activeUrls,
   });
 });
 
@@ -143,7 +149,8 @@ dashboardRouter.get("/events", async (c) => {
       const stats = getQueueStats();
       const html = renderWorkersHtml({
         active: stats.active,
-        activeUrl: stats.activeUrls.length > 0 ? stats.activeUrls[0] : undefined,
+        max: stats.max,
+        activeUrls: stats.activeUrls,
       });
       controller.enqueue(
         new TextEncoder().encode(
@@ -235,13 +242,15 @@ dashboardRouter.get("/", async (c) => {
       >
         {queueStats.active > 0 && queueStats.activeUrls.length > 0 ? (
           <>
-            <div class="card-header">Scraping</div>
-            <p
-              class="code text-sm"
-              style="margin: 0; word-break: break-all;"
-            >
-              {queueStats.activeUrls[0]}
-            </p>
+            <div class="card-header">Scraping ({queueStats.active}/{queueStats.max})</div>
+            {queueStats.activeUrls.map((url) => (
+              <p
+                class="code text-sm"
+                style="margin: 0 0 4px 0; word-break: break-all;"
+              >
+                {url}
+              </p>
+            ))}
           </>
         ) : queueStats.active > 0 ? (
           <>
@@ -254,7 +263,7 @@ dashboardRouter.get("/", async (c) => {
           <>
             <div class="card-header">Status</div>
             <p class="text-muted text-sm" style="margin: 0;">
-              Idle
+              Idle (0/{queueStats.max})
             </p>
           </>
         )}

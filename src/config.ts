@@ -19,6 +19,9 @@ const ConfigSchema = z.object({
   port: z.coerce.number().min(1).max(65535).default(5555),
   nodeEnv: z.enum(['development', 'production']).default('production'),
   
+  // Scraping concurrency
+  concurrency: z.coerce.number().min(1).max(20).default(1),
+  
   // Data storage
   dataDir: z.string().default('./data'),
   logDir: z.string().optional(),
@@ -111,6 +114,9 @@ function mapEnvVars(): Record<string, string | undefined> {
     // Server
     port: process.env.PORT,
     nodeEnv: process.env.NODE_ENV,
+    
+    // Concurrency
+    concurrency: process.env.CONCURRENCY,
     
     // Data storage
     dataDir: process.env.DATA_DIR,
@@ -304,4 +310,8 @@ export function getDatadomeProxyPassword(): string {
  */
 export function isDebugMode(): boolean {
   return process.env.DEBUG === 'true' || process.env.DEBUG === '1';
+}
+
+export function getConcurrency(): number {
+  return getConfig().concurrency;
 }

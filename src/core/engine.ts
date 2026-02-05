@@ -14,21 +14,26 @@ import { recordScrape } from '../services/stats-storage.js';
 import { logScrape } from '../services/log-storage.js';
 import { logger } from '../utils/logger.js';
 import { buildSessionProxyUrl } from '../utils/proxy.js';
-import { getDatadomeProxyHost, getDatadomeProxyLogin, getDatadomeProxyPassword } from '../config.js';
+import { getDatadomeProxyHost, getDatadomeProxyLogin, getDatadomeProxyPassword, getConcurrency } from '../config.js';
 
 export const workerEvents = new EventEmitter();
 
 export class CoreScraperEngine {
   private static readonly MAX_QUEUE_SIZE = 100;
-  private queue = new PQueue({ concurrency: 1 });
+  private queue: PQueue;
   private activeScrapes = new Map<string, string>(); // scrapeId -> url
+  private readonly maxWorkers: number;
 
   constructor(
     private browserPort: BrowserPort,
     private llmPort: LlmPort,
     private captchaPort: CaptchaPort,
     private knownSitesPort: KnownSitesPort
-  ) {}
+  ) {
+    this.maxWorkers = getConcurrency();
+    this.queue = new PQueue({ concurrency: this.maxWorkers });
+    logger.info(`[ENGINE] Initialized with concurrency: ${this.maxWorkers}`);
+  }
 
   getQueueSize(): number {
     return this.queue.size;
@@ -39,7 +44,7 @@ export class CoreScraperEngine {
   }
 
   getMaxWorkers(): number {
-    return 1;
+    return this.maxWorkers;
   }
 
   getActiveUrls(): string[] {
