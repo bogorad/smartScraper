@@ -12,7 +12,7 @@
 ## Justfile is THE source of truth, beads is your issus tracker
 
 Before attempting ANYTHING check the .justfile, it might contain guidance.
-Befre acting, checkout/create beads issue, consult beads for all actions.
+Before acting, checkout/create beads issue, consult beads for all actions.
 
 ## Root Setup Commands
 

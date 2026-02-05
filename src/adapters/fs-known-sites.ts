@@ -61,6 +61,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
         configs.push(config);
       }
       
+      this.cache = configs;
       await this.flush();
     });
   }
@@ -72,6 +73,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
       
       if (config) {
         config.failureCountSinceLastSuccess++;
+        this.cache = configs;
         await this.flush();
       }
     });
@@ -85,6 +87,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
       if (config) {
         config.failureCountSinceLastSuccess = 0;
         config.lastSuccessfulScrapeTimestamp = utcNow();
+        this.cache = configs;
         await this.flush();
       }
     });

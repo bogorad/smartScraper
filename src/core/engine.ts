@@ -40,7 +40,7 @@ export class CoreScraperEngine {
   }
 
   getActiveWorkers(): number {
-    return this.queue.pending;
+    return this.activeScrapes.size;
   }
 
   getMaxWorkers(): number {

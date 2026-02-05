@@ -3,18 +3,21 @@
 # Run e2e tests against URLs from testing/urls_for_testing.txt
 #
 
-# Proxy configuration: override with SMART_SCRAPER_PROXY env var
+# Configuration: override with environment variables
 PROXY="${SMART_SCRAPER_PROXY:-socks5://r5s.bruc:1080}"
+SERVER="${SMART_SCRAPER_SERVER:-http://localhost:5555}"
+TIMEOUT="${SMART_SCRAPER_TIMEOUT:-120}"
 
-if ! sops decrypt secrets.yaml --output-type=json > /dev/null 2>&1; then
+# Decrypt secrets once and reuse
+SECRETS=$(sops decrypt secrets.yaml --output-type=json 2>/dev/null)
+if [[ $? -ne 0 ]]; then
     echo "Error: Failed to decrypt secrets.yaml"
     exit 1
 fi
 
-eval "$(sops decrypt secrets.yaml --output-type=json | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
+eval "$(echo "$SECRETS" | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
 
 URLS_FILE="testing/urls_for_testing.txt"
-SERVER="http://localhost:5555"
 
 # Check server health
 if ! curl -sf "$SERVER/health" > /dev/null 2>&1; then
@@ -34,7 +37,7 @@ if [[ ${#URLS[@]} -eq 0 ]]; then
     exit 0
 fi
 
-echo "Testing ${#URLS[@]} URLs (proxy: $PROXY)..."
+echo "Testing ${#URLS[@]} URLs (proxy: $PROXY, timeout: ${TIMEOUT}s)..."
 echo "================================================"
 
 PASSED=0
@@ -48,18 +51,21 @@ for url in "${URLS[@]}"; do
         -H "Authorization: Bearer $SMART_SCRAPER" \
         -H "Content-Type: application/json" \
         -d "{\"url\": \"$url\", \"outputType\": \"metadata_only\"}" \
-        --max-time 120 2>&1)
+        --max-time "$TIMEOUT" 2>&1)
     CURL_EXIT=$?
     
     if [[ $CURL_EXIT -ne 0 ]]; then
         # Map common curl exit codes to human-readable errors
         case $CURL_EXIT in
+            5)  CURL_ERROR="Proxy error" ;;
             6)  CURL_ERROR="Could not resolve host" ;;
             7)  CURL_ERROR="Failed to connect" ;;
+            22) CURL_ERROR="HTTP error (4xx/5xx)" ;;
             28) CURL_ERROR="Operation timeout" ;;
             35) CURL_ERROR="SSL connect error" ;;
             52) CURL_ERROR="Empty reply from server" ;;
             56) CURL_ERROR="Failure receiving network data" ;;
+            60) CURL_ERROR="SSL certificate problem" ;;
             *)  CURL_ERROR="curl exit code $CURL_EXIT" ;;
         esac
         RESPONSE="{\"success\":false,\"error\":\"$CURL_ERROR\"}"

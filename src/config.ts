@@ -162,6 +162,15 @@ function mapEnvVars(): Record<string, string | undefined> {
 function parseConfig(): Config {
   const envVars = mapEnvVars();
   
+  // Check for concurrency clamping before validation
+  const rawConcurrency = envVars.concurrency;
+  if (rawConcurrency !== undefined) {
+    const numVal = Number(rawConcurrency);
+    if (!isNaN(numVal) && (numVal < 1 || numVal > 20)) {
+      console.warn(`[CONFIG] CONCURRENCY=${numVal} is outside valid range (1-20), will be clamped to ${Math.max(1, Math.min(20, numVal))}`);
+    }
+  }
+  
   try {
     return ConfigSchema.parse(envVars);
   } catch (error) {
