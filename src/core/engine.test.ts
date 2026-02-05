@@ -381,9 +381,12 @@ describe('CoreScraperEngine', () => {
 
       const result = await engine.scrapeUrl('https://example.com/article');
 
+      // Verify the fallback path was attempted
+      expect(mockBrowser.extractEmbeddedArticle).toHaveBeenCalledWith('page-123');
+      
       // Engine should handle the exception and return an error result
       expect(result.success).toBe(false);
-      expect(result.errorType).toBeDefined();
+      expect(result.errorType).toBe(ERROR_TYPES.UNKNOWN);
     });
   });
 
