@@ -194,7 +194,8 @@ export class CoreScraperEngine {
             logger.debug(`[ENGINE] Validation failed for cached XPath ${xpath}, but discovery is disabled.`);
           } else {
             needsDiscovery = true;
-            logger.debug(`[ENGINE] Existing XPath ${xpath} failed validation (length: ${extracted?.[0]?.length || 0}). Needs discovery.`);
+            xpath = undefined; // Reset xpath so discovery result is used
+            logger.debug(`[ENGINE] Existing XPath ${context.siteConfig.xpathMainContent} failed validation (length: ${extracted?.[0]?.length || 0}). Needs discovery.`);
             await this.knownSitesPort.incrementFailure(domain);
           }
         } else {

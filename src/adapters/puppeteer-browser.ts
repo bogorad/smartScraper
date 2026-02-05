@@ -211,7 +211,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
 
   // XPath validation constants
   private static readonly MAX_XPATH_LENGTH = 500;
-  private static readonly ALLOWED_XPATH_PATTERN = /^[\w\-\/\[\]@="'\s\.\(\)\|\*\:]+$/;
+  private static readonly ALLOWED_XPATH_PATTERN = /^[\w\-\/\[\]@="'\s\.\(\)\|\*\:,]+$/;
 
   private validateXPath(xpath: string): boolean {
     if (!xpath || xpath.length > PuppeteerBrowserAdapter.MAX_XPATH_LENGTH) return false;

@@ -65,6 +65,10 @@ just test-urls    # E2E tests against real URLs
 - `main` is the default branch
 - Feature branches: `feat/description` or `fix/description`
 
+### Development Commands
+
+- Use `nix develop --command <command>` to run commands with the devShell environment
+
 ---
 
 ## Security & Secrets
