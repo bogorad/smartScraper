@@ -136,6 +136,8 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
   }
 
   private buildLaunchArgs(explicitProxy?: string): string[] {
+    const extensionPaths = this.getExtensionPaths();
+    
     const args = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -147,6 +149,13 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       '--font-render-hinting=none',
       '--blink-settings=imagesEnabled=false'
     ];
+
+    // Add extension flags if extensions are configured
+    // These flags work alongside Puppeteer's enableExtensions option
+    if (extensionPaths.length > 0) {
+      args.push('--enable-extensions');
+      args.push(`--disable-extensions-except=${extensionPaths.join(',')}`);
+    }
 
     // Priority: explicit proxy > global PROXY_SERVER
     const proxyServer = explicitProxy || getProxyServer();
