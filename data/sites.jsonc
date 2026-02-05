@@ -69,8 +69,8 @@
   },
   {
     "domainPattern": "foreignaffairs.com",
-    "xpathMainContent": "//main[@class='rich-text__inner ']",
-    "lastSuccessfulScrapeTimestamp": "2025-05-18T00:16:34.347Z",
+    "xpathMainContent": "//div[@class='rich-text__inner ']",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T19:03:01.492Z",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -86,7 +86,7 @@
   {
     "domainPattern": "ft.com",
     "xpathMainContent": "//div[@class='article__content']",
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T15:43:04.168Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:22:10.806Z",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -128,7 +128,7 @@
     "domainPattern": "nypost.com",
     "xpathMainContent": "//div[@class='single__content entry-content m-bottom']",
     "failureCountSinceLastSuccess": 0,
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T17:04:10.848Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:25:59.560Z",
     "siteCleanupClasses": [
       "featured-image__wrapper",
       "inline-module--more",
@@ -138,7 +138,7 @@
   {
     "domainPattern": "nytimes.com",
     "xpathMainContent": "//section[@name='articleBody']",
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:22:41.849Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:22:41.097Z",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -253,9 +253,9 @@
   },
   {
     "domainPattern": "unherd.com",
-    "xpathMainContent": "//article[contains(@class, 'post-')]",
-    "lastSuccessfulScrapeTimestamp": "2025-12-07T14:02:17.728Z",
-    "failureCountSinceLastSuccess": 2,
+    "xpathMainContent": "//div[@class='pianocontentwrapper']",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:29:26.552Z",
+    "failureCountSinceLastSuccess": 0,
     "discoveredByLlm": true
   },
   {
@@ -298,48 +298,47 @@
   },
   {
     "domainPattern": "nzz.ch",
-    "xpathMainContent": "//div[@class='nzz-page-transition']/div/div[@class='article']",
-    "lastSuccessfulScrapeTimestamp": "2025-05-17T20:03:27.978Z",
-    "failureCountSinceLastSuccess": 2,
+    "xpathMainContent": "//section[@data-nzz-tid='article']",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T19:06:03.397Z",
+    "failureCountSinceLastSuccess": 0,
     "discoveredByLlm": true
   },
   {
     "domainPattern": "spiegel.de",
     "xpathMainContent": "//main[@id='Inhalt']/article",
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:24:43.907Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:24:04.019Z",
     "failureCountSinceLastSuccess": 0,
     "discoveredByLlm": true
   },
   {
     "domainPattern": "thelocal.es",
     "xpathMainContent": "//div[@id='articleBody']",
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T17:02:40.991Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:24:33.319Z",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "cjr.org",
-    "xpathMainContent": "//div[contains(@class, 'entry-content')]",
-    "failureCountSinceLastSuccess": 1,
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T17:07:06.796Z",
-    "discoveredByLlm": true
+    "xpathMainContent": "//div[contains(@class,'entry-content')]",
+    "failureCountSinceLastSuccess": 0,
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:39:47.416Z"
   },
   {
     "domainPattern": "thetimes.com",
     "xpathMainContent": "//div[@data-testid='article-content-body']",
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:45:32.687Z",
-    "failureCountSinceLastSuccess": 0
-  },
-  {
-    "domainPattern": "variety.com",
-    "xpathMainContent": "//div[contains(@class, 'vy-cx-page-content')]",
-    "lastSuccessfulScrapeTimestamp": "2025-12-07T14:02:31.874Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T19:10:28.043Z",
     "failureCountSinceLastSuccess": 2
   },
   {
+    "domainPattern": "variety.com",
+    "xpathMainContent": "//div[@class='pmc-paywall']",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:31:32.973Z",
+    "failureCountSinceLastSuccess": 0
+  },
+  {
     "domainPattern": "reuters.com",
-    "xpathMainContent": "//main[@id='main-content']//div[contains(@class, 'article-body')]",
-    "failureCountSinceLastSuccess": 1,
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:44:23.344Z",
+    "xpathMainContent": "//article//div[contains(@class, 'content')]",
+    "failureCountSinceLastSuccess": 0,
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T19:09:06.077Z",
     "discoveredByLlm": true
   }
 ]
