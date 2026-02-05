@@ -231,6 +231,7 @@ func (p *WorkerPool) Start(ctx context.Context, healthTimeout time.Duration, ver
 
 // Acquire gets an available worker from the pool.
 // It blocks until a worker is available or the context/timeout expires.
+// If the acquired worker's server is unhealthy, it will attempt to restart it.
 func (p *WorkerPool) Acquire(ctx context.Context, timeout time.Duration, verbose bool) (*Worker, error) {
 	acquireCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -241,6 +242,24 @@ func (p *WorkerPool) Acquire(ctx context.Context, timeout time.Duration, verbose
 		worker.Status = StatusRunning
 		worker.mu.Unlock()
 
+		// Health check - ensure server is still responsive
+		healthy, _ := worker.CheckHealth(ctx)
+		if !healthy {
+			if verbose {
+				fmt.Printf("[pool] Worker %d unhealthy, attempting restart...\n", worker.ID)
+			}
+
+			// Restart the Hono server
+			if err := p.restartWorkerServer(ctx, worker, verbose); err != nil {
+				if verbose {
+					fmt.Printf("[pool] Worker %d restart failed: %v\n", worker.ID, err)
+				}
+				// Put worker back and return error
+				p.available <- worker
+				return nil, fmt.Errorf("worker %d restart failed: %w", worker.ID, err)
+			}
+		}
+
 		if verbose {
 			fmt.Printf("[pool] Acquired worker %d\n", worker.ID)
 		}
@@ -250,6 +269,34 @@ func (p *WorkerPool) Acquire(ctx context.Context, timeout time.Duration, verbose
 	case <-acquireCtx.Done():
 		return nil, ErrWorkerNotAvailable
 	}
+}
+
+// restartWorkerServer restarts the Hono server for a worker.
+func (p *WorkerPool) restartWorkerServer(ctx context.Context, worker *Worker, verbose bool) error {
+	// Send Ctrl+C to stop any running process
+	if err := worker.TmuxSession.SendCommand("\x03", verbose); err != nil {
+		// Ignore error, might not have a running process
+	}
+
+	// Wait a moment for the process to stop
+	time.Sleep(500 * time.Millisecond)
+
+	// Start Hono again
+	if err := worker.StartHono(verbose); err != nil {
+		return fmt.Errorf("failed to start Hono: %w", err)
+	}
+
+	// Wait for health
+	healthTimeout := 30 * time.Second
+	if err := worker.WaitReady(ctx, healthTimeout, verbose); err != nil {
+		return fmt.Errorf("server not healthy after restart: %w", err)
+	}
+
+	if verbose {
+		fmt.Printf("[pool] Worker %d restarted successfully\n", worker.ID)
+	}
+
+	return nil
 }
 
 // Release returns a worker to the pool for reuse.

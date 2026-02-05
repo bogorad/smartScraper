@@ -25,3 +25,4 @@ temp_test.crx
 test-orchestrator/test-orchestrator
 test-orchestrator/logs/
 .test-cache.json
+.beads/.bv.lock
