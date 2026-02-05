@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Mutex, getFileMutex } from './mutex.js';
+import { Mutex } from './mutex.js';
 
 describe('Mutex', () => {
   it('should allow single acquisition', async () => {
@@ -106,33 +106,5 @@ describe('Mutex', () => {
     await Promise.all([task1, task2]);
 
     expect(execution).toEqual(['start-1', 'end-1', 'start-2', 'end-2']);
-  });
-});
-
-describe('getFileMutex', () => {
-  it('should return same mutex for same path', () => {
-    const mutex1 = getFileMutex('/path/to/file.txt');
-    const mutex2 = getFileMutex('/path/to/file.txt');
-    expect(mutex1).toBe(mutex2);
-  });
-
-  it('should return different mutexes for different paths', () => {
-    const mutex1 = getFileMutex('/path/to/file1.txt');
-    const mutex2 = getFileMutex('/path/to/file2.txt');
-    expect(mutex1).not.toBe(mutex2);
-  });
-
-  it('should handle multiple paths', async () => {
-    const mutex1 = getFileMutex('/path1');
-    const mutex2 = getFileMutex('/path2');
-    
-    const release1 = await mutex1.acquire();
-    const release2 = await mutex2.acquire();
-    
-    expect(release1).toBeInstanceOf(Function);
-    expect(release2).toBeInstanceOf(Function);
-    
-    release1();
-    release2();
   });
 });

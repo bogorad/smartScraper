@@ -9,6 +9,16 @@ interface RateLimitEntry {
 // In-memory rate limit store (consider Redis for multi-instance deployments)
 const store = new Map<string, RateLimitEntry>();
 
+// Cleanup expired entries every minute
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of store) {
+    if (entry.resetTime < now) {
+      store.delete(key);
+    }
+  }
+}, 60000);
+
 interface RateLimitOptions {
   maxRequests: number;
   windowMs: number;

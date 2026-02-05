@@ -43,7 +43,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
   }
 
   async loadPage(url: string, options?: LoadPageOptions): Promise<{ pageId: string }> {
-    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'puppeteer-user-data-'));
+    const userDataDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'puppeteer-user-data-'));
     const extensionPaths = this.getExtensionPaths();
     const hasExtensions = extensionPaths.length > 0;
 
@@ -74,51 +74,61 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       logger.debug('Browser launching without proxy', { url }, 'BROWSER');
     }
 
-    const browser = await puppeteer.launch({
-      executablePath: getExecutablePath(),
-      headless: true,
-      pipe: true,
-      userDataDir,
-      args: this.buildLaunchArgs(options?.proxy),
-      timeout: options?.timeout || DEFAULTS.TIMEOUT_MS,
-      ...(hasExtensions && { enableExtensions: extensionPaths })
-    });
+    let browser: Browser | null = null;
+    try {
+      browser = await puppeteer.launch({
+        executablePath: getExecutablePath(),
+        headless: true,
+        pipe: true,
+        userDataDir,
+        args: this.buildLaunchArgs(options?.proxy),
+        timeout: options?.timeout || DEFAULTS.TIMEOUT_MS,
+        ...(hasExtensions && { enableExtensions: extensionPaths })
+      });
 
-    const page = await browser.newPage();
-    
-    // Set proxy authentication if credentials are provided
-    if (proxyAuth) {
-      await page.authenticate(proxyAuth);
-      logger.debug('Proxy authentication set', { username: proxyAuth.username }, 'BROWSER');
-    }
-    
-    page.on('console', msg => {
-      const text = msg.text();
-      // Ignore 404 errors from the page being scraped
-      if (!text.includes('404') && !text.includes('Failed to load resource')) {
-        logger.debug(`[BROWSER] ${text}`);
+      const page = await browser.newPage();
+      
+      // Set proxy authentication if credentials are provided
+      if (proxyAuth) {
+        await page.authenticate(proxyAuth);
+        logger.debug('Proxy authentication set', { username: proxyAuth.username }, 'BROWSER');
       }
-    });
-    await page.setUserAgent(DEFAULTS.USER_AGENT);
-    await page.setViewport({ width: DEFAULTS.VIEWPORT_WIDTH, height: DEFAULTS.VIEWPORT_HEIGHT });
+      
+      page.on('console', msg => {
+        const text = msg.text();
+        // Ignore 404 errors from the page being scraped
+        if (!text.includes('404') && !text.includes('Failed to load resource')) {
+          logger.debug(`[BROWSER] ${text}`);
+        }
+      });
+      await page.setUserAgent(DEFAULTS.USER_AGENT);
+      await page.setViewport({ width: DEFAULTS.VIEWPORT_WIDTH, height: DEFAULTS.VIEWPORT_HEIGHT });
 
-    if (hasExtensions) {
-      await new Promise(r => setTimeout(r, 2000));
+      if (hasExtensions) {
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      await page.goto(url, {
+        waitUntil: options?.waitUntil || 'networkidle2',
+        timeout: options?.timeout || DEFAULTS.TIMEOUT_MS
+      });
+
+      await page.mouse.move(100, 100);
+      await page.evaluate(() => window.scrollBy(0, 200));
+      await new Promise(r => setTimeout(r, 1000));
+
+      const pageId = `page-${++this.pageCounter}`;
+      this.sessions.set(pageId, { page, browser, userDataDir });
+
+      return { pageId };
+    } catch (error) {
+      // Cleanup on failure to prevent resource leaks
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+      await fs.promises.rm(userDataDir, { recursive: true, force: true }).catch(() => {});
+      throw error;
     }
-
-    await page.goto(url, {
-      waitUntil: options?.waitUntil || 'networkidle2',
-      timeout: options?.timeout || DEFAULTS.TIMEOUT_MS
-    });
-
-    await page.mouse.move(100, 100);
-    await page.evaluate(() => window.scrollBy(0, 200));
-    await new Promise(r => setTimeout(r, 1000));
-
-    const pageId = `page-${++this.pageCounter}`;
-    this.sessions.set(pageId, { page, browser, userDataDir });
-
-    return { pageId };
   }
 
   private getExtensionPaths(): string[] {

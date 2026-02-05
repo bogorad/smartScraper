@@ -41,6 +41,11 @@ function initLogFile() {
     
     logFileStream = fs.createWriteStream(logFile, { flags: 'a' });
     
+    logFileStream.on('error', (err) => {
+      console.error('[LOGGER] File stream error:', err.message);
+      logFileStream = null; // Disable file logging, continue with console
+    });
+    
     // Check if DEBUG env var is set
     isDebugMode = process.env.DEBUG === 'true' || process.env.DEBUG === '1' || getLogLevel() === 'DEBUG';
     
@@ -48,7 +53,7 @@ function initLogFile() {
       console.log(`[LOGGER] Debug mode enabled, logging to: ${logFile}`);
     }
   } catch (error) {
-    // Silently fail if config not ready yet - will retry on first log
+    console.error('[LOGGER] Failed to initialize log file:', error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -66,7 +71,7 @@ function writeToFile(entry: LogEntry) {
     try {
       logFileStream.write(JSON.stringify(entry) + '\n');
     } catch (error) {
-      // Fail silently to not disrupt the application
+      console.error('[LOGGER] Write error:', error instanceof Error ? error.message : String(error));
     }
   }
 }

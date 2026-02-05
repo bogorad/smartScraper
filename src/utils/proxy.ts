@@ -72,8 +72,12 @@ export function buildSessionProxyUrl(
   // Build username with session params
   const sessionLogin = `${baseLogin}-session-${sessionId}-sessTime-${sessionMinutes}`;
   
+  // URL-encode credentials to handle special characters (@, :, /, %)
+  const encodedLogin = encodeURIComponent(sessionLogin);
+  const encodedPassword = encodeURIComponent(password);
+  
   // Construct full URL (always use http:// for Chromium compatibility)
-  const proxyUrl = `http://${sessionLogin}:${password}@${host}`;
+  const proxyUrl = `http://${encodedLogin}:${encodedPassword}@${host}`;
   
   logger.debug('Built session proxy URL', {
     sessionId,

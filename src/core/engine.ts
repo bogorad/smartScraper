@@ -19,6 +19,7 @@ import { getDatadomeProxyHost, getDatadomeProxyLogin, getDatadomeProxyPassword }
 export const workerEvents = new EventEmitter();
 
 export class CoreScraperEngine {
+  private static readonly MAX_QUEUE_SIZE = 100;
   private queue = new PQueue({ concurrency: 5 });
   private activeScrapes = new Map<string, string>(); // scrapeId -> url
 
@@ -46,6 +47,18 @@ export class CoreScraperEngine {
   }
 
   async scrapeUrl(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
+    if (this.queue.size >= CoreScraperEngine.MAX_QUEUE_SIZE) {
+      logger.warn('[ENGINE] Queue full, rejecting request', { 
+        queueSize: this.queue.size, 
+        url 
+      });
+      return {
+        success: false,
+        errorType: ERROR_TYPES.CONFIGURATION,
+        error: 'Server overloaded, please retry later'
+      };
+    }
+
     return await this.queue.add(async () => {
       const scrapeId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const domain = extractDomain(url);

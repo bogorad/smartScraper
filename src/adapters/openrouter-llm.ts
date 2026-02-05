@@ -4,6 +4,7 @@ import type { LlmXPathSuggestion } from '../domain/models.js';
 import { parseXPathResponse } from '../utils/xpath-parser.js';
 import { DEFAULTS } from '../constants.js';
 import { getOpenrouterApiKey, getLlmModel, getLlmTemperature, getLlmHttpReferer, getLlmXTitle } from '../config.js';
+import { logger } from '../utils/logger.js';
 
 const SYSTEM_PROMPT = `You are an expert web scraper. Your task is to analyze HTML structure and identify the XPath selector for the main article content.
 
@@ -59,8 +60,23 @@ export class OpenRouterLlmAdapter implements LlmPort {
         }
       );
 
+      // Validate response content type (skip if headers missing in test mocks)
+      const contentType = response.headers?.['content-type'] || '';
+      if (contentType && !contentType.includes('application/json')) {
+        logger.warn('[LLM] Unexpected response content type', {
+          contentType,
+          status: response.status
+        });
+        return [];
+      }
+
       const content = response.data?.choices?.[0]?.message?.content;
-      if (!content) return [];
+      if (!content) {
+        logger.debug('[LLM] Empty content in response', {
+          hasChoices: !!response.data?.choices
+        });
+        return [];
+      }
 
       const xpaths = parseXPathResponse(content);
       return xpaths.map(xpath => ({ xpath }));

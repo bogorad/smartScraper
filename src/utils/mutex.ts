@@ -31,14 +31,3 @@ export class Mutex {
     }
   }
 }
-
-const mutexes = new Map<string, Mutex>();
-
-export function getFileMutex(path: string): Mutex {
-  let mutex = mutexes.get(path);
-  if (!mutex) {
-    mutex = new Mutex();
-    mutexes.set(path, mutex);
-  }
-  return mutex;
-}
