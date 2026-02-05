@@ -6,8 +6,9 @@
 
 set -o pipefail
 
-# Configuration - use empty string as default for PROXY (no proxy by default)
-PROXY="${SMART_SCRAPER_PROXY:-}"
+# Configuration
+# Note: Proxy for browser scraping is configured server-side via PROXY_SERVER env var
+# DataDome CAPTCHA solving uses separate DATADOME_PROXY_* credentials
 SERVER="${SMART_SCRAPER_SERVER:-http://localhost:5555}"
 TIMEOUT="${SMART_SCRAPER_TIMEOUT:-120}"
 URLS_FILE="testing/urls_for_testing.txt"
@@ -50,12 +51,6 @@ echo "Server: $SERVER"
 echo "Timeout: ${TIMEOUT}s"
 echo ""
 
-# Build curl args
-build_curl_args() {
-    local url="$1"
-    echo "-sf -X POST $SERVER/api/scrape -H 'Authorization: Bearer $SMART_SCRAPER' -H 'Content-Type: application/json' -d '{\"url\": \"$url\", \"outputType\": \"metadata_only\"}' --max-time $TIMEOUT"
-}
-
 # Temp files for output
 OUT1=$(mktemp)
 OUT2=$(mktemp)
@@ -65,15 +60,11 @@ TIME2=$(mktemp)
 echo "Starting concurrent scrapes..."
 echo ""
 
-# Build curl commands
+# Build curl commands - proxy is configured server-side, not passed per-request
 CURL_BASE=(-sf -X POST "$SERVER/api/scrape"
     -H "Authorization: Bearer $SMART_SCRAPER"
     -H "Content-Type: application/json"
     --max-time "$TIMEOUT")
-
-if [[ -n "$PROXY" ]]; then
-    CURL_BASE+=(--proxy "$PROXY")
-fi
 
 # Launch both in parallel using process substitution
 {

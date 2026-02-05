@@ -138,7 +138,7 @@
   {
     "domainPattern": "nytimes.com",
     "xpathMainContent": "//section[@name='articleBody']",
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T15:41:43.117Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:22:41.849Z",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -306,7 +306,7 @@
   {
     "domainPattern": "spiegel.de",
     "xpathMainContent": "//main[@id='Inhalt']/article",
-    "lastSuccessfulScrapeTimestamp": "2025-12-07T14:04:07.193Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:24:43.907Z",
     "failureCountSinceLastSuccess": 0,
     "discoveredByLlm": true
   },
