@@ -51,6 +51,41 @@ export class CoreScraperEngine {
     return Array.from(this.activeScrapes.values());
   }
 
+  /**
+   * Build a success result with appropriate output format.
+   * Centralizes result construction to avoid duplication.
+   */
+  private async buildSuccessResult(
+    pageId: string,
+    xpath: string,
+    rawContent: string,
+    outputType: string,
+    cleanerOptions?: { siteCleanupClasses?: string[] }
+  ): Promise<ScrapeResult> {
+    let data: string | object;
+
+    if (outputType === OUTPUT_TYPES.FULL_HTML) {
+      data = await this.browserPort.getPageHtml(pageId);
+    } else if (outputType === OUTPUT_TYPES.METADATA_ONLY) {
+      data = { xpath, contentLength: rawContent.length };
+    } else if (outputType === OUTPUT_TYPES.CLEANED_HTML) {
+      data = cleanHtml(rawContent, cleanerOptions);
+    } else if (outputType === OUTPUT_TYPES.MARKDOWN) {
+      // For embedded JSON (plain text), just return as-is; for HTML, convert
+      data = rawContent.includes('<') ? toMarkdown(rawContent, cleanerOptions) : rawContent;
+    } else {
+      // CONTENT_ONLY - extract text if HTML, else return as-is
+      data = rawContent.includes('<') ? extractText(rawContent, cleanerOptions) : rawContent;
+    }
+
+    return {
+      success: true,
+      method: METHODS.PUPPETEER_STEALTH,
+      xpath,
+      data
+    };
+  }
+
   async scrapeUrl(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
     if (this.queue.size >= CoreScraperEngine.MAX_QUEUE_SIZE) {
       logger.warn('[ENGINE] Queue full, rejecting request', { 
@@ -254,23 +289,12 @@ export class CoreScraperEngine {
             logger.info(`[ENGINE] Extracted ${embeddedContent.length} chars from embedded JSON`);
             
             const outputType = options?.outputType || OUTPUT_TYPES.CONTENT_ONLY;
-            let data: string | object = embeddedContent;
-            
-            if (outputType === OUTPUT_TYPES.FULL_HTML) {
-              data = await this.browserPort.getPageHtml(pageId);
-            } else if (outputType === OUTPUT_TYPES.METADATA_ONLY) {
-              data = { xpath: 'embedded_json', contentLength: embeddedContent.length };
-            } else if (outputType === OUTPUT_TYPES.MARKDOWN) {
-              // Content is already plain text, just format paragraphs
-              data = embeddedContent;
-            }
-            
-            result = {
-              success: true,
-              method: METHODS.PUPPETEER_STEALTH,
-              xpath: 'embedded_json',
-              data
-            };
+            result = await this.buildSuccessResult(
+              pageId,
+              'embedded_json',
+              embeddedContent,
+              outputType
+            );
             
             await this.recordResult(context, result, startTime, embeddedContent.length);
             return result;
@@ -318,31 +342,18 @@ export class CoreScraperEngine {
       await this.knownSitesPort.markSuccess(domain);
 
       const outputType = options?.outputType || OUTPUT_TYPES.CONTENT_ONLY;
-      let data: string | object;
-
       const rawHtml = extracted.join('\n');
       const cleanerOptions = {
         siteCleanupClasses: context.siteConfig?.siteCleanupClasses
       };
 
-      if (outputType === OUTPUT_TYPES.FULL_HTML) {
-        data = await this.browserPort.getPageHtml(pageId);
-      } else if (outputType === OUTPUT_TYPES.METADATA_ONLY) {
-        data = { xpath, contentLength: rawHtml.length };
-      } else if (outputType === OUTPUT_TYPES.CLEANED_HTML) {
-        data = cleanHtml(rawHtml, cleanerOptions);
-      } else if (outputType === OUTPUT_TYPES.MARKDOWN) {
-        data = toMarkdown(rawHtml, cleanerOptions);
-      } else {
-        data = extractText(rawHtml, cleanerOptions);
-      }
-
-      result = {
-        success: true,
-        method: METHODS.PUPPETEER_STEALTH,
-        xpath,
-        data
-      };
+      result = await this.buildSuccessResult(
+        pageId,
+        xpath!,
+        rawHtml,
+        outputType,
+        cleanerOptions
+      );
 
       await this.recordResult(context, result, startTime, rawHtml.length);
       return result;

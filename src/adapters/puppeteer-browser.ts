@@ -128,12 +128,13 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       await page.evaluate(() => window.scrollBy(0, 200));
       
       // Wait for extension content injection (e.g., bypass-paywalls fetching from archive.is)
-      // Poll for substantial content appearing, with timeout
+      // Poll with exponential backoff for substantial content appearing
       if (hasExtensions) {
         const maxWaitMs = 15000;
-        const pollIntervalMs = 500;
         const minContentLength = 1000;
         let waited = 0;
+        let interval = 200; // Start at 200ms, grow exponentially
+        const maxInterval = 2000;
         
         while (waited < maxWaitMs) {
           const contentLength = await page.evaluate(() => {
@@ -148,11 +149,13 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
             ];
             for (const sel of selectors) {
               const el = document.querySelector(sel) as HTMLElement | null;
-              if (el?.innerText && el.innerText.length > 500) {
-                return el.innerText.length;
+              // Check trimmed content to avoid whitespace-only matches
+              if (el?.innerText && el.innerText.trim().length > 500) {
+                return el.innerText.trim().length;
               }
             }
-            return (document.body as HTMLElement)?.innerText?.length || 0;
+            const bodyText = (document.body as HTMLElement)?.innerText?.trim();
+            return bodyText?.length || 0;
           });
           
           if (contentLength >= minContentLength) {
@@ -160,8 +163,9 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
             break;
           }
           
-          await new Promise(r => setTimeout(r, pollIntervalMs));
-          waited += pollIntervalMs;
+          await new Promise(r => setTimeout(r, interval));
+          waited += interval;
+          interval = Math.min(interval * 1.5, maxInterval); // Exponential backoff capped at 2s
         }
         
         if (waited >= maxWaitMs) {
@@ -552,7 +556,12 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
                   }
                 }
               }
-            } catch (e) {}
+            } catch (e) {
+              // JSON-LD parse error - continue to next script
+              if (typeof console !== 'undefined' && console.debug) {
+                console.debug('[SmartScraper] JSON-LD parse error:', e);
+              }
+            }
           }
 
           // Method 3: Try __NEXT_DATA__
