@@ -16,7 +16,13 @@
     |                    HTTP Layer                           |
     |  - API Routes (POST /api/scrape)                       |
     |  - Dashboard Routes (HTMX + SSE)                       |
-    |  - Middleware (Auth, RateLimit, CSRF)                  |
+    +----------------------------+---------------------------+
+                                 |
+    +----------------------------v---------------------------+
+    |                   Middleware Layer                      |
+    |  - Auth (Bearer token, session cookie)                 |
+    |  - Rate Limiting (10 req/min API, 60 req/min dash)     |
+    |  - CSRF Protection (dashboard forms)                   |
     +----------------------------+---------------------------+
                                  |
                                  v
@@ -50,8 +56,8 @@ SCRAPE_FLOW:
     INPUT: url, outputType, options
     
     1. HTTP Layer receives POST /api/scrape
+       - Rate limit check (10 req/min)
        - Validate Bearer token
-       - Check rate limit
        - Validate JSON schema with Zod
     
     2. Engine.scrapeUrl(url, options)
@@ -75,9 +81,10 @@ SCRAPE_FLOW:
           - Score each candidate
           - Pick best (score >= 0.7, length >= 200)
        i. Extract content via XPath
-       j. Transform output (text, markdown, html, etc.)
-       k. Record stats + log
-       l. Cleanup: close page + browser + delete temp profile
+       j. Embedded JSON fallback (Apollo, JSON-LD, __NEXT_DATA__)
+       k. Transform output (text, markdown, html, etc.)
+       l. Record stats + log
+       m. Cleanup: close page + browser + delete temp profile
     
     4. Return ScrapeResult
        - success: boolean
@@ -164,9 +171,9 @@ src/
         api/scrape.ts           # POST /api/scrape
         dashboard/
             index.tsx           # Dashboard home + SSE
+            login.tsx           # Login page
             sites.tsx           # Site configuration CRUD
             stats.tsx           # Statistics view
-            login.tsx           # Login page
     
     middleware/
         auth.ts           # Bearer token + session auth
@@ -192,10 +199,7 @@ src/
     
     components/
         layout.tsx        # HTML layout wrapper
-        site-row.tsx      # Site table row
-        site-form.tsx     # Site edit form
-        stats-card.tsx    # Stats card component
-        test-form.tsx     # Scrape test form
+        styles.ts         # CSS-in-JS styles
 
 data/
     sites.jsonc           # Site configurations (JSONC with comments)

@@ -6,18 +6,24 @@ SmartScraper is an intelligent, self-learning web scraping service designed to r
 
 - **Intelligent Extraction**: Uses LLMs to discover content XPaths when standard selectors fail.
 - **Self-Healing**: Automatically updates and saves working configurations for domains.
+- **Embedded JSON Fallback**: Extracts content from Apollo State, JSON-LD, and __NEXT_DATA__ when XPath fails.
 - **Anti-Bot Evasion**: 
   - Realistic browser fingerprinting (Puppeteer Stealth).
   - Integration with 2Captcha for solving generic and DataDome CAPTCHAs.
   - Extension support for ad-blocking and paywall bypass.
 - **Concurrency & Scaling**:
-  - High-performance queue processing with **5 parallel workers** by default.
+  - High-performance queue processing with configurable parallel workers (default: 1, max: 20).
   - Granular resource management (per-scrape browser page cleanup).
 - **Backend & Dashboard**: 
   - REST API for programmatic access.
   - **Real-time Dashboard** powered by HTMX + SSE (Server-Sent Events) for live worker status.
   - Statistical insights and site configuration management.
   - Persistent storage using JSONC and JSON Lines.
+- **Security**:
+  - Bearer token authentication for API.
+  - Session-based authentication for dashboard.
+  - Rate limiting (10 req/min for API, 60 req/min for dashboard).
+  - CSRF protection for form submissions.
 
 ## Architecture
 

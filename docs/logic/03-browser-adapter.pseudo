@@ -18,6 +18,8 @@ INTERFACE BrowserPort:
     FUNCTION getCookies(pageId: string) -> string
     FUNCTION setCookies(pageId: string, cookies: string) -> void
     FUNCTION reload(pageId: string, timeoutMs?: int) -> void
+    FUNCTION injectTurnstileToken(pageId: string, token: string) -> boolean
+    FUNCTION extractEmbeddedArticle(pageId: string) -> { content: string, source: string } | null
 
 
 # ============================================================================
@@ -376,3 +378,99 @@ CLASS PuppeteerBrowserAdapter IMPLEMENTS BrowserPort:
             waitUntil: 'networkidle2',
             timeout: timeoutMs OR 120000
         })
+
+
+# ============================================================================
+# CLOUDFLARE TURNSTILE SUPPORT
+# ============================================================================
+
+    FUNCTION injectTurnstileToken(pageId: string, token: string) -> boolean:
+        """
+        Inject a Turnstile token into the page's callback.
+        Used after solving Turnstile via external service.
+        """
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN false
+        
+        TRY:
+            result = await session.page.evaluate((token) => {
+                # Find and call Turnstile callback
+                IF window.turnstileCallback:
+                    window.turnstileCallback(token)
+                    RETURN true
+                
+                # Try to find callback in Turnstile widget
+                widgets = document.querySelectorAll('[data-sitekey]')
+                FOR widget IN widgets:
+                    IF widget._turnstileCallback:
+                        widget._turnstileCallback(token)
+                        RETURN true
+                
+                RETURN false
+            }, token)
+            
+            LOG debug "Turnstile token injection result: {result}"
+            RETURN result
+        
+        CATCH error:
+            LOG error "Turnstile injection error:", error
+            RETURN false
+
+
+# ============================================================================
+# EMBEDDED JSON EXTRACTION
+# ============================================================================
+
+    FUNCTION extractEmbeddedArticle(pageId: string) -> { content: string, source: string } | null:
+        """
+        Extract article content from embedded JSON sources:
+        - Apollo State (__APOLLO_STATE__)
+        - Next.js data (__NEXT_DATA__)
+        - JSON-LD structured data
+        """
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN null
+        
+        TRY:
+            result = await session.page.evaluate(() => {
+                # 1. Try Apollo State (common in React SPAs)
+                IF window.__APOLLO_STATE__:
+                    apolloData = JSON.stringify(window.__APOLLO_STATE__)
+                    # Look for article content in Apollo cache
+                    FOR key IN Object.keys(window.__APOLLO_STATE__):
+                        IF key.includes('Article') OR key.includes('Post'):
+                            entry = window.__APOLLO_STATE__[key]
+                            IF entry.body OR entry.content:
+                                RETURN { content: entry.body OR entry.content, source: 'apollo' }
+                
+                # 2. Try Next.js __NEXT_DATA__
+                nextScript = document.getElementById('__NEXT_DATA__')
+                IF nextScript:
+                    nextData = JSON.parse(nextScript.textContent)
+                    props = nextData?.props?.pageProps
+                    IF props?.article?.body:
+                        RETURN { content: props.article.body, source: 'next' }
+                    IF props?.content:
+                        RETURN { content: props.content, source: 'next' }
+                
+                # 3. Try JSON-LD structured data
+                jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]')
+                FOR script IN jsonLdScripts:
+                    TRY:
+                        data = JSON.parse(script.textContent)
+                        IF data['@type'] == 'Article' OR data['@type'] == 'NewsArticle':
+                            IF data.articleBody:
+                                RETURN { content: data.articleBody, source: 'jsonld' }
+                    CATCH:
+                        CONTINUE
+                
+                RETURN null
+            })
+            
+            RETURN result
+        
+        CATCH error:
+            LOG debug "Embedded extraction error:", error
+            RETURN null

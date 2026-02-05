@@ -232,6 +232,17 @@ CLASS CoreScraperEngine:
             # 7. EXTRACT CONTENT
             extracted = await this.browserPort.evaluateXPath(pageId, xpath)
             
+            # 7a. EMBEDDED JSON FALLBACK (if XPath extraction failed/empty)
+            IF NOT extracted OR extracted.empty OR extracted[0].length < 200:
+                LOG debug "XPath extraction insufficient, trying embedded JSON fallback"
+                
+                embeddedResult = await this.browserPort.extractEmbeddedArticle(pageId)
+                
+                IF embeddedResult AND embeddedResult.content.length >= 200:
+                    LOG debug "Embedded JSON extraction succeeded: {embeddedResult.source}"
+                    extracted = [embeddedResult.content]
+                    xpath = "[embedded:{embeddedResult.source}]"  # Synthetic XPath marker
+            
             # Debug snapshot (optional)
             IF options?.debug:
                 fullHtml = await this.browserPort.getPageHtml(pageId)

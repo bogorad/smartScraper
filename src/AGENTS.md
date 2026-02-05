@@ -19,6 +19,11 @@
 └─────────────────────────────┬───────────────────────────────┘
                               │
 ┌─────────────────────────────▼───────────────────────────────┐
+│                       middleware/                            │
+│    auth.ts       rate-limit.ts       csrf.ts                │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────┐
 │                         core/                                │
 │    engine.ts (CoreScraperEngine)    scoring.ts              │
 └─────────────────────────────┬───────────────────────────────┘
@@ -60,6 +65,18 @@ const schema = z.object({ url: z.string().url() });
 scrapeRouter.post('/', zValidator('json', schema), async (c) => { ... });
 ```
 
+### Middleware
+
+**✅ DO:** Apply middleware in correct order (rate limit → auth → route)
+```typescript
+app.use('/api/scrape', rateLimitMiddleware({ maxRequests: 10, windowMs: 60000 }));
+app.use('/api/scrape', apiAuthMiddleware);
+```
+
+**✅ DO:** Use CSRF middleware for dashboard POST/PUT/DELETE
+
+**❌ DON'T:** Skip CSRF validation for form submissions
+
 ### JSX Components
 
 **✅ DO:** Use Hono JSX, keep styles in `components/styles.ts`
@@ -99,11 +116,25 @@ import { scrapeUrl } from './core/engine.js';  // Correct
 |---------|------|
 | Entry point | `index.ts` |
 | Configuration | `config.ts` |
+| Constants | `constants.ts` |
 | Core engine | `core/engine.ts` |
+| Content scoring | `core/scoring.ts` |
 | Domain models | `domain/models.ts` |
-| Port interfaces | `ports/index.ts` |
+| Port interfaces | `ports/*.ts` |
+| Browser adapter | `adapters/puppeteer-browser.ts` |
+| LLM adapter | `adapters/openrouter-llm.ts` |
+| CAPTCHA adapter | `adapters/twocaptcha.ts` |
+| Sites storage | `adapters/fs-known-sites.ts` |
 | API endpoint | `routes/api/scrape.ts` |
 | Dashboard | `routes/dashboard/index.tsx` |
+| Dashboard login | `routes/dashboard/login.tsx` |
+| Sites management | `routes/dashboard/sites.tsx` |
+| Stats view | `routes/dashboard/stats.tsx` |
+| Auth middleware | `middleware/auth.ts` |
+| Rate limiting | `middleware/rate-limit.ts` |
+| CSRF protection | `middleware/csrf.ts` |
+| Stats service | `services/stats-storage.ts` |
+| Log service | `services/log-storage.ts` |
 
 ---
 

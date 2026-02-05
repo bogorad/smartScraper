@@ -9,10 +9,11 @@
 
 ---
 
-## Justfile is THE source of truth, beads is your issus tracker
+## Justfile is THE source of truth, beads is your issue tracker
 
 Before attempting ANYTHING check the .justfile, it might contain guidance.
 Before acting, checkout/create beads issue, consult beads for all actions.
+Use beads along with TODO.
 
 ## Root Setup Commands
 
@@ -95,6 +96,7 @@ src/adapters/    # Implementations (puppeteer, openrouter, twocaptcha, fs)
 src/core/        # Business logic (engine.ts, scoring.ts)
 src/domain/      # Domain models (models.ts)
 src/routes/      # HTTP endpoints (api/, dashboard/)
+src/middleware/  # Auth, rate limiting, CSRF protection
 src/components/  # Hono JSX UI
 src/services/    # App services (stats, logs)
 src/utils/       # Utilities

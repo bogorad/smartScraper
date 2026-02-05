@@ -147,6 +147,10 @@ ConfigSchema = z.object({
     datadomeProxyLogin: z.string().default(''),
     datadomeProxyPassword: z.string().default(''),
     
+    # FlareSolverr (Cloudflare bypass)
+    flareSolverrUrl: z.string().default(''),
+    flareSolverrTimeout: z.coerce.number().default(60000),
+    
     # Auth
     apiToken: z.string().default(''),
     
