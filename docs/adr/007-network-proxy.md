@@ -12,9 +12,12 @@ SmartScraper must support HTTP proxies for bypassing restrictions and improving 
 ### Environment Variables
 
 ```dotenv
+PROXY_SERVER=http://username:password@hostname:port
+# Legacy alias (also supported):
 HTTP_PROXY=http://username:password@hostname:port
-USER_AGENT=custom-user-agent-string
 ```
+
+Note: `PROXY_SERVER` takes precedence over `HTTP_PROXY` if both are set.
 
 ### Proxy URL Format
 
@@ -60,9 +63,10 @@ Proxies apply to:
 
 ### User-Agent Handling
 
-- `USER_AGENT` env var sets default for all requests
-- Can be overridden per-request via options
+- Default UA is set in code (Windows Chrome fingerprint)
+- Can be overridden per-request via `userAgentString` option
 - Same UA forwarded to CAPTCHA solving services
+- Per-site overrides can be stored in `SiteConfig.userAgent`
 
 ## Consequences
 

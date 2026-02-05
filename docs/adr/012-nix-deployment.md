@@ -30,7 +30,6 @@ Enter with `nix develop`:
 devShells.default = pkgs.mkShell {
   buildInputs = [
     nodejs_24
-    pnpm
     chromium
     typescript
     typescript-language-server
@@ -52,7 +51,7 @@ Build with `nix build`:
 smart-scraper = pkgs.stdenv.mkDerivation {
   pname = "smart-scraper";
   
-  buildPhase = "pnpm build";
+  buildPhase = "npm run build";
   
   installPhase = ''
     # Copy dist/, node_modules/, package.json
@@ -173,13 +172,13 @@ exec smart-scraper
 nix develop
 
 # Install dependencies
-pnpm install
+npm install
 
 # Run in dev mode
-pnpm dev
+npm run dev
 
 # Build
-pnpm build
+npm run build
 ```
 
 ### Build Package
@@ -272,13 +271,13 @@ smart-scraper:
 
 ### Trade-offs
 
-- **pnpm hash updates**: Must update `pnpmDeps.hash` when dependencies change
+- **npm deps hash updates**: Must update `npmDeps.hash` when dependencies change
 - **Extension packaging**: Chrome extensions need separate Nix packaging
 - **Chromium size**: Nix Chromium is large (~500MB in store)
 
 ### Implementation Requirements
 
-- Update `pnpmDeps.hash` after modifying `pnpm-lock.yaml`
+- Update `npmDeps.hash` after modifying `package-lock.json`
 - Create Nix derivations for Chrome extensions
 - Configure sops-nix with age or GPG keys
 - Ensure `/var/lib/smart-scraper` is backed up

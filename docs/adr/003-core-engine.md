@@ -58,21 +58,27 @@ class CoreScraperEngine {
 
 ### Concurrency Control
 
-Access to the browser resource is serialized to prevent resource exhaustion and ensure stability.
+Browser access is managed via an in-memory priority queue to balance throughput and resource usage.
 
 **Mechanism:** In-memory priority queue (`p-queue`).
 
 **Configuration:**
-- Concurrency: `1` (Strictly serial execution)
+- Concurrency: `5` (parallel scrapes)
+- Queue size limit: `100` (returns error when exceeded)
 - Timeout: Request dependent (default 60s)
 
 ```typescript
 import PQueue from 'p-queue';
 
 export class CoreScraperEngine {
-  private queue = new PQueue({ concurrency: 1 });
+  private static readonly MAX_QUEUE_SIZE = 100;
+  private queue = new PQueue({ concurrency: 5 });
 
   async scrapeUrl(url: string, options?: ScrapeOptions): Promise<ScrapeResult> {
+    // Reject if queue is full
+    if (this.queue.size >= CoreScraperEngine.MAX_QUEUE_SIZE) {
+      return { success: false, errorType: 'CONFIGURATION', error: 'Queue full' };
+    }
     return this.queue.add(() => this._executeScrape(url, options));
   }
 }
@@ -81,7 +87,8 @@ export class CoreScraperEngine {
 ## Consequences
 
 - Single place to reason about scraping flow
-- **Protected Resources:** Prevents concurrent Puppeteer instances from crashing the host
+- **Parallel Execution:** 5 concurrent workers balance throughput and resource usage
+- **Backpressure:** Queue size limit prevents unbounded memory growth
 - **Queueing:** Requests queue up in memory; client timeout handling is required
 - Testable via mock port implementations
 - Changes to engine have wide impact; requires comprehensive testing

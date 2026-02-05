@@ -26,7 +26,7 @@ SmartScraper requires a headless browser for scraping JavaScript-heavy sites and
 
 ### Session Management
 
-Each Puppeteer session represents a unique scrape and uses a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode (new headless) while still supporting extensions via specific flags.
+Each Puppeteer session represents a unique scrape and uses a unique temporary profile directory via `userDataDir`. The browser is launched in **headless** mode with extension support via Puppeteer's `enableExtensions` option.
 
 **Concurrency:** The system supports parallel scraping (default: 5 concurrent workers). To optimize resource usage, the browser remains open while individual pages (sessions) are created and destroyed using `closePage(pageId)`.
 
@@ -61,21 +61,19 @@ async closePage(pageId: string) {
 
 ### Extension Architecture
 
-Extensions are loaded as unpacked Chrome extensions (not puppeteer-extra plugins):
+Extensions are loaded via Puppeteer's `enableExtensions` option:
 
 ```typescript
-let extensionArgs: string[] = [];
+const hasExtensions = extensionPaths.length > 0;
 
-if (process.env.EXTENSION_PATHS) {
-  const extensionPaths = process.env.EXTENSION_PATHS
-    .split(',')
-    .map(p => p.trim())
-    .filter(p => p.length > 0);
+const browser = await puppeteer.launch({
+  // ... other options
+  ...(hasExtensions && { enableExtensions: extensionPaths })
+});
 
-  extensionArgs = [
-    `--disable-extensions-except=${extensionPaths.join(',')}`,
-    `--load-extension=${extensionPaths.join(',')}`
-  ];
+// Wait for extensions to initialize (if any)
+if (hasExtensions) {
+  await new Promise(resolve => setTimeout(resolve, 2000));
 }
 ```
 
@@ -203,8 +201,10 @@ const browser = await puppeteer.launch({
 ### Navigation Strategy
 
 ```typescript
-// Pre-navigation delay (allow extensions to initialize)
-await new Promise(resolve => setTimeout(resolve, 3000));
+// Pre-navigation delay for extensions (if loaded)
+if (hasExtensions) {
+  await new Promise(resolve => setTimeout(resolve, 2000));
+}
 
 // Navigate with networkidle2
 await page.goto(url, {
@@ -289,10 +289,10 @@ if (error.name === 'TimeoutError' ||
 
 ### Trade-offs
 
-- **`headless: false` required**: Extensions only work in headed mode (use Xvfb for headless servers)
+- **Extension support**: Uses Puppeteer's `enableExtensions` option with `headless: true`
 - **Profile cleanup overhead**: Directory deletion adds ~50-100ms per session
 - **Extension maintenance**: Extensions may need updates for browser compatibility
-- **Longer startup time**: 3-second pre-navigation delay for extension initialization
+- **Extension initialization delay**: 2-second pre-navigation delay when extensions are loaded
 
 ### Implementation Requirements
 

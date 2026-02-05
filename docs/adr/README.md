@@ -20,6 +20,7 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 | [012](012-nix-deployment.md) | Nix Deployment Architecture | Accepted |
 | [013](013-centralized-configuration.md) | Centralized Configuration | Accepted |
 | [014](014-auth-security-strategy.md) | Authentication Security Strategy | Accepted |
+| [015](015-sse-dashboard.md) | Real-time Dashboard Updates (SSE + HTMX) | Accepted |
 
 ## Overview
 
@@ -47,6 +48,7 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 ### Backend
 - **[ADR-011](011-backend-architecture.md)** - Hono + HTMX, API endpoints, dashboard, storage (sites.jsonc, stats.json, logs/*.jsonl)
 - **[ADR-014](014-auth-security-strategy.md)** - Token-based auth, session handling, adaptive cookie security
+- **[ADR-015](015-sse-dashboard.md)** - Real-time dashboard updates via SSE + HTMX
 
 ### Deployment
 - **[ADR-012](012-nix-deployment.md)** - Nix flake, devShell, NixOS module, sops-nix secrets
