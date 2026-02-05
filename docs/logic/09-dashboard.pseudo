@@ -1,0 +1,346 @@
+# Dashboard Routes
+# =================
+# HTMX-based dashboard with SSE updates
+
+# ============================================================================
+# DASHBOARD HOME (/dashboard)
+# ============================================================================
+
+ROUTE GET /dashboard:
+    MIDDLEWARE:
+        - rateLimitMiddleware({ maxRequests: 60, windowMs: 60000 })
+        - csrfMiddleware
+        - dashboardAuthMiddleware
+    
+    HANDLER:
+        theme = getCookie(c, 'theme') OR 'light'
+        stats = await loadStats()
+        topDomains = await getTopDomains(5)
+        queueStats = getQueueStats()
+        csrfToken = getCsrfToken(c)
+        
+        RENDER Layout:
+            - StatsCard: Total scrapes
+            - StatsCard: Today scrapes  
+            - StatsCard: Failed total
+            - StatsCard: Failed today
+            - Worker status (SSE-connected)
+            - Top domains list
+
+
+# ============================================================================
+# SSE EVENTS (/dashboard/events)
+# ============================================================================
+
+ROUTE GET /dashboard/events:
+    # Global state
+    clients = Set<SseClient>()
+    MAX_SSE_CLIENTS = 100
+    SSE_CONNECTION_TIMEOUT_MS = 10 * 60 * 1000  # 10 minutes
+    
+    # Cleanup stale connections every minute
+    setInterval(() => {
+        now = Date.now()
+        FOR client IN clients:
+            IF now - client.connectedAt > SSE_CONNECTION_TIMEOUT_MS:
+                clients.delete(client)
+    }, 60000)
+    
+    # Broadcast worker status to all clients
+    FUNCTION broadcast(data: { active, max, activeUrls }):
+        html = renderWorkersHtml(data)
+        event = "event: workers\ndata: {html}\n\n"
+        
+        FOR client IN clients:
+            TRY:
+                client.controller.enqueue(TextEncoder.encode(event))
+            CATCH:
+                clients.delete(client)
+    
+    # Listen for engine events
+    workerEvents.on('change', (data) => broadcast(data))
+    
+    HANDLER:
+        IF clients.size >= MAX_SSE_CLIENTS:
+            RETURN c.json({ error: 'Server connection limit reached' }, 503)
+        
+        stream = new ReadableStream({
+            start(controller):
+                clientId = Symbol('client')
+                clients.add({ controller, id: clientId, connectedAt: Date.now() })
+                
+                # Send initial state
+                stats = getQueueStats()
+                html = renderWorkersHtml(stats)
+                controller.enqueue(TextEncoder.encode("event: workers\ndata: {html}\n\n"))
+                
+                # Keepalive every 30 seconds
+                keepaliveInterval = setInterval(() => {
+                    TRY:
+                        controller.enqueue(TextEncoder.encode(": keepalive\n\n"))
+                    CATCH:
+                        clearInterval(keepaliveInterval)
+                }, 30000)
+            
+            cancel():
+                clearInterval(keepaliveInterval)
+                clients.delete(clientById)
+        })
+        
+        RETURN c.newResponse(stream, {
+            headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive'
+            }
+        })
+
+    FUNCTION renderWorkersHtml(stats) -> string:
+        IF stats.active > 0 AND stats.activeUrls.length > 0:
+            urlList = stats.activeUrls.map(url => 
+                "<p class='code'>{escapeHtml(url)}</p>"
+            ).join('')
+            RETURN "<div class='card-header'>Scraping ({stats.active}/{stats.max})</div>{urlList}"
+        
+        IF stats.active > 0:
+            RETURN "<div class='card-header'>Status</div><p>Starting...</p>"
+        
+        RETURN "<div class='card-header'>Status</div><p>Idle (0/{stats.max})</p>"
+
+
+# ============================================================================
+# SITES LIST (/dashboard/sites)
+# ============================================================================
+
+ROUTE GET /dashboard/sites:
+    QUERY_SCHEMA (Zod):
+        q: string.optional().default('')          # Search filter
+        sort: enum['domain', 'failures', 'last'].default('domain')
+        limit: union[literal('all'), number.min(1).max(100)].default(10)
+        page: number.min(1).default(1)
+    
+    HANDLER:
+        query = c.req.valid('query')
+        sites = await knownSitesAdapter.getAllConfigs()
+        
+        # Filter by search query
+        IF query.q:
+            sites = sites.filter(s => s.domainPattern.includes(query.q.toLowerCase()))
+        
+        # Sort
+        SWITCH query.sort:
+            CASE 'failures':
+                sites.sort((a, b) => b.failureCount - a.failureCount)
+            CASE 'last':
+                sites.sort((a, b) => (b.lastSuccess OR '').localeCompare(a.lastSuccess OR ''))
+            DEFAULT:
+                sites.sort((a, b) => a.domainPattern.localeCompare(b.domainPattern))
+        
+        # Paginate
+        limitNum = query.limit == 'all' ? sites.length : query.limit
+        startIndex = (query.page - 1) * limitNum
+        paginatedSites = sites.slice(startIndex, startIndex + limitNum)
+        
+        IF isHtmxRequest:
+            RENDER partial table with pagination
+        ELSE:
+            RENDER full page with Layout
+
+
+# ============================================================================
+# SITE DETAIL (/dashboard/sites/:domain)
+# ============================================================================
+
+ROUTE GET /dashboard/sites/:domain:
+    HANDLER:
+        domain = decodeURIComponent(c.req.param('domain'))
+        site = await knownSitesAdapter.getConfig(domain)
+        
+        IF NOT site:
+            RENDER error "Site not found"
+        
+        RENDER:
+            - SiteForm (edit mode)
+            - TestForm (scrape test)
+
+ROUTE POST /dashboard/sites/:domain:
+    HANDLER:
+        domain = decodeURIComponent(c.req.param('domain'))
+        body = await c.req.parseBody()
+        
+        # Parse headers (key: value per line)
+        headersText = body.siteSpecificHeaders OR ''
+        siteSpecificHeaders = {}
+        FOR line IN headersText.split('\n'):
+            [key, ...rest] = line.split(':')
+            IF key AND rest.length:
+                siteSpecificHeaders[key.trim()] = rest.join(':').trim()
+        
+        # Parse cleanup classes (one per line)
+        cleanupText = body.siteCleanupClasses OR ''
+        siteCleanupClasses = cleanupText.split('\n').map(trim).filter(nonEmpty)
+        
+        # Build config
+        existingConfig = await knownSitesAdapter.getConfig(domain)
+        config = {
+            domainPattern: body.domainPattern OR domain,
+            xpathMainContent: body.xpathMainContent,
+            failureCountSinceLastSuccess: existingConfig?.failureCount OR 0,
+            lastSuccessfulScrapeTimestamp: existingConfig?.lastSuccess,
+            siteSpecificHeaders,
+            siteCleanupClasses,
+            userAgent: body.userAgent OR undefined,
+            needsProxy: body.needsProxy == 'datadome' ? 'datadome' : undefined
+        }
+        
+        await knownSitesAdapter.saveConfig(config)
+        
+        IF isHtmxRequest:
+            RENDER success message + form
+        ELSE:
+            REDIRECT /dashboard/sites
+
+ROUTE DELETE /dashboard/sites/:domain:
+    HANDLER:
+        domain = decodeURIComponent(c.req.param('domain'))
+        await knownSitesAdapter.deleteConfig(domain)
+        RETURN c.html('')  # Empty response removes row
+
+
+# ============================================================================
+# TEST SCRAPE (/dashboard/sites/:domain/test)
+# ============================================================================
+
+ROUTE POST /dashboard/sites/:domain/test:
+    HANDLER:
+        body = await c.req.parseBody()
+        testUrl = body.testUrl
+        
+        IF NOT testUrl:
+            RENDER TestResult(success: false, message: 'Test URL is required')
+        
+        TRY:
+            engine = getDefaultEngine()
+            startTime = Date.now()
+            result = await engine.scrapeUrl(testUrl)
+            duration = Date.now() - startTime
+            
+            IF result.success:
+                contentLength = typeof result.data == 'string' ? result.data.length : 0
+                RENDER TestResult(
+                    success: true,
+                    message: "Extracted {contentLength} chars in {duration/1000}s",
+                    details: "XPath: {result.xpath}"
+                )
+            ELSE:
+                RENDER TestResult(
+                    success: false,
+                    message: "{result.errorType}: {result.error}"
+                )
+        CATCH error:
+            RENDER TestResult(success: false, message: error.message)
+
+
+# ============================================================================
+# THEME TOGGLE (/dashboard/theme)
+# ============================================================================
+
+ROUTE POST /dashboard/theme:
+    HANDLER:
+        current = getCookie(c, 'theme') OR 'light'
+        next = current == 'dark' ? 'light' : 'dark'
+        
+        setCookie(c, 'theme', next, {
+            path: '/',
+            maxAge: 31536000,  # 1 year
+            httpOnly: false
+        })
+        
+        c.header('HX-Refresh', 'true')
+        RETURN c.body(null)
+
+
+# ============================================================================
+# STATS (/dashboard/stats)
+# ============================================================================
+
+ROUTE GET /dashboard/stats:
+    HANDLER:
+        stats = await loadStats()
+        topDomains = await getTopDomains(10)
+        todayLogs = await readTodayLogs()
+        recentLogs = todayLogs.slice(-20).reverse()
+        
+        successRate = stats.scrapeTotal > 0 ?
+            ((stats.scrapeTotal - stats.failTotal) / stats.scrapeTotal * 100).toFixed(1) : '0'
+        
+        RENDER:
+            - Stats cards with success rates
+            - Top 10 domains table
+            - Recent activity table (last 20 logs)
+
+ROUTE POST /dashboard/stats/reset:
+    HANDLER:
+        await resetStats()
+        c.header('HX-Refresh', 'true')
+        RETURN c.body(null)
+
+
+# ============================================================================
+# LOGIN (/login)
+# ============================================================================
+
+ROUTE GET /login:
+    HANDLER:
+        theme = getCookie(c, 'theme') OR 'light'
+        error = c.req.query('error')
+        redirect = c.req.query('redirect') OR '/dashboard'
+        
+        RENDER LoginLayout:
+            - Title: SmartScraper
+            - Error messages (if any)
+            - Token input form
+
+ROUTE POST /login:
+    HANDLER:
+        body = await c.req.parseBody()
+        token = body.token
+        redirect = c.req.query('redirect') OR '/dashboard'
+        
+        isValid = validateToken(token)
+        
+        IF NOT isValid:
+            REDIRECT /login?error=invalid&redirect={redirect}
+        
+        createSession(c, token)
+        REDIRECT {redirect}
+
+
+# ============================================================================
+# CSRF PROTECTION
+# ============================================================================
+
+csrfMiddleware = createMiddleware(async (c, next) => {
+    IF c.req.method == 'GET':
+        # Generate new token for GET requests
+        token = crypto.randomUUID()
+        setCookie(c, 'csrf_token', token, {
+            httpOnly: false,  # Allow JS access for HTMX
+            path: '/',
+            sameSite: 'Strict',
+            maxAge: 3600
+        })
+        c.set('csrfToken', token)
+        await next()
+        RETURN
+    
+    # Validate CSRF token for non-GET requests
+    cookieToken = getCookie(c, 'csrf_token')
+    headerToken = c.req.header('X-CSRF-Token')
+    
+    IF NOT cookieToken OR NOT headerToken OR cookieToken != headerToken:
+        LOG warn "CSRF token validation failed"
+        RETURN c.json({ error: 'CSRF token validation failed' }, 403)
+    
+    await next()
+})

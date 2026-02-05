@@ -1,0 +1,155 @@
+# LLM Adapter (OpenRouter)
+# =========================
+# XPath discovery using LLM API
+
+# ============================================================================
+# LLM PORT INTERFACE
+# ============================================================================
+
+INTERFACE LlmPort:
+    FUNCTION suggestXPaths(input: LlmSuggestInput) -> LlmXPathSuggestion[]
+
+
+# ============================================================================
+# OPENROUTER IMPLEMENTATION
+# ============================================================================
+
+CLASS OpenRouterLlmAdapter IMPLEMENTS LlmPort:
+    PRIVATE:
+        apiKey: string
+        model: string
+        temperature: float
+    
+    CONST API_URL = 'https://openrouter.ai/api/v1/chat/completions'
+    
+    CONST SYSTEM_PROMPT = """
+You are an expert web scraper. Your task is to analyze HTML structure and identify the XPath selector for the main article content.
+
+Rules:
+1. Return ONLY a JSON array of XPath strings
+2. Suggest 3-5 candidate XPaths, ordered by confidence
+3. Target the element containing the article text, not navigation or sidebars
+4. Prefer semantic elements: <article>, <main>, elements with class/id containing "article", "content", "post", "entry"
+5. Avoid: <header>, <footer>, <nav>, <aside>, elements with class containing "sidebar", "menu", "nav", "comment", "ad"
+6. XPaths must be valid and reasonably specific (not just "//div")
+
+Output format:
+["//article[@class='post-content']", "//div[@id='article-body']", "//main//div[@class='entry']"]
+"""
+
+    CONSTRUCTOR():
+        this.apiKey = getOpenrouterApiKey()
+        this.model = getLlmModel()
+        this.temperature = getLlmTemperature()
+
+
+# ============================================================================
+# XPATH SUGGESTION
+# ============================================================================
+
+    FUNCTION suggestXPaths(input: LlmSuggestInput) -> LlmXPathSuggestion[]:
+        IF NOT this.apiKey:
+            LOG warn "OPENROUTER_API_KEY not set"
+            RETURN []
+        
+        userContent = this.buildUserPrompt(input)
+        
+        TRY:
+            response = await axios.post(API_URL, {
+                model: this.model,
+                temperature: this.temperature,
+                messages: [
+                    { role: 'system', content: SYSTEM_PROMPT },
+                    { role: 'user', content: userContent }
+                ]
+            }, {
+                headers: {
+                    'Authorization': "Bearer {this.apiKey}",
+                    'Content-Type': 'application/json',
+                    'HTTP-Referer': getLlmHttpReferer(),
+                    'X-Title': getLlmXTitle()
+                },
+                timeout: 30000
+            })
+            
+            # Validate response content type
+            contentType = response.headers['content-type'] OR ''
+            IF contentType AND NOT contentType.includes('application/json'):
+                LOG warn "Unexpected response content type", { contentType }
+                RETURN []
+            
+            # Extract response content
+            content = response.data?.choices?.[0]?.message?.content
+            IF NOT content:
+                LOG debug "Empty content in response"
+                RETURN []
+            
+            # Parse XPaths from response
+            xpaths = parseXPathResponse(content)
+            RETURN xpaths.map(xpath => ({ xpath }))
+        
+        CATCH error:
+            IF error.isAxiosError:
+                retryAfter = error.response?.headers?.['retry-after']
+                IF retryAfter:
+                    LOG warn "Rate limited, retry after {retryAfter}s"
+                LOG error "API error:", error.response?.status, error.response?.data
+            ELSE:
+                LOG error "LLM error:", error
+            RETURN []
+
+
+# ============================================================================
+# PROMPT BUILDING
+# ============================================================================
+
+    PRIVATE FUNCTION buildUserPrompt(input: LlmSuggestInput) -> string:
+        snippetsText = ''
+        IF input.snippets.length > 0:
+            snippetsText = "Sample text from the article:\n" + 
+                input.snippets.map(s => '"{s}"').join('\n\n')
+        
+        prompt = """
+Analyze this HTML and suggest XPath selectors for the main article content.
+
+Page URL: {input.url}
+"""
+        
+        IF snippetsText:
+            prompt += "\n\n{snippetsText}"
+        
+        prompt += "\n\nSimplified HTML structure:\n{input.simplifiedDom}"
+        
+        IF input.previousFailureReason:
+            prompt += "\n\nNote: Previous attempt failed because: {input.previousFailureReason}"
+        
+        RETURN prompt
+
+
+# ============================================================================
+# XPATH PARSING
+# ============================================================================
+
+FUNCTION parseXPathResponse(content: string) -> string[]:
+    # Strategy 1: Try direct JSON parse
+    TRY:
+        parsed = JSON.parse(content.trim())
+        IF isArray(parsed) AND parsed.every(isString):
+            RETURN unique(parsed)
+    CATCH:
+        PASS
+    
+    # Strategy 2: Try extracting from code block
+    codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/)
+    IF codeBlockMatch:
+        TRY:
+            parsed = JSON.parse(codeBlockMatch[1].trim())
+            IF isArray(parsed):
+                RETURN unique(parsed.filter(isString))
+        CATCH:
+            PASS
+    
+    # Strategy 3: Extract XPath patterns with regex
+    xpathPattern = /\/\/[a-zA-Z][a-zA-Z0-9]*(?:\[[^\]]+\])?(?:\/[a-zA-Z][a-zA-Z0-9]*(?:\[[^\]]+\])?)*/g
+    matches = content.match(xpathPattern)
+    RETURN matches ? unique(matches) : []

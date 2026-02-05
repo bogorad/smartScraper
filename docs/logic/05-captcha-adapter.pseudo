@@ -1,0 +1,195 @@
+# CAPTCHA Adapter (2Captcha)
+# ==========================
+# CAPTCHA solving via 2Captcha API
+
+# ============================================================================
+# CAPTCHA PORT INTERFACE
+# ============================================================================
+
+INTERFACE CaptchaPort:
+    FUNCTION solveIfPresent(input: CaptchaSolveInput) -> CaptchaSolveResult
+
+
+# ============================================================================
+# 2CAPTCHA IMPLEMENTATION
+# ============================================================================
+
+CLASS TwoCaptchaAdapter IMPLEMENTS CaptchaPort:
+    PRIVATE:
+        apiKey: string
+        timeout: int           # Seconds (default 120)
+        pollingInterval: int   # Milliseconds (default 5000)
+    
+    CONSTRUCTOR():
+        this.apiKey = getTwocaptchaApiKey()
+        this.timeout = getCaptchaDefaultTimeout()
+        this.pollingInterval = getCaptchaPollingInterval()
+
+
+# ============================================================================
+# SOLVE DISPATCHER
+# ============================================================================
+
+    FUNCTION solveIfPresent(input: CaptchaSolveInput) -> CaptchaSolveResult:
+        IF NOT this.apiKey:
+            RETURN { solved: false, reason: 'TWOCAPTCHA_API_KEY not configured' }
+        
+        SWITCH input.captchaTypeHint:
+            CASE 'datadome':
+                RETURN this.solveDataDome(input)
+            CASE 'generic':
+                RETURN this.solveGeneric(input)
+            DEFAULT:
+                RETURN { solved: false, reason: 'Unknown CAPTCHA type' }
+
+
+# ============================================================================
+# GENERIC CAPTCHA (reCAPTCHA/hCaptcha)
+# ============================================================================
+
+    PRIVATE FUNCTION solveGeneric(input: CaptchaSolveInput) -> CaptchaSolveResult:
+        IF NOT input.siteKey:
+            RETURN { solved: false, reason: 'Generic CAPTCHA requires siteKey extraction (not yet implemented)' }
+        
+        TRY:
+            # 1. Submit task
+            submitResponse = await axios.get('https://2captcha.com/in.php', {
+                params: {
+                    key: this.apiKey,
+                    method: 'userrecaptcha',
+                    googlekey: input.siteKey,
+                    pageurl: input.pageUrl,
+                    json: 1
+                }
+            })
+            
+            IF submitResponse.data?.status != 1:
+                RETURN { solved: false, reason: submitResponse.data?.request OR 'Submit failed' }
+            
+            captchaId = submitResponse.data.request
+            startTime = now()
+            
+            # 2. Poll for result
+            WHILE now() - startTime < this.timeout * 1000:
+                await sleep(this.pollingInterval)
+                
+                resultResponse = await axios.get('https://2captcha.com/res.php', {
+                    params: {
+                        key: this.apiKey,
+                        action: 'get',
+                        id: captchaId,
+                        json: 1
+                    }
+                })
+                
+                IF resultResponse.data?.status == 1:
+                    RETURN { solved: true, updatedCookie: resultResponse.data.request }
+                
+                IF resultResponse.data?.request != 'CAPCHA_NOT_READY':
+                    RETURN { solved: false, reason: resultResponse.data?.request OR 'Unknown error' }
+            
+            RETURN { solved: false, reason: 'Timeout waiting for solution' }
+        
+        CATCH error:
+            RETURN { solved: false, reason: error.message OR 'Unknown error' }
+
+
+# ============================================================================
+# DATADOME CAPTCHA
+# ============================================================================
+
+    PRIVATE FUNCTION solveDataDome(input: CaptchaSolveInput) -> CaptchaSolveResult:
+        TRY:
+            # Build proxy fields from proxy URL
+            proxyFields = {}
+            IF input.proxyDetails:
+                proxyFields = this.buildProxyFields(input.proxyDetails.server)
+            
+            # 1. Create task
+            taskPayload = {
+                clientKey: this.apiKey,
+                task: {
+                    type: 'DataDomeSliderTask',
+                    websiteURL: input.pageUrl,
+                    captchaUrl: input.captchaUrl OR input.pageUrl,
+                    userAgent: input.userAgentString OR DEFAULTS.USER_AGENT,
+                    ...proxyFields
+                }
+            }
+            
+            LOG debug "Creating DataDome task:", {
+                type: taskPayload.task.type,
+                websiteURL: taskPayload.task.websiteURL
+            }
+            
+            createResponse = await axios.post('https://api.2captcha.com/createTask', taskPayload)
+            LOG debug "Create response:", createResponse.data
+            
+            taskId = createResponse.data?.taskId
+            IF NOT taskId:
+                RETURN { solved: false, reason: createResponse.data?.errorDescription OR 'Failed to create task' }
+            
+            # 2. Poll for result
+            startTime = now()
+            WHILE now() - startTime < this.timeout * 1000:
+                await sleep(this.pollingInterval)
+                
+                resultResponse = await axios.post('https://api.2captcha.com/getTaskResult', {
+                    clientKey: this.apiKey,
+                    taskId
+                })
+                
+                LOG debug "Poll result for task {taskId}:", resultResponse.data
+                
+                IF resultResponse.data?.status == 'ready':
+                    cookie = resultResponse.data?.solution?.cookie
+                    IF cookie:
+                        RETURN { solved: true, updatedCookie: cookie }
+                    RETURN { solved: false, reason: 'Solution missing cookie' }
+                
+                # Check for fatal errors
+                hasError = (
+                    resultResponse.data?.status == 'error' OR
+                    (resultResponse.data?.errorId AND resultResponse.data.errorId != 0) OR
+                    resultResponse.data?.errorCode
+                )
+                
+                IF hasError:
+                    errorCode = resultResponse.data?.errorCode
+                    errorDesc = resultResponse.data?.errorDescription
+                    
+                    # Map known fatal error codes
+                    fatalErrors = {
+                        'ERROR_CAPTCHA_UNSOLVABLE': 'CAPTCHA could not be solved',
+                        'ERROR_WRONG_CAPTCHA_ID': 'Invalid CAPTCHA ID',
+                        'ERROR_BAD_TOKEN_OR_PAGEURL': 'Invalid token or page URL',
+                        'ERROR_EMPTY_ACTION': 'Empty action parameter',
+                        'ERROR_PROXY_CONNECTION_FAILED': 'Proxy connection failed',
+                        'ERROR_PROXY_NOT_AUTHORIZED': 'Proxy authentication failed'
+                    }
+                    
+                    reason = fatalErrors[errorCode] OR errorDesc OR errorCode OR 'Unknown error'
+                    RETURN { solved: false, reason }
+            
+            RETURN { solved: false, reason: 'Timeout waiting for solution' }
+        
+        CATCH error:
+            RETURN { solved: false, reason: error.message OR 'Unknown error' }
+
+
+# ============================================================================
+# PROXY FIELD BUILDER
+# ============================================================================
+
+    PRIVATE FUNCTION buildProxyFields(proxyUrl: string) -> Map<string, any>:
+        parsed = parseProxyUrl(proxyUrl)
+        IF NOT parsed:
+            RETURN {}
+        
+        RETURN {
+            proxyType: parsed.protocol,
+            proxyAddress: parsed.host,
+            proxyPort: parsed.port,
+            ...(parsed.username && { proxyLogin: parsed.username }),
+            ...(parsed.password && { proxyPassword: parsed.password })
+        }

@@ -1,0 +1,378 @@
+# Puppeteer Browser Adapter
+# =========================
+# Browser automation with complete session isolation
+
+# ============================================================================
+# BROWSER PORT INTERFACE
+# ============================================================================
+
+INTERFACE BrowserPort:
+    FUNCTION open() -> void
+    FUNCTION close() -> void
+    FUNCTION closePage(pageId: string) -> void
+    FUNCTION loadPage(url: string, options?: LoadPageOptions) -> { pageId: string }
+    FUNCTION evaluateXPath(pageId: string, xpath: string) -> string[] | null
+    FUNCTION getPageHtml(pageId: string) -> string
+    FUNCTION detectCaptcha(pageId: string) -> CaptchaDetectionResult
+    FUNCTION getElementDetails(pageId: string, xpath: string) -> ElementDetails | null
+    FUNCTION getCookies(pageId: string) -> string
+    FUNCTION setCookies(pageId: string, cookies: string) -> void
+    FUNCTION reload(pageId: string, timeoutMs?: int) -> void
+
+
+# ============================================================================
+# PUPPETEER IMPLEMENTATION
+# ============================================================================
+
+CLASS PuppeteerBrowserAdapter IMPLEMENTS BrowserPort:
+    PRIVATE:
+        sessions: Map<string, PageSession>  # pageId -> session
+        pageCounter: int = 0
+    
+    # Validation constants
+    CONST MAX_XPATH_LENGTH = 500
+    CONST ALLOWED_XPATH_PATTERN = /^[\w\-\/\[\]@="'\s\.\(\)\|\*\:]+$/
+
+    FUNCTION open() -> void:
+        # No-op: browsers are created per-request
+        PASS
+
+    FUNCTION close() -> void:
+        # Close all active sessions
+        FOR pageId IN this.sessions.keys():
+            await this.closePage(pageId)
+
+
+# ============================================================================
+# PAGE LIFECYCLE
+# ============================================================================
+
+    FUNCTION loadPage(url: string, options?: LoadPageOptions) -> { pageId: string }:
+        # 1. CREATE FRESH TEMP PROFILE
+        userDataDir = createTempDirectory('puppeteer-user-data-')
+        extensionPaths = this.getExtensionPaths()
+        hasExtensions = extensionPaths.length > 0
+        
+        # 2. HANDLE PROXY
+        proxyServer = options?.proxy OR getProxyServer()
+        proxyAuth = null
+        
+        IF proxyServer:
+            LOG debug "Browser launching with proxy", { proxyRedacted: redactPassword(proxyServer) }
+            
+            TRY:
+                proxyUrl = parseUrl(proxyServer)
+                IF proxyUrl.username AND proxyUrl.password:
+                    proxyAuth = {
+                        username: proxyUrl.username,
+                        password: proxyUrl.password
+                    }
+            CATCH:
+                LOG warn "Failed to parse proxy URL for auth"
+        ELSE:
+            LOG debug "Browser launching without proxy"
+        
+        browser = null
+        
+        TRY:
+            # 3. LAUNCH BROWSER (fresh instance)
+            browser = await puppeteer.launch({
+                executablePath: getExecutablePath(),
+                headless: true,
+                pipe: true,
+                userDataDir: userDataDir,
+                args: this.buildLaunchArgs(options?.proxy),
+                timeout: options?.timeout OR 120000,
+                ...(hasExtensions && { enableExtensions: extensionPaths })
+            })
+            
+            # 4. CREATE PAGE
+            page = await browser.newPage()
+            
+            # Set proxy auth if needed
+            IF proxyAuth:
+                await page.authenticate(proxyAuth)
+                LOG debug "Proxy authentication set"
+            
+            # Console logging (filter noise)
+            page.on('console', msg => {
+                text = msg.text()
+                IF NOT text.includes('404') AND NOT text.includes('Failed to load resource'):
+                    LOG debug "[BROWSER] {text}"
+            })
+            
+            # 5. SET PAGE PROPERTIES
+            await page.setUserAgent(DEFAULTS.USER_AGENT)
+            await page.setViewport({ width: 1280, height: 720 })
+            
+            # 6. WAIT FOR EXTENSIONS (if any)
+            IF hasExtensions:
+                await sleep(2000)
+            
+            # 7. NAVIGATE
+            await page.goto(url, {
+                waitUntil: options?.waitUntil OR 'networkidle2',
+                timeout: options?.timeout OR 120000
+            })
+            
+            # 8. SIMULATE HUMAN INTERACTION
+            await page.mouse.move(100, 100)
+            await page.evaluate(() => window.scrollBy(0, 200))
+            await sleep(1000)
+            
+            # 9. STORE SESSION
+            pageId = "page-{++this.pageCounter}"
+            this.sessions.set(pageId, { page, browser, userDataDir })
+            
+            RETURN { pageId }
+        
+        CATCH error:
+            # Cleanup on failure
+            IF browser:
+                await browser.close().catch(() => {})
+            await deleteDirectory(userDataDir, { recursive: true, force: true }).catch(() => {})
+            THROW error
+
+
+    FUNCTION closePage(pageId: string) -> void:
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN
+        
+        # Close page (ignore if already closed)
+        TRY:
+            await session.page.close()
+        CATCH:
+            LOG debug "Page close failed (may already be closed)"
+        
+        # Close browser (one per session)
+        TRY:
+            await session.browser.close()
+        CATCH:
+            LOG debug "Browser close failed (may already be closed)"
+        
+        # Delete temp profile directory
+        TRY:
+            await deleteDirectory(session.userDataDir, { recursive: true, force: true })
+        CATCH:
+            LOG debug "User data dir cleanup failed"
+        
+        this.sessions.delete(pageId)
+
+
+# ============================================================================
+# LAUNCH ARGUMENTS
+# ============================================================================
+
+    PRIVATE FUNCTION buildLaunchArgs(explicitProxy?: string) -> string[]:
+        extensionPaths = this.getExtensionPaths()
+        
+        args = [
+            # Security/sandbox
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            
+            # Performance
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--disable-gpu',
+            '--use-gl=swiftshader',
+            
+            # Display
+            '--window-size=1280,720',
+            '--font-render-hinting=none',
+            '--blink-settings=imagesEnabled=false'  # Disable images for speed
+        ]
+        
+        # Extensions
+        IF extensionPaths.length > 0:
+            args.push('--enable-extensions')
+            args.push("--disable-extensions-except={extensionPaths.join(',')}")
+        
+        # Proxy (priority: explicit > global)
+        proxyServer = explicitProxy OR getProxyServer()
+        IF proxyServer:
+            TRY:
+                proxyUrl = parseUrl(proxyServer)
+                hostPort = "{proxyUrl.hostname}:{proxyUrl.port OR '80'}"
+                args.push("--proxy-server={hostPort}")
+                LOG debug "Added proxy-server arg", { proxyHostPort: hostPort }
+            CATCH:
+                LOG warn "Failed to parse proxy URL"
+        
+        RETURN args
+
+    PRIVATE FUNCTION getExtensionPaths() -> string[]:
+        RETURN getExtensionPaths()  # From config module
+
+
+# ============================================================================
+# XPATH EXTRACTION
+# ============================================================================
+
+    PRIVATE FUNCTION validateXPath(xpath: string) -> boolean:
+        IF NOT xpath OR xpath.length > MAX_XPATH_LENGTH:
+            RETURN false
+        RETURN ALLOWED_XPATH_PATTERN.test(xpath)
+
+    FUNCTION evaluateXPath(pageId: string, xpath: string) -> string[] | null:
+        # Validate XPath first (security)
+        IF NOT this.validateXPath(xpath):
+            LOG warn "Invalid XPath rejected", { xpath: xpath.slice(0, 50) }
+            RETURN null
+        
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN null
+        
+        TRY:
+            RETURN await session.page.evaluate((xpathSelector) => {
+                console.log("Evaluating XPath: {xpathSelector}")
+                
+                TRY:
+                    # XPathResult.ORDERED_NODE_SNAPSHOT_TYPE = 7
+                    result = document.evaluate(xpathSelector, document, null, 7, null)
+                    results = []
+                    console.log("Snapshot length: {result.snapshotLength}")
+                    
+                    FOR i = 0 TO result.snapshotLength:
+                        node = result.snapshotItem(i)
+                        IF NOT node:
+                            CONTINUE
+                        
+                        val = null
+                        IF node.nodeType == 1:  # Element
+                            val = node.outerHTML
+                        ELSE IF node.nodeType == 2 OR node.nodeType == 3:  # Attr or Text
+                            val = node.nodeValue
+                        
+                        IF val:
+                            results.push(val)
+                    
+                    RETURN results
+                CATCH e:
+                    console.error("Evaluate error:", e.message)
+                    RETURN []
+            }, xpath)
+        CATCH e:
+            LOG error "Puppeteer evaluate error:", e
+            RETURN null
+
+
+# ============================================================================
+# PAGE CONTENT
+# ============================================================================
+
+    FUNCTION getPageHtml(pageId: string) -> string:
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN ''
+        RETURN await session.page.content()
+
+    FUNCTION getElementDetails(pageId: string, xpath: string) -> ElementDetails | null:
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN null
+        
+        TRY:
+            RETURN await session.page.evaluate((xpathSelector) => {
+                result = document.evaluate(xpathSelector, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null)
+                element = result.singleNodeValue
+                IF NOT element:
+                    RETURN null
+                
+                text = element.textContent OR ''
+                links = element.querySelectorAll('a')
+                linkText = Array.from(links).map(a => a.textContent).join('')
+                
+                RETURN {
+                    xpath: xpathSelector,
+                    textLength: text.length,
+                    linkDensity: text.length > 0 ? linkText.length / text.length : 0,
+                    paragraphCount: element.querySelectorAll('p').length,
+                    headingCount: element.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
+                    hasMedia: element.querySelectorAll('img,video,audio').length > 0,
+                    domDepth: calculateDepth(element),
+                    semanticScore: isSemanticTag(element.tagName) ? 1 : 0,
+                    unwantedTagScore: isUnwantedTag(element.tagName) ? 1 : 0
+                }
+                
+                FUNCTION calculateDepth(el):
+                    depth = 0
+                    WHILE el:
+                        depth++
+                        el = el.parentElement
+                    RETURN depth
+                
+                FUNCTION isSemanticTag(tag):
+                    RETURN ['article', 'main', 'section'].includes(tag.toLowerCase())
+                
+                FUNCTION isUnwantedTag(tag):
+                    RETURN ['nav', 'aside', 'footer', 'header'].includes(tag.toLowerCase())
+            }, xpath)
+        CATCH:
+            RETURN null
+
+
+# ============================================================================
+# CAPTCHA DETECTION
+# ============================================================================
+
+    FUNCTION detectCaptcha(pageId: string) -> CaptchaDetectionResult:
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN { type: 'none' }
+        
+        html = await session.page.content()
+        
+        # DataDome detection - extract iframe URL
+        IF html.includes('captcha-delivery.com') OR html.includes('geo.captcha-delivery.com'):
+            captchaUrl = await session.page.evaluate(() => {
+                iframe = document.querySelector('iframe[src*="captcha-delivery.com"]')
+                RETURN iframe?.getAttribute('src')
+            })
+            
+            LOG debug "DataDome iframe URL extracted", { captchaUrl }
+            RETURN { type: 'datadome', captchaUrl }
+        
+        # Generic CAPTCHA detection
+        IF html.includes('g-recaptcha') OR html.includes('h-captcha') OR html.includes('cf-turnstile'):
+            RETURN { type: 'generic' }
+        
+        RETURN { type: 'none' }
+
+
+# ============================================================================
+# COOKIES
+# ============================================================================
+
+    FUNCTION getCookies(pageId: string) -> string:
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN ''
+        cookies = await session.page.cookies()
+        RETURN cookies.map(c => "{c.name}={c.value}").join('; ')
+
+    FUNCTION setCookies(pageId: string, cookieStr: string) -> void:
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN
+        
+        url = session.page.url()
+        domain = parseUrl(url).hostname
+        
+        cookies = cookieStr.split(';').map(pair => {
+            [name, ...rest] = pair.trim().split('=')
+            RETURN { name, value: rest.join('='), domain }
+        })
+        
+        await session.page.setCookie(...cookies)
+
+    FUNCTION reload(pageId: string, timeoutMs?: int) -> void:
+        session = this.sessions.get(pageId)
+        IF NOT session:
+            RETURN
+        await session.page.reload({
+            waitUntil: 'networkidle2',
+            timeout: timeoutMs OR 120000
+        })

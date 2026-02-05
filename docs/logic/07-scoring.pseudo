@@ -1,0 +1,129 @@
+# Content Scoring
+# ================
+# Scoring algorithm for XPath candidate evaluation
+
+# ============================================================================
+# SCORING CONSTANTS
+# ============================================================================
+
+CONST SCORING:
+    MIN_SCORE_THRESHOLD = 0.7   # Minimum score to accept an XPath
+    MIN_CONTENT_CHARS = 200     # Minimum text length for valid content
+
+
+# ============================================================================
+# ELEMENT SCORING
+# ============================================================================
+
+FUNCTION scoreElement(details: ElementDetails) -> float:
+    """
+    Score an element for article content quality.
+    Returns a score between 0.0 and 1.0
+    
+    Higher score = more likely to be main article content
+    """
+    
+    score = 0.0
+    
+    # 1. TEXT LENGTH (+0.3)
+    # More text = likely content
+    IF details.textLength > MIN_CONTENT_CHARS:
+        score += 0.3
+    
+    # 2. LINK DENSITY (+0.2)
+    # Low link density = likely content (not navigation)
+    IF details.linkDensity < 0.3:
+        score += 0.2
+    
+    # 3. PARAGRAPH COUNT (+0.15)
+    # Multiple paragraphs = article-like
+    IF details.paragraphCount >= 3:
+        score += 0.15
+    
+    # 4. HEADING COUNT (+0.1)
+    # Has headings = structured content
+    IF details.headingCount >= 1:
+        score += 0.1
+    
+    # 5. SEMANTIC ELEMENT (+0.15)
+    # article, main, section = designed for content
+    IF details.semanticScore > 0:
+        score += 0.15
+    
+    # 6. UNWANTED ELEMENT (-0.3)
+    # nav, aside, footer, header = NOT content
+    IF details.unwantedTagScore > 0:
+        score -= 0.3
+    
+    # 7. DOM DEPTH (+0.1)
+    # Moderate depth = typically content area (not too shallow, not too deep)
+    IF details.domDepth > 3 AND details.domDepth < 10:
+        score += 0.1
+    
+    # Clamp to [0.0, 1.0]
+    RETURN max(0, min(1, score))
+
+
+# ============================================================================
+# RANKING
+# ============================================================================
+
+FUNCTION rankXPathCandidates(
+    candidates: Array<{ xpath: string, details: ElementDetails | null }>
+) -> Array<{ xpath: string, score: float }>:
+    """
+    Rank multiple XPath candidates by their content quality score.
+    Returns candidates sorted by score (highest first).
+    """
+    
+    RETURN candidates
+        .map(({ xpath, details }) => ({
+            xpath,
+            score: details ? scoreElement(details) : 0
+        }))
+        .sort((a, b) => b.score - a.score)
+
+
+# ============================================================================
+# SCORING EXPLANATION
+# ============================================================================
+
+"""
+SCORING BREAKDOWN:
+
+Component             | Points | Condition
+----------------------|--------|---------------------------
+Text length           | +0.30  | > 200 characters
+Link density          | +0.20  | < 30% of text is links
+Paragraph count       | +0.15  | >= 3 paragraphs
+Heading presence      | +0.10  | >= 1 heading (h1-h6)
+Semantic element      | +0.15  | <article>, <main>, <section>
+Unwanted element      | -0.30  | <nav>, <aside>, <footer>, <header>
+DOM depth             | +0.10  | Between 3 and 10 levels
+----------------------|--------|---------------------------
+Maximum possible      | 1.00   |
+Threshold for accept  | 0.70   |
+
+
+EXAMPLES:
+
+1. Perfect article element:
+   - 5000 chars, 0.1 link density, 10 paragraphs, 3 headings
+   - <article> tag at depth 5
+   Score: 0.30 + 0.20 + 0.15 + 0.10 + 0.15 + 0.10 = 1.00 ✓
+
+2. Navigation element:
+   - 200 chars, 0.9 link density, 0 paragraphs, 0 headings
+   - <nav> tag at depth 3
+   Score: 0.30 + 0.00 + 0.00 + 0.00 + 0.00 - 0.30 = 0.00 ✗
+
+3. Sidebar with content:
+   - 500 chars, 0.4 link density, 2 paragraphs, 1 heading
+   - <aside> tag at depth 4
+   Score: 0.30 + 0.00 + 0.00 + 0.10 + 0.00 - 0.30 + 0.10 = 0.20 ✗
+
+4. Generic div with article:
+   - 3000 chars, 0.15 link density, 8 paragraphs, 2 headings
+   - <div> tag at depth 6
+   Score: 0.30 + 0.20 + 0.15 + 0.10 + 0.00 + 0.10 = 0.85 ✓
+"""

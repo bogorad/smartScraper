@@ -1,0 +1,164 @@
+# Known Sites Storage
+# ====================
+# Site configuration persistence with JSONC (JSON with comments)
+
+# ============================================================================
+# KNOWN SITES PORT INTERFACE
+# ============================================================================
+
+INTERFACE KnownSitesPort:
+    FUNCTION getConfig(domain: string) -> SiteConfig | undefined
+    FUNCTION saveConfig(config: SiteConfig) -> void
+    FUNCTION incrementFailure(domain: string) -> void
+    FUNCTION markSuccess(domain: string) -> void
+    FUNCTION deleteConfig(domain: string) -> void
+    FUNCTION getAllConfigs() -> SiteConfig[]
+
+
+# ============================================================================
+# FILE-BASED IMPLEMENTATION
+# ============================================================================
+
+CLASS FsKnownSitesAdapter IMPLEMENTS KnownSitesPort:
+    PRIVATE:
+        cache: SiteConfig[] | null = null
+        writeQueue: PQueue = new PQueue({ concurrency: 1 })  # Serialize writes
+    
+    FUNCTION getSitesFile() -> string:
+        RETURN path.join(getDataDir(), 'sites.jsonc')
+
+
+# ============================================================================
+# FILE OPERATIONS
+# ============================================================================
+
+    PRIVATE FUNCTION ensureFile() -> void:
+        sitesFile = this.getSitesFile()
+        TRY:
+            await fs.access(sitesFile)
+        CATCH:
+            await fs.mkdir(getDataDir(), { recursive: true })
+            await fs.writeFile(sitesFile, '[]')
+
+    PRIVATE FUNCTION load() -> SiteConfig[]:
+        IF this.cache:
+            RETURN this.cache
+        
+        await this.ensureFile()
+        content = await fs.readFile(this.getSitesFile(), 'utf-8')
+        
+        # Parse JSONC (preserves comments)
+        this.cache = commentJson.parse(content) as SiteConfig[]
+        
+        LOG debug "Loaded {this.cache.length} site configs"
+        RETURN this.cache
+
+    PRIVATE FUNCTION flush() -> void:
+        await this.ensureFile()
+        
+        # Write to temp file first (atomic write)
+        tempFile = this.getSitesFile() + '.tmp'
+        content = commentJson.stringify(this.cache, null, 2)
+        
+        await fs.writeFile(tempFile, content)
+        await fs.rename(tempFile, this.getSitesFile())
+
+
+# ============================================================================
+# READ OPERATIONS (use cache directly)
+# ============================================================================
+
+    FUNCTION getConfig(domain: string) -> SiteConfig | undefined:
+        configs = await this.load()
+        RETURN configs.find(c => c.domainPattern == domain)
+
+    FUNCTION getAllConfigs() -> SiteConfig[]:
+        RETURN await this.load()
+
+
+# ============================================================================
+# WRITE OPERATIONS (through serialized queue)
+# ============================================================================
+
+    FUNCTION saveConfig(config: SiteConfig) -> void:
+        RETURN this.writeQueue.add(async () => {
+            configs = await this.load()
+            index = configs.findIndex(c => c.domainPattern == config.domainPattern)
+            
+            IF index >= 0:
+                configs[index] = config
+            ELSE:
+                configs.push(config)
+            
+            await this.flush()
+        })
+
+    FUNCTION incrementFailure(domain: string) -> void:
+        RETURN this.writeQueue.add(async () => {
+            configs = await this.load()
+            config = configs.find(c => c.domainPattern == domain)
+            
+            IF config:
+                config.failureCountSinceLastSuccess++
+                await this.flush()
+        })
+
+    FUNCTION markSuccess(domain: string) -> void:
+        RETURN this.writeQueue.add(async () => {
+            configs = await this.load()
+            config = configs.find(c => c.domainPattern == domain)
+            
+            IF config:
+                config.failureCountSinceLastSuccess = 0
+                config.lastSuccessfulScrapeTimestamp = utcNow()
+                await this.flush()
+        })
+
+    FUNCTION deleteConfig(domain: string) -> void:
+        RETURN this.writeQueue.add(async () => {
+            configs = await this.load()
+            filtered = configs.filter(c => c.domainPattern != domain)
+            this.cache = filtered
+            await this.flush()
+        })
+
+
+# ============================================================================
+# SINGLETON EXPORT
+# ============================================================================
+
+# Single instance shared across application
+knownSitesAdapter = new FsKnownSitesAdapter()
+
+
+# ============================================================================
+# FILE FORMAT EXAMPLE (sites.jsonc)
+# ============================================================================
+
+"""
+[
+  // News sites
+  {
+    "domainPattern": "nypost.com",
+    "xpathMainContent": "//article[@class='post-content']",
+    "lastSuccessfulScrapeTimestamp": "2025-12-05T10:30:00Z",
+    "failureCountSinceLastSuccess": 0,
+    "siteCleanupClasses": ["ad-wrapper", "social-share"],
+    "siteSpecificHeaders": {}
+  },
+  // Tech blogs
+  {
+    "domainPattern": "techcrunch.com",
+    // TODO: xpath needs testing after site redesign
+    "xpathMainContent": "//div[@class='article-content']",
+    "failureCountSinceLastSuccess": 2
+  },
+  // DataDome protected sites
+  {
+    "domainPattern": "wsj.com",
+    "xpathMainContent": "//article",
+    "needsProxy": "datadome",
+    "failureCountSinceLastSuccess": 0
+  }
+]
+"""

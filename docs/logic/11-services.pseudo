@@ -1,0 +1,245 @@
+# Services
+# =========
+# Stats persistence and log management
+
+# ============================================================================
+# STATS STORAGE
+# ============================================================================
+
+# Global state
+writeQueue = new PQueue({ concurrency: 1 })  # Serialize writes
+cache: Stats | null = null
+
+DEFAULT_STATS = {
+    scrapeTotal: 0,
+    failTotal: 0,
+    todayDate: utcToday(),
+    scrapeToday: 0,
+    failToday: 0,
+    domainCounts: {}
+}
+
+FUNCTION getStatsFile() -> string:
+    RETURN path.join(getDataDir(), 'stats.json')
+
+
+# ============================================================================
+# STATS FILE OPERATIONS
+# ============================================================================
+
+PRIVATE FUNCTION ensureFile() -> void:
+    statsFile = getStatsFile()
+    TRY:
+        await fs.access(statsFile)
+    CATCH:
+        await fs.mkdir(getDataDir(), { recursive: true })
+        await fs.writeFile(statsFile, JSON.stringify(DEFAULT_STATS, null, 2))
+
+PRIVATE FUNCTION loadFromDisk() -> Stats:
+    await ensureFile()
+    content = await fs.readFile(getStatsFile(), 'utf-8')
+    parsed = JSON.parse(content)
+    
+    # Ensure domainCounts is initialized (defensive)
+    cache = {
+        ...DEFAULT_STATS,
+        ...parsed,
+        domainCounts: parsed.domainCounts OR {}
+    }
+    
+    RETURN cache
+
+PRIVATE FUNCTION flush() -> void:
+    IF NOT cache:
+        RETURN
+    
+    await ensureFile()
+    tempFile = getStatsFile() + '.tmp'
+    await fs.writeFile(tempFile, JSON.stringify(cache, null, 2))
+    await fs.rename(tempFile, getStatsFile())
+
+
+# ============================================================================
+# STATS API (READ)
+# ============================================================================
+
+FUNCTION loadStats() -> Stats:
+    """Load stats (uses cache if available)"""
+    IF cache:
+        RETURN cache
+    RETURN await loadFromDisk()
+
+FUNCTION getTopDomains(limit = 5) -> Array<{ domain, count }>:
+    """Get top N domains by scrape count"""
+    IF NOT cache:
+        await loadFromDisk()
+    
+    stats = cache
+    RETURN Object.entries(stats.domainCounts OR {})
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, limit)
+        .map(([domain, count]) => ({ domain, count }))
+
+
+# ============================================================================
+# STATS API (WRITE)
+# ============================================================================
+
+FUNCTION saveStats(stats: Stats) -> void:
+    """Save stats (through queue)"""
+    RETURN writeQueue.add(async () => {
+        cache = stats
+        await flush()
+    })
+
+FUNCTION recordScrape(domain: string, success: boolean) -> void:
+    """Record a scrape attempt"""
+    RETURN writeQueue.add(async () => {
+        IF NOT cache:
+            await loadFromDisk()
+        
+        stats = cache
+        today = utcToday()
+        
+        # Reset daily counters if new day
+        IF stats.todayDate != today:
+            stats.todayDate = today
+            stats.scrapeToday = 0
+            stats.failToday = 0
+        
+        # Update counters
+        stats.scrapeTotal++
+        stats.scrapeToday++
+        stats.domainCounts[domain] = (stats.domainCounts[domain] OR 0) + 1
+        
+        IF NOT success:
+            stats.failTotal++
+            stats.failToday++
+        
+        await flush()
+    })
+
+FUNCTION resetStats() -> void:
+    """Reset all stats to defaults"""
+    RETURN writeQueue.add(async () => {
+        cache = {
+            scrapeTotal: 0,
+            failTotal: 0,
+            todayDate: utcToday(),
+            scrapeToday: 0,
+            failToday: 0,
+            domainCounts: {}
+        }
+        await flush()
+    })
+
+
+# ============================================================================
+# LOG STORAGE
+# ============================================================================
+
+FUNCTION getLogsDir() -> string:
+    RETURN getLogDir()
+
+PRIVATE FUNCTION ensureLogsDir() -> void:
+    await fs.mkdir(getLogsDir(), { recursive: true })
+
+
+# ============================================================================
+# LOG API
+# ============================================================================
+
+FUNCTION logScrape(entry: LogEntry) -> void:
+    """Write a scrape log entry to today's log file"""
+    await ensureLogsDir()
+    
+    today = utcToday()
+    logFile = path.join(getLogsDir(), "{today}.jsonl")
+    
+    line = JSON.stringify(entry) + '\n'
+    await fs.appendFile(logFile, line)
+
+FUNCTION readTodayLogs() -> LogEntry[]:
+    """Read all log entries from today's log file"""
+    await ensureLogsDir()
+    
+    today = utcToday()
+    logFile = path.join(getLogsDir(), "{today}.jsonl")
+    
+    TRY:
+        content = await fs.readFile(logFile, 'utf-8')
+        RETURN content
+            .split('\n')
+            .filter(line => line.trim())
+            .map(line => JSON.parse(line) as LogEntry)
+    CATCH:
+        RETURN []
+
+FUNCTION cleanupOldLogs() -> void:
+    """Delete log files older than retention period"""
+    await ensureLogsDir()
+    
+    TRY:
+        logsDir = getLogsDir()
+        files = await fs.readdir(logsDir)
+        
+        FOR file IN files:
+            IF NOT file.endsWith('.jsonl'):
+                CONTINUE
+            
+            dateStr = file.replace('.jsonl', '')
+            IF isOlderThanDays(dateStr, DEFAULTS.LOG_RETENTION_DAYS):
+                await fs.unlink(path.join(logsDir, file))
+                LOG info "Cleaned up old log: {file}"
+    
+    CATCH error:
+        LOG error "Log cleanup error:", error
+
+
+# ============================================================================
+# LOG FILE FORMAT
+# ============================================================================
+
+"""
+Log files are stored as JSON Lines (one JSON object per line).
+
+File naming: YYYY-MM-DD.jsonl
+Location: {dataDir}/logs/
+
+Example content (2025-12-05.jsonl):
+
+{"ts":"2025-12-05T10:30:00.123Z","domain":"nypost.com","url":"https://nypost.com/...","success":true,"method":"puppeteer_stealth","xpath":"//article","ms":1250}
+{"ts":"2025-12-05T10:31:15.456Z","domain":"cnn.com","url":"https://cnn.com/...","success":false,"errorType":"CAPTCHA","error":"DataDome detected","ms":5400}
+{"ts":"2025-12-05T10:32:00.789Z","domain":"bbc.com","url":"https://bbc.com/...","success":true,"method":"puppeteer_stealth","xpath":"//main","ms":2100}
+
+Retention: Files older than 7 days are automatically deleted.
+Cleanup runs on startup and daily via setInterval.
+"""
+
+
+# ============================================================================
+# STATS FILE FORMAT
+# ============================================================================
+
+"""
+Stats are stored as JSON with aggregate counters.
+
+File: {dataDir}/stats.json
+
+{
+  "scrapeTotal": 15420,
+  "failTotal": 342,
+  "todayDate": "2025-12-05",
+  "scrapeToday": 87,
+  "failToday": 3,
+  "domainCounts": {
+    "nypost.com": 2341,
+    "cnn.com": 1892,
+    "techcrunch.com": 1456,
+    "bbc.com": 1203,
+    "reuters.com": 998
+  }
+}
+
+Daily counters (scrapeToday, failToday) reset at UTC midnight.
+"""

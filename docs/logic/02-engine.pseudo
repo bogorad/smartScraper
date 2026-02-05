@@ -1,0 +1,346 @@
+# Core Scraping Engine
+# =====================
+# Main orchestrator for web scraping operations
+
+# ============================================================================
+# ENGINE INITIALIZATION
+# ============================================================================
+
+CLASS CoreScraperEngine:
+    CONST MAX_QUEUE_SIZE = 100
+    
+    PRIVATE:
+        queue: PQueue                       # Concurrency control
+        activeScrapes: Map<string, string>  # scrapeId -> url
+        maxWorkers: int
+        browserPort: BrowserPort
+        llmPort: LlmPort
+        captchaPort: CaptchaPort
+        knownSitesPort: KnownSitesPort
+    
+    CONSTRUCTOR(browserPort, llmPort, captchaPort, knownSitesPort):
+        this.browserPort = browserPort
+        this.llmPort = llmPort
+        this.captchaPort = captchaPort
+        this.knownSitesPort = knownSitesPort
+        
+        this.maxWorkers = getConcurrency()  # From config (1-20, default 1)
+        this.queue = new PQueue({ concurrency: this.maxWorkers })
+        
+        LOG info "Engine initialized with concurrency: {maxWorkers}"
+
+
+# ============================================================================
+# PUBLIC API
+# ============================================================================
+
+    FUNCTION scrapeUrl(url: string, options?: ScrapeOptions) -> ScrapeResult:
+        # Check queue capacity
+        IF this.queue.size >= MAX_QUEUE_SIZE:
+            LOG warn "Queue full, rejecting request"
+            RETURN {
+                success: false,
+                errorType: 'CONFIGURATION',
+                error: 'Server overloaded, please retry later'
+            }
+        
+        # Add to queue (respects concurrency limit)
+        RETURN await this.queue.add(async () => {
+            scrapeId = generateScrapeId()  # "{timestamp}-{random7chars}"
+            domain = extractDomain(url)
+            
+            # Track active scrape
+            this.activeScrapes.set(scrapeId, url)
+            workerEvents.emit('change', {
+                activeUrls: this.getActiveUrls(),
+                active: this.getActiveWorkers(),
+                max: this.maxWorkers
+            })
+            
+            LOG scrapeStart(scrapeId, url, domain, options)
+            startTime = now()
+            
+            TRY:
+                result = await this._executeScrape(scrapeId, url, options)
+                duration = now() - startTime
+                LOG scrapeEnd(scrapeId, url, domain, result.success, duration)
+                RETURN result
+            FINALLY:
+                this.activeScrapes.delete(scrapeId)
+                workerEvents.emit('change', {...})
+        })
+
+    FUNCTION getQueueSize() -> int:
+        RETURN this.queue.size
+
+    FUNCTION getActiveWorkers() -> int:
+        RETURN this.queue.pending
+
+    FUNCTION getMaxWorkers() -> int:
+        RETURN this.maxWorkers
+
+    FUNCTION getActiveUrls() -> string[]:
+        RETURN Array.from(this.activeScrapes.values())
+
+
+# ============================================================================
+# SCRAPE EXECUTION (PRIVATE)
+# ============================================================================
+
+    PRIVATE FUNCTION _executeScrape(scrapeId, url, options) -> ScrapeResult:
+        startTime = now()
+        domain = extractDomain(url)
+        pageId = null
+        
+        # Validate URL
+        IF NOT isValidUrl(url) OR NOT domain:
+            RETURN { success: false, errorType: 'CONFIGURATION', error: 'Invalid URL' }
+        
+        # Build context
+        context = {
+            targetUrl: url,
+            normalizedDomain: domain,
+            proxyDetails: options?.proxyDetails,
+            userAgentString: options?.userAgentString,
+            debugContextId: options?.debugContextId
+        }
+        
+        TRY:
+            # 1. LOOKUP SITE CONFIG
+            context.siteConfig = await this.knownSitesPort.getConfig(domain)
+            LOG debug "Site config lookup", { found: !!siteConfig, needsProxy: siteConfig?.needsProxy }
+            
+            # 2. BUILD PROXY URL (if DataDome proxy needed)
+            proxyUrl = null
+            IF context.siteConfig?.needsProxy == 'datadome':
+                host = getDatadomeProxyHost()
+                login = getDatadomeProxyLogin()
+                password = getDatadomeProxyPassword()
+                
+                IF host AND login AND password:
+                    proxyUrl = buildSessionProxyUrl(host, login, password, 2)  # 2 min sticky
+                    LOG proxySession(scrapeId, proxyUrl, sessionId, 2)
+                ELSE:
+                    LOG warn "needsProxy=datadome but credentials not configured"
+            
+            # 3. LOAD PAGE (fresh browser per scrape)
+            { pageId } = await this.browserPort.loadPage(url, {
+                timeout: options?.timeoutMs OR 120000,
+                proxy: proxyUrl
+            })
+            
+            # 4. DETECT CAPTCHA
+            captchaDetection = await this.browserPort.detectCaptcha(pageId)
+            LOG debug "CAPTCHA detection", { type: captchaDetection.type, captchaUrl: captchaDetection.captchaUrl }
+            
+            IF captchaDetection.type != 'none':
+                LOG captchaDetected(scrapeId, url, captchaDetection.type)
+                
+                # Try to solve
+                captchaStart = now()
+                solveResult = await this.captchaPort.solveIfPresent({
+                    pageId,
+                    pageUrl: url,
+                    captchaUrl: captchaDetection.captchaUrl,
+                    captchaTypeHint: captchaDetection.type,
+                    proxyDetails: proxyUrl ? { server: proxyUrl } : context.proxyDetails,
+                    userAgentString: context.userAgentString
+                })
+                LOG captchaSolved(scrapeId, url, solveResult.solved, now() - captchaStart)
+                
+                IF NOT solveResult.solved:
+                    result = { success: false, errorType: 'CAPTCHA', error: solveResult.reason }
+                    await this.recordResult(context, result, startTime)
+                    RETURN result
+                
+                IF solveResult.updatedCookie:
+                    await this.browserPort.setCookies(pageId, solveResult.updatedCookie)
+                    await this.browserPort.reload(pageId, options?.timeoutMs)
+            
+            # 5. DETERMINE XPATH
+            xpath = options?.xpathOverride
+            needsDiscovery = (
+                NOT options?.disableDiscovery AND
+                NOT xpath AND
+                (NOT context.siteConfig?.xpathMainContent OR
+                 context.siteConfig.failureCountSinceLastSuccess >= 2)
+            )
+            
+            # Try cached XPath first
+            IF NOT xpath AND NOT needsDiscovery AND context.siteConfig?.xpathMainContent:
+                xpath = context.siteConfig.xpathMainContent
+                extracted = await this.browserPort.evaluateXPath(pageId, xpath)
+                
+                IF NOT extracted OR extracted.empty OR extracted[0].length < 200:
+                    IF options?.disableDiscovery:
+                        LOG debug "Cached XPath failed, but discovery disabled"
+                    ELSE:
+                        needsDiscovery = true
+                        LOG debug "Cached XPath failed validation, needs discovery"
+                        await this.knownSitesPort.incrementFailure(domain)
+                ELSE:
+                    LOG debug "Using cached XPath: {xpath}"
+            
+            # 6. LLM DISCOVERY (if needed)
+            IF needsDiscovery:
+                LOG debug "Starting discovery phase"
+                
+                html = await this.browserPort.getPageHtml(pageId)
+                simplifiedDom = simplifyDom(html)
+                snippets = extractSnippets(html)
+                
+                suggestions = await this.llmPort.suggestXPaths({
+                    simplifiedDom,
+                    snippets,
+                    url
+                })
+                LOG debug "LLM returned {len(suggestions)} suggestions"
+                
+                IF suggestions.empty:
+                    result = { success: false, errorType: 'LLM', error: 'No XPath suggestions' }
+                    await this.recordResult(context, result, startTime)
+                    RETURN result
+                
+                # Score each suggestion
+                FOR suggestion IN suggestions:
+                    details = await this.browserPort.getElementDetails(pageId, suggestion.xpath)
+                    IF NOT details:
+                        CONTINUE
+                    
+                    score = scoreElement(details)
+                    LOG debug "Evaluating {suggestion.xpath}: score={score}, length={details.textLength}"
+                    
+                    IF score >= 0.7 AND details.textLength >= 200:
+                        xpath = suggestion.xpath
+                        LOG debug "Accepted new XPath: {xpath}"
+                        
+                        # Save to known sites
+                        await this.knownSitesPort.saveConfig({
+                            domainPattern: domain,
+                            xpathMainContent: xpath,
+                            failureCountSinceLastSuccess: 0,
+                            lastSuccessfulScrapeTimestamp: utcNow(),
+                            discoveredByLlm: true
+                        })
+                        BREAK
+                
+                IF NOT xpath:
+                    result = { success: false, errorType: 'EXTRACTION', error: 'No valid XPath found' }
+                    await this.recordResult(context, result, startTime)
+                    RETURN result
+            
+            # 7. EXTRACT CONTENT
+            extracted = await this.browserPort.evaluateXPath(pageId, xpath)
+            
+            # Debug snapshot (optional)
+            IF options?.debug:
+                fullHtml = await this.browserPort.getPageHtml(pageId)
+                filename = "{domain}_{timestamp}.html"
+                writeFile("data/logs/debug/{filename}", fullHtml)
+                LOG debug "Saved HTML snapshot to {filename}"
+            
+            IF NOT extracted OR extracted.empty:
+                result = { success: false, errorType: 'EXTRACTION', error: 'Extraction returned empty' }
+                await this.knownSitesPort.incrementFailure(domain)
+                await this.recordResult(context, result, startTime)
+                RETURN result
+            
+            # 8. MARK SUCCESS
+            await this.knownSitesPort.markSuccess(domain)
+            
+            # 9. TRANSFORM OUTPUT
+            outputType = options?.outputType OR 'content_only'
+            rawHtml = extracted.join('\n')
+            cleanerOptions = { siteCleanupClasses: context.siteConfig?.siteCleanupClasses }
+            
+            SWITCH outputType:
+                CASE 'full_html':
+                    data = await this.browserPort.getPageHtml(pageId)
+                CASE 'metadata_only':
+                    data = { xpath, contentLength: rawHtml.length }
+                CASE 'cleaned_html':
+                    data = cleanHtml(rawHtml, cleanerOptions)
+                CASE 'markdown':
+                    data = toMarkdown(rawHtml, cleanerOptions)
+                DEFAULT:  # content_only
+                    data = extractText(rawHtml, cleanerOptions)
+            
+            result = {
+                success: true,
+                method: 'puppeteer_stealth',
+                xpath,
+                data
+            }
+            
+            await this.recordResult(context, result, startTime)
+            RETURN result
+        
+        CATCH error:
+            message = error.message OR 'Unknown error'
+            LOG error "Scrape exception", { url, error: message, scrapeId }
+            result = { success: false, errorType: 'UNKNOWN', error: message }
+            await this.recordResult(context, result, startTime)
+            RETURN result
+        
+        FINALLY:
+            IF pageId:
+                TRY:
+                    await this.browserPort.closePage(pageId)
+                CATCH:
+                    LOG debug "Page cleanup failed in finally block"
+
+
+# ============================================================================
+# RESULT RECORDING
+# ============================================================================
+
+    PRIVATE FUNCTION recordResult(context, result, startTime):
+        ms = now() - startTime
+        
+        await recordScrape(context.normalizedDomain, result.success)
+        
+        entry = {
+            ts: utcNow(),
+            domain: context.normalizedDomain,
+            url: context.targetUrl,
+            success: result.success,
+            method: result.method,
+            xpath: result.xpath,
+            errorType: result.errorType,
+            error: result.error,
+            ms
+        }
+        
+        await logScrape(entry)
+
+
+# ============================================================================
+# MODULE EXPORTS
+# ============================================================================
+
+# Global singleton
+VARIABLE defaultEngine: CoreScraperEngine | null = null
+
+FUNCTION initializeEngine(browserPort, llmPort, captchaPort, knownSitesPort) -> CoreScraperEngine:
+    defaultEngine = new CoreScraperEngine(browserPort, llmPort, captchaPort, knownSitesPort)
+    RETURN defaultEngine
+
+FUNCTION getDefaultEngine() -> CoreScraperEngine:
+    IF NOT defaultEngine:
+        THROW "Engine not initialized. Call initializeEngine() first."
+    RETURN defaultEngine
+
+FUNCTION scrapeUrl(url, options) -> ScrapeResult:
+    RETURN getDefaultEngine().scrapeUrl(url, options)
+
+FUNCTION getQueueStats() -> { size, active, max, activeUrls }:
+    engine = getDefaultEngine()
+    RETURN {
+        size: engine.getQueueSize(),
+        active: engine.getActiveWorkers(),
+        max: engine.getMaxWorkers(),
+        activeUrls: engine.getActiveUrls()
+    }
+
+# Event emitter for worker status updates (SSE)
+workerEvents = new EventEmitter()

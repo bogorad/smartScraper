@@ -1,0 +1,263 @@
+# Logging System
+# ================
+# Structured logging with file output
+
+# ============================================================================
+# LOG LEVELS
+# ============================================================================
+
+TYPE LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'NONE'
+
+CONST LEVELS = {
+    DEBUG: 0,
+    INFO: 1,
+    WARN: 2,
+    ERROR: 3,
+    NONE: 4
+}
+
+
+# ============================================================================
+# LOG ENTRY STRUCTURE
+# ============================================================================
+
+STRUCT LogEntry:
+    timestamp: string       # ISO 8601
+    level: LogLevel
+    module: string?         # Component name (e.g., 'ENGINE', 'BROWSER')
+    message: string
+    data: any?              # Additional structured data
+    scrapeId: string?       # Correlation ID for scrape operations
+    url: string?
+    domain: string?
+    duration: int?          # Milliseconds
+    error: string?
+
+
+# ============================================================================
+# LOGGER INITIALIZATION
+# ============================================================================
+
+# Global state
+logFileStream: WriteStream | null = null
+debugEnabled: boolean = false
+
+FUNCTION initLogFile() -> void:
+    IF logFileStream:
+        RETURN
+    
+    TRY:
+        dataDir = getDataDir()
+        logDir = path.join(dataDir, 'logs')
+        fs.mkdirSync(logDir, { recursive: true })
+        
+        timestamp = new Date().toISOString().split('T')[0]
+        logFile = path.join(logDir, "scraper-{timestamp}.jsonl")
+        
+        logFileStream = fs.createWriteStream(logFile, { flags: 'a' })
+        
+        logFileStream.on('error', (err) => {
+            console.error("[LOGGER] File stream error:", err.message)
+            logFileStream = null  # Disable file logging, continue with console
+        })
+        
+        # Check debug mode (env var or config)
+        debugEnabled = isDebugMode()
+        TRY:
+            IF getLogLevel() == 'DEBUG':
+                debugEnabled = true
+        CATCH:
+            # Config not initialized yet
+            PASS
+        
+        IF debugEnabled:
+            console.log("LOGGER: Debug mode enabled, logging to: {logFile}")
+    
+    CATCH error:
+        console.error("[LOGGER] Failed to initialize log file:", error)
+
+
+# ============================================================================
+# LOG FILTERING
+# ============================================================================
+
+FUNCTION shouldLog(level: LogLevel) -> boolean:
+    currentLevel = getLogLevel() as LogLevel
+    RETURN LEVELS[level] >= LEVELS[currentLevel]
+
+
+# ============================================================================
+# LOG WRITING
+# ============================================================================
+
+PRIVATE FUNCTION writeToFile(entry: LogEntry) -> void:
+    IF NOT logFileStream:
+        initLogFile()
+    
+    IF logFileStream AND debugEnabled:
+        TRY:
+            logFileStream.write(JSON.stringify(entry) + '\n')
+        CATCH error:
+            console.error("[LOGGER] Write error:", error)
+
+PRIVATE FUNCTION log(level: LogLevel, module: string?, message: string, data?: any) -> void:
+    IF NOT shouldLog(level):
+        RETURN
+    
+    timestamp = new Date().toISOString()
+    entry = {
+        timestamp,
+        level,
+        message,
+        ...(module && { module }),
+        ...(data && { data })
+    }
+    
+    # Console output
+    prefix = module ? "[{level}] [{module}]" : "[{level}]"
+    
+    IF data != undefined:
+        SWITCH level:
+            CASE 'ERROR': console.error(prefix, message, data)
+            CASE 'WARN':  console.warn(prefix, message, data)
+            DEFAULT:      console.log(prefix, message, data)
+    ELSE:
+        SWITCH level:
+            CASE 'ERROR': console.error(prefix, message)
+            CASE 'WARN':  console.warn(prefix, message)
+            DEFAULT:      console.log(prefix, message)
+    
+    # File output (JSONL)
+    writeToFile(entry)
+
+
+# ============================================================================
+# LOGGER API
+# ============================================================================
+
+logger = {
+    debug: (message, data?, module?) => log('DEBUG', module, message, data),
+    info:  (message, data?, module?) => log('INFO', module, message, data),
+    warn:  (message, data?, module?) => log('WARN', module, message, data),
+    error: (message, data?, module?) => log('ERROR', module, message, data),
+    
+    # Specialized logging methods
+    scrapeStart: (scrapeId, url, domain, config?) => {
+        entry = {
+            timestamp: new Date().toISOString(),
+            level: 'INFO',
+            module: 'SCRAPE',
+            message: 'Scrape started',
+            scrapeId,
+            url,
+            domain,
+            data: config
+        }
+        console.log("[INFO] [SCRAPE] {scrapeId} - Starting: {url}")
+        writeToFile(entry)
+    },
+    
+    scrapeEnd: (scrapeId, url, domain, success, duration, error?) => {
+        entry = {
+            timestamp: new Date().toISOString(),
+            level: success ? 'INFO' : 'ERROR',
+            module: 'SCRAPE',
+            message: success ? 'Scrape completed' : 'Scrape failed',
+            scrapeId,
+            url,
+            domain,
+            duration,
+            ...(error && { error })
+        }
+        console.log("[{entry.level}] [SCRAPE] {scrapeId} - {entry.message} in {duration}ms")
+        writeToFile(entry)
+    },
+    
+    proxySession: (scrapeId, sessionUrl, sessionId, minutes) => {
+        entry = {
+            timestamp: new Date().toISOString(),
+            level: 'DEBUG',
+            module: 'PROXY',
+            message: 'Generated proxy session',
+            scrapeId,
+            data: {
+                sessionId,
+                stickyMinutes: minutes,
+                # Redact credentials
+                sessionUrl: sessionUrl.replace(/:([^:@]+)@/, ':***@')
+            }
+        }
+        console.log("[DEBUG] [PROXY] {scrapeId} - Session {sessionId} ({minutes}min sticky)")
+        writeToFile(entry)
+    },
+    
+    captchaDetected: (scrapeId, url, captchaType) => {
+        entry = {
+            timestamp: new Date().toISOString(),
+            level: 'WARN',
+            module: 'CAPTCHA',
+            message: 'CAPTCHA detected',
+            scrapeId,
+            url,
+            data: { captchaType }
+        }
+        console.warn("[WARN] [CAPTCHA] {scrapeId} - Detected: {captchaType}")
+        writeToFile(entry)
+    },
+    
+    captchaSolved: (scrapeId, url, success, duration, reason?) => {
+        entry = {
+            timestamp: new Date().toISOString(),
+            level: success ? 'INFO' : 'ERROR',
+            module: 'CAPTCHA',
+            message: success ? 'CAPTCHA solved' : 'CAPTCHA solve failed',
+            scrapeId,
+            url,
+            duration,
+            ...(reason && { error: reason })
+        }
+        console.log("[{entry.level}] [CAPTCHA] {scrapeId} - {entry.message} in {duration}ms")
+        writeToFile(entry)
+    },
+    
+    close: () => {
+        IF logFileStream:
+            logFileStream.end()
+            logFileStream = null
+    }
+}
+
+
+# ============================================================================
+# CLEANUP HANDLERS
+# ============================================================================
+
+# Close log file on process exit
+process.on('exit', () => logger.close())
+process.on('SIGINT', () => { logger.close(); process.exit(0) })
+process.on('SIGTERM', () => { logger.close(); process.exit(0) })
+
+
+# ============================================================================
+# LOG FILE FORMAT
+# ============================================================================
+
+"""
+Log files are JSONL (one JSON object per line).
+
+File naming: scraper-YYYY-MM-DD.jsonl
+Location: {dataDir}/logs/
+
+Example entries:
+
+{"timestamp":"2025-12-05T10:30:00.123Z","level":"INFO","module":"SCRAPE","message":"Scrape started","scrapeId":"1733400600123-abc123","url":"https://nypost.com/...","domain":"nypost.com"}
+{"timestamp":"2025-12-05T10:30:15.456Z","level":"DEBUG","module":"BROWSER","message":"Browser launching with proxy","data":{"proxyRedacted":"http://user:***@proxy.com:8080"}}
+{"timestamp":"2025-12-05T10:30:45.789Z","level":"INFO","module":"SCRAPE","message":"Scrape completed","scrapeId":"1733400600123-abc123","duration":45666}
+
+Levels:
+- DEBUG: Verbose debugging info (only when LOG_LEVEL=DEBUG)
+- INFO:  Normal operation events
+- WARN:  Potential issues (CAPTCHA detected, rate limits, etc.)
+- ERROR: Failures requiring attention
+- NONE:  Disable all logging
+"""

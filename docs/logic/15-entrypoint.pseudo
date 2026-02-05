@@ -1,0 +1,187 @@
+# Application Entry Point
+# ========================
+# Server startup and initialization
+
+# ============================================================================
+# PROCESS HANDLERS
+# ============================================================================
+
+# Fail fast on uncaught exceptions
+process.on('uncaughtException', (error) => {
+    LOG error "[FATAL] Uncaught Exception:", error
+    process.exit(1)
+})
+
+# Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+    reasonStr = reason instanceof Error ? "{reason.name}: {reason.message}" : String(reason)
+    
+    # Ignore benign Puppeteer extension cleanup error
+    # (race condition when browser.close() called while extensions loading)
+    isBenignExtensionError = (
+        reasonStr.includes('TargetCloseError') AND
+        reasonStr.includes('Extensions.loadUnpacked')
+    )
+    
+    IF isBenignExtensionError:
+        LOG warn "[PUPPETEER] Ignoring benign extension cleanup error during browser close"
+        RETURN
+    
+    LOG error "Unhandled Rejection", { reason, promise }, 'FATAL'
+    process.exit(1)
+})
+
+# Graceful shutdown
+FUNCTION shutdown(signal: string) -> void:
+    LOG info "[SHUTDOWN] Received {signal}, closing browsers..."
+    
+    IF browserAdapter:
+        TRY:
+            await browserAdapter.close()
+            LOG info "[SHUTDOWN] All browsers closed"
+        CATCH error:
+            LOG error "[SHUTDOWN] Error closing browsers:", error
+    
+    process.exit(0)
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
+
+
+# ============================================================================
+# HONO APP SETUP
+# ============================================================================
+
+app = new Hono()
+
+# Request logging middleware
+app.use('*', honoLogger())
+
+# Static assets
+app.use('/htmx.min.js', serveStatic({ path: './src/htmx.min.js' }))
+app.use('/sse.js', serveStatic({ path: './src/sse.js' }))
+
+
+# ============================================================================
+# ROUTES
+# ============================================================================
+
+# Health check
+app.get('/health', (c) => {
+    RETURN c.json({
+        status: 'alive',
+        version: VERSION,
+        timestamp: Date.now()
+    })
+})
+
+# API version
+app.get('/api/version', (c) => {
+    RETURN c.json({ version: VERSION })
+})
+
+# Mount routers
+app.route('/api/scrape', scrapeRouter)
+app.route('/login', loginRouter)
+app.route('/dashboard', dashboardRouter)
+app.route('/dashboard/sites', sitesRouter)
+app.route('/dashboard/stats', statsRouter)
+
+# Root redirect
+app.get('/', (c) => c.redirect('/dashboard'))
+
+
+# ============================================================================
+# MAIN FUNCTION
+# ============================================================================
+
+FUNCTION main() -> void:
+    # 1. INITIALIZE CONFIGURATION
+    initConfig()
+    
+    PORT = getPort()
+    DATA_DIR = getDataDir()
+    
+    LOG info "[CONFIG] Environment: {config.nodeEnv}, Log Level: {config.logLevel}"
+    LOG info "[APP] SmartScraper v{VERSION} starting..."
+    
+    # 2. ENSURE DATA DIRECTORIES
+    await fs.mkdir("{DATA_DIR}/logs", { recursive: true })
+    
+    # 3. VALIDATE CHROMIUM EXECUTABLE
+    execPath = getExecutablePath()
+    TRY:
+        await fs.access(execPath)
+        LOG info "[CHROMIUM] Found at: {execPath}"
+    CATCH:
+        LOG warn "[WARNING] Chromium executable not found at: {execPath}"
+    
+    # 4. LOG EXTENSION CONFIG
+    extensionPaths = getExtensionPaths()
+    IF extensionPaths.length > 0:
+        LOG info "[CHROMIUM] Extensions: {extensionPaths.join(', ')}"
+    
+    # 5. CREATE ADAPTERS
+    browserAdapter = new PuppeteerBrowserAdapter()
+    
+    # 6. INITIALIZE ENGINE
+    initializeEngine(
+        browserAdapter,
+        new OpenRouterLlmAdapter(),
+        new TwoCaptchaAdapter(),
+        knownSitesAdapter
+    )
+    
+    # 7. CLEANUP OLD LOGS
+    await cleanupOldLogs()
+    
+    # Schedule daily cleanup
+    setInterval(cleanupOldLogs, 24 * 60 * 60 * 1000)
+    
+    # 8. START SERVER
+    LOG info "[SERVER] Starting on port {PORT}"
+    
+    serve({
+        fetch: app.fetch,
+        port: PORT,
+        hostname: '0.0.0.0'
+    }, (info) => {
+        LOG info "[SERVER] Running at http://0.0.0.0:{info.port}"
+    })
+
+
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
+
+main().catch((error) => {
+    LOG error "[FATAL] Startup failed:", error
+    process.exit(1)
+})
+
+
+# ============================================================================
+# STARTUP SEQUENCE
+# ============================================================================
+
+"""
+1. Load environment variables (.env, secrets.yaml)
+2. Validate configuration with Zod
+3. Create data directories
+4. Validate Chromium installation
+5. Create adapter instances:
+   - PuppeteerBrowserAdapter (browser automation)
+   - OpenRouterLlmAdapter (XPath discovery)
+   - TwoCaptchaAdapter (CAPTCHA solving)
+   - FsKnownSitesAdapter (site config storage)
+6. Initialize CoreScraperEngine with adapters
+7. Cleanup old log files
+8. Schedule daily log cleanup
+9. Start HTTP server on configured port
+
+Shutdown sequence:
+1. Receive SIGTERM or SIGINT
+2. Close all active browser sessions
+3. Flush log files
+4. Exit process
+"""

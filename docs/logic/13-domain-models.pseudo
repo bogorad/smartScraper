@@ -1,0 +1,236 @@
+# Domain Models
+# =============
+# All data structures used throughout the system
+
+# ============================================================================
+# SITE CONFIGURATION
+# ============================================================================
+
+STRUCT SiteConfig:
+    domainPattern: string           # e.g., "nypost.com" (normalized, no www)
+    xpathMainContent: string        # XPath to extract article content
+    lastSuccessfulScrapeTimestamp: string?  # ISO 8601 UTC
+    failureCountSinceLastSuccess: int       # Incremented on failure, reset on success
+    discoveredByLlm: boolean?       # True if XPath was found by LLM
+    siteSpecificHeaders: Map<string, string>?  # Custom HTTP headers
+    siteCleanupClasses: string[]?   # CSS classes to remove from content
+    userAgent: string?              # Override default UA for this site
+    needsProxy: ProxyModeValue?     # 'off' | 'datadome'
+
+
+# ============================================================================
+# SCRAPE REQUEST/RESPONSE
+# ============================================================================
+
+STRUCT ScrapeOptions:
+    outputType: OutputTypeValue?    # 'content_only' | 'markdown' | etc.
+    methodHint: MethodValue?        # Unused currently
+    proxyDetails: {server: string}? # Explicit proxy override
+    userAgentString: string?        # Override default UA
+    timeoutMs: int?                 # Navigation timeout (default 120000)
+    debugContextId: string?         # Debug correlation ID
+    xpathOverride: string?          # Skip discovery, use this XPath
+    debug: boolean?                 # Save HTML snapshot for debugging
+    disableDiscovery: boolean?      # Don't use LLM even if XPath fails
+
+STRUCT ScrapeResult:
+    success: boolean
+    method: MethodValue?            # 'puppeteer_stealth'
+    xpath: string?                  # XPath used for extraction
+    data: string | object?          # Extracted content (format depends on outputType)
+    rawHtmlSnapshotPath: string?    # Path to debug HTML file
+    errorType: ErrorTypeValue?      # Error category
+    error: string?                  # Error message
+    details: any?                   # Additional error details
+
+STRUCT ScrapeContext:
+    targetUrl: string
+    normalizedDomain: string        # e.g., "nypost.com"
+    siteConfig: SiteConfig?         # Loaded from storage
+    methodAttempted: MethodValue?
+    proxyDetails: {server: string}?
+    userAgentString: string?
+    debugContextId: string?
+
+
+# ============================================================================
+# ELEMENT ANALYSIS
+# ============================================================================
+
+STRUCT ElementDetails:
+    xpath: string                   # XPath of the element
+    textLength: int                 # Total text content length
+    linkDensity: float              # Ratio of link text to total text (0.0 - 1.0)
+    paragraphCount: int             # Number of <p> elements
+    headingCount: int               # Number of h1-h6 elements
+    hasMedia: boolean               # Contains img/video/audio
+    domDepth: int                   # Nesting depth from root
+    semanticScore: int              # 1 if article/main/section, else 0
+    unwantedTagScore: int           # 1 if nav/aside/footer/header, else 0
+
+
+# ============================================================================
+# LLM INTEGRATION
+# ============================================================================
+
+STRUCT LlmSuggestInput:
+    simplifiedDom: string           # Cleaned HTML structure
+    snippets: string[]              # Sample text from paragraphs
+    url: string                     # Page URL for context
+    previousFailureReason: string?  # Why last attempt failed
+
+STRUCT LlmXPathSuggestion:
+    xpath: string                   # Suggested XPath
+    explanation: string?            # LLM's reasoning (optional)
+
+
+# ============================================================================
+# CAPTCHA SOLVING
+# ============================================================================
+
+STRUCT CaptchaSolveInput:
+    pageId: string                  # Browser session ID
+    pageUrl: string                 # URL being scraped
+    captchaTypeHint: CaptchaTypeValue?  # 'generic' | 'datadome'
+    proxyDetails: {server: string}?
+    userAgentString: string?
+    siteKey: string?                # For reCAPTCHA/hCaptcha
+    captchaUrl: string?             # DataDome iframe URL
+
+STRUCT CaptchaSolveResult:
+    solved: boolean
+    updatedCookie: string?          # Cookie to set after solve
+    reason: string?                 # Error reason if failed
+
+STRUCT CaptchaDetectionResult:
+    type: CaptchaTypeValue          # 'none' | 'generic' | 'datadome'
+    captchaUrl: string?             # DataDome iframe src URL
+
+
+# ============================================================================
+# BROWSER SESSION
+# ============================================================================
+
+STRUCT PageSession:
+    page: PuppeteerPage             # Puppeteer page handle
+    browser: PuppeteerBrowser       # Browser instance (one per session)
+    userDataDir: string             # Temp profile directory path
+
+STRUCT LoadPageOptions:
+    timeout: int?                   # Navigation timeout ms
+    waitUntil: WaitUntilOption?     # 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2'
+    proxy: string?                  # Per-request proxy override
+
+
+# ============================================================================
+# STATISTICS & LOGGING
+# ============================================================================
+
+STRUCT Stats:
+    scrapeTotal: int                # All-time scrape count
+    failTotal: int                  # All-time failure count
+    todayDate: string               # UTC date (YYYY-MM-DD)
+    scrapeToday: int                # Today's scrape count
+    failToday: int                  # Today's failure count
+    domainCounts: Map<string, int>  # Scrapes per domain
+
+STRUCT LogEntry:
+    ts: string                      # ISO 8601 timestamp
+    domain: string                  # Normalized domain
+    url: string                     # Full URL
+    success: boolean
+    method: MethodValue?
+    xpath: string?
+    errorType: ErrorTypeValue?
+    error: string?
+    ms: int                         # Duration in milliseconds
+
+
+# ============================================================================
+# PROXY CONFIGURATION
+# ============================================================================
+
+STRUCT ParsedProxy:
+    host: string                    # Proxy hostname
+    port: int                       # Proxy port
+    username: string?               # Auth username
+    password: string?               # Auth password
+    protocol: ProxyProtocol         # 'http' | 'https' | 'socks4' | 'socks5'
+
+
+# ============================================================================
+# RATE LIMITING
+# ============================================================================
+
+STRUCT RateLimitEntry:
+    count: int                      # Requests in current window
+    resetTime: int                  # Unix timestamp when window resets
+
+STRUCT RateLimitOptions:
+    maxRequests: int                # Max requests per window
+    windowMs: int                   # Window duration in ms
+
+
+# ============================================================================
+# SSE (SERVER-SENT EVENTS)
+# ============================================================================
+
+STRUCT SseClient:
+    controller: ReadableStreamController
+    id: symbol                      # Unique client identifier
+    connectedAt: int                # Connection timestamp
+
+STRUCT WorkerStatusEvent:
+    active: int                     # Currently running scrapes
+    max: int                        # Maximum concurrent scrapes
+    activeUrls: string[]            # URLs being scraped
+
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+STRUCT Config:
+    # Server
+    port: int                       # Default: 5555
+    nodeEnv: 'development' | 'production'
+    
+    # Concurrency
+    concurrency: int                # 1-20, default: 1
+    
+    # Storage
+    dataDir: string                 # Default: './data'
+    logDir: string?                 # Default: '{dataDir}/logs'
+    
+    # LLM (OpenRouter)
+    openrouterApiKey: string
+    llmModel: string                # Default: 'meta-llama/llama-4-maverick:free'
+    llmTemperature: float           # 0.0 - 2.0, default: 0
+    llmHttpReferer: string
+    llmXTitle: string
+    
+    # Browser
+    executablePath: string          # Chrome/Chromium binary path
+    extensionPaths: string          # Comma-separated paths
+    proxyServer: string             # Global proxy (overridable per request)
+    
+    # CAPTCHA
+    twocaptchaApiKey: string
+    captchaDefaultTimeout: int      # Seconds
+    captchaPollingInterval: int     # Milliseconds
+    
+    # DataDome Proxy (residential)
+    datadomeProxyHost: string       # host:port
+    datadomeProxyLogin: string      # Base username
+    datadomeProxyPassword: string
+    
+    # Auth
+    apiToken: string                # UUID7 bearer token
+    
+    # Logging
+    logLevel: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'NONE'
+    saveHtmlOnSuccessNav: boolean
+    
+    # DOM
+    domStructureMaxTextLength: int
+    domStructureMinTextSizeToAnnotate: int

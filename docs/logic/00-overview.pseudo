@@ -1,0 +1,204 @@
+# SmartScraper - System Overview
+# ================================
+# Intelligent web scraping service with LLM-assisted XPath discovery
+# Architecture: Hexagonal (Ports & Adapters)
+
+# ============================================================================
+# SYSTEM ARCHITECTURE
+# ============================================================================
+
+                    +------------------+
+                    |   HTTP Clients   |
+                    +--------+---------+
+                             |
+                             v
+    +--------------------------------------------------------+
+    |                    HTTP Layer                           |
+    |  - API Routes (POST /api/scrape)                       |
+    |  - Dashboard Routes (HTMX + SSE)                       |
+    |  - Middleware (Auth, RateLimit, CSRF)                  |
+    +----------------------------+---------------------------+
+                                 |
+                                 v
+    +--------------------------------------------------------+
+    |                   Core Engine                           |
+    |  - CoreScraperEngine (orchestrator)                    |
+    |  - PQueue (concurrency control)                        |
+    |  - ContentScoringEngine                                |
+    +----------------------------+---------------------------+
+                                 |
+          +----------+-----------+-----------+----------+
+          |          |           |           |          |
+          v          v           v           v          v
+    +---------+ +---------+ +---------+ +---------+ +---------+
+    | Browser | |   LLM   | | CAPTCHA | |  Known  | |  Stats  |
+    |  Port   | |  Port   | |  Port   | |  Sites  | | Service |
+    +---------+ +---------+ +---------+ +---------+ +---------+
+          |          |           |           |          |
+          v          v           v           v          v
+    +---------+ +---------+ +---------+ +---------+ +---------+
+    |Puppeteer| |OpenRouter| |2Captcha | |   FS    | |  JSON   |
+    | Adapter | | Adapter | | Adapter | | Adapter | | Storage |
+    +---------+ +---------+ +---------+ +---------+ +---------+
+
+
+# ============================================================================
+# DATA FLOW: SCRAPE REQUEST
+# ============================================================================
+
+SCRAPE_FLOW:
+    INPUT: url, outputType, options
+    
+    1. HTTP Layer receives POST /api/scrape
+       - Validate Bearer token
+       - Check rate limit
+       - Validate JSON schema with Zod
+    
+    2. Engine.scrapeUrl(url, options)
+       - Check queue size (max 100)
+       - Add to PQueue (concurrency: configurable, default 1)
+       - Generate unique scrapeId
+    
+    3. _executeScrape()
+       a. Validate URL
+       b. Extract domain
+       c. Lookup site config from KnownSitesPort
+       d. Build proxy URL if needsProxy=datadome
+       e. BrowserPort.loadPage(url) - fresh browser per scrape
+       f. Detect CAPTCHA
+       g. If CAPTCHA: solve via CaptchaPort
+       h. If no cached XPath OR failures >= 2:
+          - Get page HTML
+          - Simplify DOM
+          - Extract text snippets
+          - LlmPort.suggestXPaths()
+          - Score each candidate
+          - Pick best (score >= 0.7, length >= 200)
+       i. Extract content via XPath
+       j. Transform output (text, markdown, html, etc.)
+       k. Record stats + log
+       l. Cleanup: close page + browser + delete temp profile
+    
+    4. Return ScrapeResult
+       - success: boolean
+       - method: 'puppeteer_stealth'
+       - xpath: string
+       - data: extracted content
+       - OR errorType + error message
+
+
+# ============================================================================
+# KEY CONSTANTS
+# ============================================================================
+
+CONSTANTS:
+    METHODS:
+        CURL = 'curl'
+        PUPPETEER_STEALTH = 'puppeteer_stealth'
+        PUPPETEER_CAPTCHA = 'puppeteer_captcha'
+    
+    OUTPUT_TYPES:
+        CONTENT_ONLY = 'content_only'     # Plain text
+        MARKDOWN = 'markdown'             # Converted to markdown
+        CLEANED_HTML = 'cleaned_html'     # Sanitized HTML
+        FULL_HTML = 'full_html'           # Raw page HTML
+        METADATA_ONLY = 'metadata_only'   # XPath + content length
+    
+    ERROR_TYPES:
+        NETWORK = 'NETWORK'
+        CAPTCHA = 'CAPTCHA'
+        LLM = 'LLM'
+        CONFIGURATION = 'CONFIGURATION'
+        EXTRACTION = 'EXTRACTION'
+        UNKNOWN = 'UNKNOWN'
+    
+    CAPTCHA_TYPES:
+        NONE = 'none'
+        GENERIC = 'generic'      # reCAPTCHA, hCaptcha, Turnstile
+        DATADOME = 'datadome'    # DataDome slider
+    
+    PROXY_MODES:
+        OFF = 'off'
+        DATADOME = 'datadome'    # Use residential proxy for DataDome sites
+    
+    SCORING:
+        MIN_SCORE_THRESHOLD = 0.7
+        MIN_CONTENT_CHARS = 200
+    
+    DEFAULTS:
+        TIMEOUT_MS = 120000
+        USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/142.0.0.0'
+        VIEWPORT_WIDTH = 1280
+        VIEWPORT_HEIGHT = 720
+        MAX_REDISCOVERY_FAILURES = 2
+        LOG_RETENTION_DAYS = 7
+        PROXY_SESSION_MINUTES = 2
+
+
+# ============================================================================
+# FILE STRUCTURE
+# ============================================================================
+
+src/
+    index.ts              # Application entry point
+    config.ts             # Centralized configuration (Zod validated)
+    constants.ts          # Constants and enums
+    
+    core/
+        engine.ts         # CoreScraperEngine (main orchestrator)
+        scoring.ts        # Content quality scoring
+    
+    ports/
+        browser.ts        # BrowserPort interface
+        llm.ts            # LlmPort interface
+        captcha.ts        # CaptchaPort interface
+        known-sites.ts    # KnownSitesPort interface
+    
+    adapters/
+        puppeteer-browser.ts    # Puppeteer implementation
+        openrouter-llm.ts       # OpenRouter API
+        twocaptcha.ts           # 2Captcha API
+        fs-known-sites.ts       # JSONC file storage
+    
+    routes/
+        api/scrape.ts           # POST /api/scrape
+        dashboard/
+            index.tsx           # Dashboard home + SSE
+            sites.tsx           # Site configuration CRUD
+            stats.tsx           # Statistics view
+            login.tsx           # Login page
+    
+    middleware/
+        auth.ts           # Bearer token + session auth
+        rate-limit.ts     # In-memory rate limiting
+        csrf.ts           # CSRF protection for dashboard
+    
+    services/
+        stats-storage.ts  # stats.json read/write
+        log-storage.ts    # JSONL log files
+    
+    utils/
+        url.ts            # URL parsing
+        dom.ts            # DOM simplification
+        html-cleaner.ts   # HTML sanitization + markdown
+        xpath-parser.ts   # Parse LLM XPath responses
+        date.ts           # UTC date helpers
+        proxy.ts          # Proxy URL building
+        logger.ts         # Structured logging
+        error-sanitizer.ts # Safe error messages
+    
+    domain/
+        models.ts         # Domain types (SiteConfig, ScrapeResult, etc.)
+    
+    components/
+        layout.tsx        # HTML layout wrapper
+        site-row.tsx      # Site table row
+        site-form.tsx     # Site edit form
+        stats-card.tsx    # Stats card component
+        test-form.tsx     # Scrape test form
+
+data/
+    sites.jsonc           # Site configurations (JSONC with comments)
+    stats.json            # Aggregate statistics
+    logs/
+        YYYY-MM-DD.jsonl  # Daily scrape logs (JSON Lines)

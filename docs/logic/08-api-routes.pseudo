@@ -1,0 +1,192 @@
+# HTTP API Routes
+# ================
+# REST API endpoints for scraping
+
+# ============================================================================
+# POST /api/scrape
+# ============================================================================
+
+ROUTE POST /api/scrape:
+    MIDDLEWARE:
+        - rateLimitMiddleware({ maxRequests: 10, windowMs: 60000 })  # 10 req/min
+        - apiAuthMiddleware  # Bearer token
+    
+    REQUEST_SCHEMA (Zod):
+        url: string.url()                     # Required, valid URL
+        outputType: enum[
+            'content_only',
+            'markdown', 
+            'cleaned_html',
+            'full_html',
+            'metadata_only'
+        ].optional()
+        proxyServer: string.optional()        # Explicit proxy override
+        userAgent: string.optional()          # Custom User-Agent
+        timeoutMs: number.optional()          # Navigation timeout
+        xpath: string.optional()              # XPath override (skip discovery)
+        debug: boolean.optional()             # Save HTML snapshot
+    
+    HANDLER:
+        body = c.req.valid('json')
+        engine = getDefaultEngine()
+        
+        TRY:
+            result = await engine.scrapeUrl(body.url, {
+                outputType: body.outputType,
+                proxyDetails: body.proxyServer ? { server: body.proxyServer } : undefined,
+                userAgentString: body.userAgent,
+                timeoutMs: body.timeoutMs,
+                xpathOverride: body.xpath,
+                debug: body.debug
+            })
+            
+            RETURN c.json(result)
+        
+        CATCH error:
+            LOG error "Scrape failed:", error
+            RETURN c.json({
+                success: false,
+                error: sanitizeErrorForClient(error)
+            }, 500)
+    
+    RESPONSE (success):
+        {
+            "success": true,
+            "method": "puppeteer_stealth",
+            "xpath": "//article[@class='post-content']",
+            "data": "Article content text..."
+        }
+    
+    RESPONSE (failure):
+        {
+            "success": false,
+            "errorType": "CAPTCHA",
+            "error": "DataDome challenge detected, solving failed"
+        }
+
+
+# ============================================================================
+# GET /health
+# ============================================================================
+
+ROUTE GET /health:
+    HANDLER:
+        RETURN c.json({
+            status: 'alive',
+            version: VERSION,
+            timestamp: Date.now()
+        })
+
+
+# ============================================================================
+# GET /api/version
+# ============================================================================
+
+ROUTE GET /api/version:
+    HANDLER:
+        RETURN c.json({ version: VERSION })
+
+
+# ============================================================================
+# AUTHENTICATION MIDDLEWARE
+# ============================================================================
+
+apiAuthMiddleware = createMiddleware(async (c, next) => {
+    authHeader = c.req.header('Authorization')
+    token = authHeader?.replace('Bearer ', '')
+    apiToken = getConfiguredApiToken()
+    
+    IF NOT apiToken:
+        RETURN c.json({ error: 'API token not configured' }, 500)
+    
+    IF token != apiToken:
+        LOG warn "API authentication failed", {
+            ip: c.req.header('x-forwarded-for'),
+            userAgent: c.req.header('user-agent')?.slice(0, 100)
+        }
+        RETURN c.json({ error: 'Unauthorized' }, 401)
+    
+    await next()
+})
+
+
+# ============================================================================
+# RATE LIMITING MIDDLEWARE
+# ============================================================================
+
+FUNCTION rateLimitMiddleware(options: { maxRequests, windowMs }):
+    # In-memory rate limit store
+    store = new Map<string, RateLimitEntry>()
+    
+    # Cleanup expired entries every minute
+    setInterval(() => {
+        now = Date.now()
+        FOR [key, entry] IN store:
+            IF entry.resetTime < now:
+                store.delete(key)
+    }, 60000)
+    
+    RETURN createMiddleware(async (c, next) => {
+        # Identify client by token or IP
+        identifier = c.req.header('Authorization')?.replace('Bearer ', '') OR
+                    c.req.header('x-forwarded-for') OR
+                    'unknown'
+        
+        now = Date.now()
+        key = "{identifier}:{floor(now / windowMs)}"
+        
+        entry = store.get(key)
+        IF NOT entry:
+            store.set(key, { count: 1, resetTime: now + windowMs })
+        ELSE:
+            entry.count++
+        
+        currentEntry = store.get(key)
+        
+        IF currentEntry.count > maxRequests:
+            LOG warn "Rate limit exceeded", { identifier, count: currentEntry.count }
+            
+            retryAfter = ceil((currentEntry.resetTime - now) / 1000)
+            RETURN c.json({
+                error: 'Rate limit exceeded',
+                retryAfter
+            }, 429, {
+                'Retry-After': String(retryAfter),
+                'X-RateLimit-Limit': String(maxRequests),
+                'X-RateLimit-Remaining': '0',
+                'X-RateLimit-Reset': String(ceil(currentEntry.resetTime / 1000))
+            })
+        
+        # Add rate limit headers
+        c.header('X-RateLimit-Limit', String(maxRequests))
+        c.header('X-RateLimit-Remaining', String(max(0, maxRequests - currentEntry.count)))
+        c.header('X-RateLimit-Reset', String(ceil(currentEntry.resetTime / 1000)))
+        
+        await next()
+    })
+
+
+# ============================================================================
+# ERROR SANITIZATION
+# ============================================================================
+
+FUNCTION sanitizeErrorForClient(error: unknown) -> string:
+    """
+    Sanitize errors for client response.
+    Returns generic messages to avoid information disclosure.
+    """
+    
+    IF error instanceof Error:
+        message = error.message
+        
+        IF message.includes('Invalid URL'):
+            RETURN 'Invalid URL provided'
+        IF message.includes('timeout') OR message.includes('Timeout'):
+            RETURN 'Request timed out'
+        IF message.includes('CAPTCHA'):
+            RETURN 'CAPTCHA challenge failed'
+        IF message.includes('rate limit'):
+            RETURN 'Rate limit exceeded'
+    
+    # Default generic message
+    RETURN 'An error occurred while processing the request'

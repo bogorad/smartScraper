@@ -1,0 +1,220 @@
+# Configuration System
+# ====================
+# Centralized configuration with Zod validation
+
+# ============================================================================
+# CONFIGURATION LOADING
+# ============================================================================
+
+FUNCTION initConfig() -> Config:
+    # 1. Load .env file if exists
+    IF file_exists('.env'):
+        dotenv.config()
+    
+    # 2. Load secrets from YAML if available
+    secrets = loadSecretsFromYaml()
+    
+    # 3. Map environment variables (with legacy name support)
+    envVars = mapEnvVars(secrets)
+    
+    # 4. Parse and validate with Zod schema
+    config = ConfigSchema.parse(envVars)
+    
+    # 5. Cache config (singleton pattern)
+    STORE config globally
+    
+    RETURN config
+
+
+FUNCTION loadSecretsFromYaml() -> Map<string, string>:
+    secretsPath = 'secrets.yaml'
+    
+    IF NOT file_exists(secretsPath):
+        RETURN empty map
+    
+    TRY:
+        content = readFile(secretsPath)
+        data = YAML.parse(content)
+        
+        # Support two formats:
+        # Flat: { smart_scraper: "...", openrouter: "...", twocaptcha: "..." }
+        # Nested: { api_keys: { smart_scraper: "...", ... } }
+        
+        IF data.smart_scraper OR data.openrouter:
+            # Flat structure
+            RETURN {
+                api_token: data.smart_scraper,
+                openrouter_api_key: data.openrouter,
+                twocaptcha_api_key: data.twocaptcha,
+                datadome_proxy_host: data.datadome_proxy_host,
+                datadome_proxy_login: data.datadome_proxy_login,
+                datadome_proxy_password: data.datadome_proxy_password
+            }
+        ELSE IF data.api_keys:
+            # Legacy nested structure
+            RETURN {
+                api_token: data.api_keys.smart_scraper,
+                openrouter_api_key: data.api_keys.openrouter,
+                twocaptcha_api_key: data.api_keys.twocaptcha,
+                ...
+            }
+    CATCH error:
+        LOG warning "Failed to load secrets.yaml"
+        RETURN empty map
+
+
+FUNCTION mapEnvVars(secrets) -> Map<string, string?>:
+    # Check DEBUG mode override
+    debugMode = env.DEBUG == 'true' OR env.DEBUG == '1'
+    effectiveLogLevel = debugMode ? 'DEBUG' : env.LOG_LEVEL
+    
+    RETURN {
+        # Server
+        port: env.PORT,
+        nodeEnv: env.NODE_ENV,
+        
+        # Concurrency
+        concurrency: env.CONCURRENCY,
+        
+        # Storage
+        dataDir: env.DATA_DIR,
+        logDir: env.LOG_DIR,
+        
+        # LLM (priority: env > secrets)
+        openrouterApiKey: env.OPENROUTER_API_KEY OR env.OPENROUTER OR secrets.openrouter_api_key,
+        llmModel: env.LLM_MODEL,
+        llmTemperature: env.LLM_TEMPERATURE,
+        
+        # Browser (support legacy names)
+        executablePath: env.EXECUTABLE_PATH OR env.PUPPETEER_EXECUTABLE_PATH,
+        extensionPaths: env.EXTENSION_PATHS,
+        proxyServer: env.PROXY_SERVER OR env.HTTP_PROXY,
+        
+        # CAPTCHA
+        twocaptchaApiKey: env.TWOCAPTCHA_API_KEY OR env.TWOCAPTCHA OR secrets.twocaptcha_api_key,
+        captchaDefaultTimeout: env.CAPTCHA_DEFAULT_TIMEOUT,
+        captchaPollingInterval: env.CAPTCHA_POLLING_INTERVAL,
+        
+        # DataDome Proxy
+        datadomeProxyHost: env.DATADOME_PROXY_HOST,
+        datadomeProxyLogin: env.DATADOME_PROXY_LOGIN,
+        datadomeProxyPassword: env.DATADOME_PROXY_PASSWORD,
+        
+        # Auth
+        apiToken: env.API_TOKEN OR env.SMART_SCRAPER OR secrets.api_token,
+        
+        # Logging
+        logLevel: effectiveLogLevel,
+        ...
+    }
+
+
+# ============================================================================
+# ZOD SCHEMA
+# ============================================================================
+
+ConfigSchema = z.object({
+    # Server
+    port: z.coerce.number().min(1).max(65535).default(5555),
+    nodeEnv: z.enum(['development', 'production']).default('production'),
+    
+    # Concurrency
+    concurrency: z.coerce.number().min(1).max(20).default(1),
+    
+    # Storage
+    dataDir: z.string().default('./data'),
+    logDir: z.string().optional(),
+    
+    # LLM
+    openrouterApiKey: z.string().default(''),
+    llmModel: z.string().default('meta-llama/llama-4-maverick:free'),
+    llmTemperature: z.coerce.number().min(0).max(2).default(0),
+    llmHttpReferer: z.string().default('https://github.com/bogorad/smartScraper'),
+    llmXTitle: z.string().default('SmartScraper'),
+    
+    # Browser
+    executablePath: z.string().default('/usr/lib/chromium/chromium'),
+    extensionPaths: z.string().default(''),
+    proxyServer: z.string().default(''),
+    
+    # CAPTCHA
+    twocaptchaApiKey: z.string().default(''),
+    captchaDefaultTimeout: z.coerce.number().default(120),
+    captchaPollingInterval: z.coerce.number().default(5000),
+    
+    # DataDome Proxy
+    datadomeProxyHost: z.string().default(''),
+    datadomeProxyLogin: z.string().default(''),
+    datadomeProxyPassword: z.string().default(''),
+    
+    # Auth
+    apiToken: z.string().default(''),
+    
+    # Logging
+    logLevel: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR', 'NONE']).default('INFO'),
+    saveHtmlOnSuccessNav: z.boolean().default(false),
+    
+    # DOM
+    domStructureMaxTextLength: z.coerce.number().default(15),
+    domStructureMinTextSizeToAnnotate: z.coerce.number().default(100)
+})
+
+
+# ============================================================================
+# GETTER FUNCTIONS
+# ============================================================================
+
+# All getters throw if config not initialized
+
+FUNCTION getConfig() -> Config:
+    IF config is null:
+        THROW "Config not initialized. Call initConfig() first."
+    RETURN config
+
+FUNCTION getPort() -> int:
+    RETURN getConfig().port
+
+FUNCTION getDataDir() -> string:
+    RETURN getConfig().dataDir
+
+FUNCTION getLogDir() -> string:
+    config = getConfig()
+    RETURN config.logDir OR path.join(config.dataDir, 'logs')
+
+FUNCTION getOpenrouterApiKey() -> string:
+    RETURN getConfig().openrouterApiKey
+
+FUNCTION getTwocaptchaApiKey() -> string:
+    RETURN getConfig().twocaptchaApiKey
+
+FUNCTION getApiToken() -> string | null:
+    token = getConfig().apiToken
+    RETURN token if not empty else null
+
+FUNCTION getExecutablePath() -> string:
+    RETURN getConfig().executablePath
+
+FUNCTION getExtensionPaths() -> string[]:
+    paths = getConfig().extensionPaths
+    IF empty:
+        RETURN []
+    RETURN paths.split(',').map(trim).filter(nonEmpty)
+
+FUNCTION getProxyServer() -> string:
+    RETURN getConfig().proxyServer
+
+FUNCTION getConcurrency() -> int:
+    RETURN getConfig().concurrency
+
+FUNCTION getDatadomeProxyHost() -> string:
+    RETURN getConfig().datadomeProxyHost
+
+FUNCTION getDatadomeProxyLogin() -> string:
+    RETURN getConfig().datadomeProxyLogin
+
+FUNCTION getDatadomeProxyPassword() -> string:
+    RETURN getConfig().datadomeProxyPassword
+
+FUNCTION isDebugMode() -> boolean:
+    # Can be called before config init (checks env directly)
+    RETURN env.DEBUG == 'true' OR env.DEBUG == '1'

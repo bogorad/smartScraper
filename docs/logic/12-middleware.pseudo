@@ -1,0 +1,266 @@
+# Middleware
+# ===========
+# Authentication, rate limiting, CSRF protection
+
+# ============================================================================
+# API AUTHENTICATION (Bearer Token)
+# ============================================================================
+
+CONST SESSION_COOKIE = 'ss_session'
+CONST SESSION_MAX_AGE = 86400  # 24 hours
+
+FUNCTION getConfiguredApiToken() -> string | null:
+    token = getApiToken()
+    RETURN token ? token : null
+
+FUNCTION getSessionSecret() -> string:
+    token = getConfiguredApiToken()
+    RETURN token ? sha256(token).slice(0, 32) : 'fallback-secret'
+
+FUNCTION hashToken(token: string) -> string:
+    RETURN sha256(token + getSessionSecret())
+
+
+# ============================================================================
+# API AUTH MIDDLEWARE
+# ============================================================================
+
+apiAuthMiddleware = createMiddleware(async (c, next) => {
+    """
+    Validates Bearer token for API requests.
+    Header: Authorization: Bearer <token>
+    """
+    
+    authHeader = c.req.header('Authorization')
+    token = authHeader?.replace('Bearer ', '')
+    apiToken = getConfiguredApiToken()
+    
+    IF NOT apiToken:
+        RETURN c.json({ error: 'API token not configured' }, 500)
+    
+    IF token != apiToken:
+        LOG warn "API authentication failed", {
+            ip: c.req.header('x-forwarded-for') OR 'unknown',
+            userAgent: c.req.header('user-agent')?.slice(0, 100)
+        }
+        RETURN c.json({ error: 'Unauthorized' }, 401)
+    
+    await next()
+})
+
+
+# ============================================================================
+# DASHBOARD AUTH MIDDLEWARE
+# ============================================================================
+
+dashboardAuthMiddleware = createMiddleware(async (c, next) => {
+    """
+    Validates session cookie for dashboard access.
+    Redirects to login page if invalid.
+    """
+    
+    sessionCookie = getCookie(c, SESSION_COOKIE)
+    apiToken = getConfiguredApiToken()
+    
+    IF NOT apiToken:
+        RETURN c.redirect('/login?error=config')
+    
+    expectedHash = hashToken(apiToken)
+    
+    IF sessionCookie != expectedHash:
+        IF sessionCookie:
+            LOG warn "Invalid session cookie presented", {
+                ip: c.req.header('x-forwarded-for'),
+                path: c.req.path
+            }
+        ELSE:
+            LOG info "No session cookie received", { path: c.req.path }
+        
+        path = c.req.path
+        RETURN c.redirect("/login?redirect={encodeURIComponent(path)}")
+    
+    await next()
+})
+
+
+# ============================================================================
+# SESSION MANAGEMENT
+# ============================================================================
+
+FUNCTION createSession(c: Context, token: string) -> void:
+    """
+    Creates session cookie after successful login.
+    """
+    hash = hashToken(token)
+    
+    # Adaptive security: secure=true only in production on non-localhost
+    hostname = c.req.header('host')?.split(':')[0] OR ''
+    isLocalhost = ['localhost', '127.0.0.1', '0.0.0.0'].includes(hostname)
+    isProduction = getNodeEnv() == 'production'
+    isSecure = isProduction AND NOT isLocalhost
+    
+    LOG info "Creating session. Secure: {isSecure}, Host: {hostname}"
+    
+    setCookie(c, SESSION_COOKIE, hash, {
+        httpOnly: true,
+        secure: isSecure,
+        maxAge: SESSION_MAX_AGE,
+        sameSite: 'Lax',
+        path: '/'
+    })
+
+FUNCTION validateToken(token: string) -> boolean:
+    """
+    Validates token against configured API token.
+    """
+    configuredToken = getConfiguredApiToken()
+    isValid = token == configuredToken
+    
+    IF NOT isValid AND token:
+        LOG warn "Token validation failed"
+    
+    RETURN isValid
+
+
+# ============================================================================
+# RATE LIMITING
+# ============================================================================
+
+STRUCT RateLimitEntry:
+    count: int
+    resetTime: int  # Unix timestamp
+
+# In-memory store (consider Redis for multi-instance)
+store = new Map<string, RateLimitEntry>()
+
+# Cleanup expired entries every minute
+setInterval(() => {
+    now = Date.now()
+    FOR [key, entry] IN store:
+        IF entry.resetTime < now:
+            store.delete(key)
+}, 60000)
+
+FUNCTION rateLimitMiddleware(options: { maxRequests, windowMs }) -> Middleware:
+    """
+    Rate limiting middleware factory.
+    Tracks requests per client within sliding window.
+    """
+    
+    { maxRequests, windowMs } = options
+    
+    RETURN createMiddleware(async (c, next) => {
+        # Identify client by token or IP
+        identifier = c.req.header('Authorization')?.replace('Bearer ', '') OR
+                    c.req.header('x-forwarded-for') OR
+                    'unknown'
+        
+        now = Date.now()
+        key = "{identifier}:{floor(now / windowMs)}"
+        
+        entry = store.get(key)
+        
+        IF NOT entry:
+            # First request in this window
+            store.set(key, { count: 1, resetTime: now + windowMs })
+        ELSE:
+            entry.count++
+        
+        currentEntry = store.get(key)
+        
+        IF currentEntry.count > maxRequests:
+            LOG warn "Rate limit exceeded", {
+                identifier: identifier.slice(0, 20),
+                count: currentEntry.count,
+                maxRequests
+            }
+            
+            retryAfter = ceil((currentEntry.resetTime - now) / 1000)
+            
+            RETURN c.json({
+                error: 'Rate limit exceeded',
+                retryAfter
+            }, 429, {
+                'Retry-After': String(retryAfter),
+                'X-RateLimit-Limit': String(maxRequests),
+                'X-RateLimit-Remaining': '0',
+                'X-RateLimit-Reset': String(ceil(currentEntry.resetTime / 1000))
+            })
+        
+        # Add rate limit headers
+        c.header('X-RateLimit-Limit', String(maxRequests))
+        c.header('X-RateLimit-Remaining', String(max(0, maxRequests - currentEntry.count)))
+        c.header('X-RateLimit-Reset', String(ceil(currentEntry.resetTime / 1000)))
+        
+        await next()
+    })
+
+
+# ============================================================================
+# CSRF PROTECTION
+# ============================================================================
+
+CONST CSRF_COOKIE = 'csrf_token'
+CONST CSRF_HEADER = 'X-CSRF-Token'
+
+csrfMiddleware = createMiddleware(async (c, next) => {
+    """
+    CSRF protection for dashboard.
+    - GET: generates token, sets cookie
+    - POST/PUT/DELETE: validates X-CSRF-Token header matches cookie
+    """
+    
+    IF c.req.method == 'GET':
+        # Generate new token for GET requests
+        token = crypto.randomUUID()
+        setCookie(c, CSRF_COOKIE, token, {
+            httpOnly: false,  # Allow JavaScript access for HTMX
+            path: '/',
+            sameSite: 'Strict',
+            maxAge: 3600  # 1 hour
+        })
+        c.set('csrfToken', token)
+        await next()
+        RETURN
+    
+    # For non-GET requests, validate CSRF token
+    cookieToken = getCookie(c, CSRF_COOKIE)
+    headerToken = c.req.header(CSRF_HEADER)
+    
+    IF NOT cookieToken OR NOT headerToken OR cookieToken != headerToken:
+        LOG warn "CSRF token validation failed", {
+            hasCookie: !!cookieToken,
+            hasHeader: !!headerToken,
+            match: cookieToken == headerToken
+        }
+        RETURN c.json({ error: 'CSRF token validation failed' }, 403)
+    
+    await next()
+})
+
+FUNCTION getCsrfToken(c: Context) -> string | undefined:
+    """Get CSRF token for inclusion in forms/meta tags"""
+    RETURN c.get('csrfToken')
+
+
+# ============================================================================
+# RATE LIMIT CONFIGURATIONS
+# ============================================================================
+
+"""
+Default rate limits:
+
+API (/api/scrape):
+    - 10 requests per minute per client
+    - Identified by Authorization header or IP
+
+Dashboard:
+    - 60 requests per minute per client
+    - Identified by session cookie or IP
+
+Headers returned:
+    - X-RateLimit-Limit: Maximum requests in window
+    - X-RateLimit-Remaining: Requests remaining
+    - X-RateLimit-Reset: Unix timestamp when window resets
+    - Retry-After: Seconds until retry (when limited)
+"""

@@ -1,0 +1,345 @@
+# Utility Functions
+# ==================
+# Helper functions for URL, DOM, HTML processing
+
+# ============================================================================
+# URL UTILITIES
+# ============================================================================
+
+FUNCTION normalizeUrl(url: string) -> URL | null:
+    """
+    Parse URL string into URL object.
+    Returns null for invalid URLs.
+    """
+    TRY:
+        RETURN new URL(url)
+    CATCH:
+        RETURN null
+
+FUNCTION extractDomain(url: string) -> string | null:
+    """
+    Extract normalized domain from URL.
+    Removes www. prefix.
+    """
+    parsed = normalizeUrl(url)
+    IF NOT parsed:
+        RETURN null
+    RETURN parsed.hostname.replace(/^www\./, '')
+
+FUNCTION isValidUrl(url: string) -> boolean:
+    """
+    Check if URL is valid and uses HTTP/HTTPS protocol.
+    """
+    parsed = normalizeUrl(url)
+    RETURN parsed != null AND (parsed.protocol == 'http:' OR parsed.protocol == 'https:')
+
+
+# ============================================================================
+# DOM SIMPLIFICATION
+# ============================================================================
+
+CONST REMOVE_TAGS = ['script', 'style', 'noscript', 'svg', 'iframe']
+CONST REMOVE_CLASSES = ['ad', 'advertisement', 'social-share', 'related-posts', 
+                         'sidebar', 'menu', 'nav', 'comment']
+CONST MAX_TEXT_LENGTH = 50
+CONST MAX_DOM_LENGTH = 8000
+CONST MAX_HTML_SIZE = 1024 * 1024  # 1MB limit
+
+FUNCTION simplifyDom(html: string) -> string:
+    """
+    Simplify HTML for LLM consumption.
+    Removes noise, truncates text, limits overall size.
+    """
+    
+    # Limit input size (ReDoS prevention)
+    IF html.length > MAX_HTML_SIZE:
+        html = html.slice(0, MAX_HTML_SIZE)
+    
+    simplified = html
+    
+    # Remove script/style/etc tags
+    FOR tag IN REMOVE_TAGS:
+        regex = new RegExp("<{tag}[^>]*>.*?</{tag}>", 'gis')
+        simplified = simplified.replace(regex, '')
+        selfClosing = new RegExp("<{tag}[^>]*/?>", 'gi')
+        simplified = simplified.replace(selfClosing, '')
+    
+    # Remove HTML comments
+    simplified = simplified.replace(/<!--[\s\S]*?-->/g, '')
+    
+    # Remove elements with unwanted classes
+    FOR cls IN REMOVE_CLASSES:
+        regex = new RegExp('<[^>]+class="[^"]*\\b{cls}\\b[^"]*"[^>]*>.*?</[^>]+>', 'gis')
+        simplified = simplified.replace(regex, '<!-- removed -->')
+    
+    # Truncate long text content
+    simplified = simplified.replace(/>([^<]{50,})</g, (_, text) => {
+        truncated = text.trim().slice(0, MAX_TEXT_LENGTH).trim()
+        RETURN ">{truncated}...<"
+    })
+    
+    # Collapse whitespace
+    simplified = simplified.replace(/\s+/g, ' ')
+    simplified = simplified.replace(/>\s+</g, '><')
+    
+    # Limit total length
+    IF simplified.length > MAX_DOM_LENGTH:
+        simplified = simplified.slice(0, MAX_DOM_LENGTH) + '\n<!-- truncated -->'
+    
+    RETURN simplified.trim()
+
+FUNCTION extractSnippets(html: string, maxSnippets = 3, maxCharsPerSnippet = 150) -> string[]:
+    """
+    Extract sample text snippets from paragraphs.
+    Used as context for LLM XPath discovery.
+    """
+    snippets = []
+    paragraphRegex = /<p[^>]*>([^<]{100,})<\/p>/gi
+    
+    WHILE (match = paragraphRegex.exec(html)) AND snippets.length < maxSnippets:
+        text = match[1].trim()
+        
+        # Skip if parent has unwanted class
+        parentMatch = html.slice(max(0, match.index - 200), match.index)
+        hasUnwantedParent = REMOVE_CLASSES.some(cls => 
+            parentMatch.includes("class=\"{cls}") OR parentMatch.includes("class='{cls}")
+        )
+        IF hasUnwantedParent:
+            CONTINUE
+        
+        # Truncate long snippets
+        IF text.length > maxCharsPerSnippet:
+            cutoff = text.lastIndexOf(' ', maxCharsPerSnippet)
+            text = text.slice(0, cutoff > 0 ? cutoff : maxCharsPerSnippet) + '...'
+        
+        # Avoid duplicates
+        IF NOT snippets.includes(text):
+            snippets.push(text)
+    
+    RETURN snippets
+
+
+# ============================================================================
+# HTML CLEANING
+# ============================================================================
+
+CONST ALLOWED_TAGS = ['b', 'i', 'em', 'strong', 'p', 'div', 'span', 'a', 'img', 'br', 'hr',
+                       'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote',
+                       'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+                       'figure', 'figcaption', 'article', 'section']
+
+CONST ALLOWED_ATTRIBUTES = {
+    a: ['href'],
+    img: ['src', 'alt']
+}
+
+CONST DEFAULT_CLASSES_TO_REMOVE = [
+    'ad', 'ads', 'advert', 'advertisement', 'advertising',
+    'social', 'social-share', 'share', 'sharebox', 'sharing',
+    'related', 'related-posts', 'related-articles',
+    'sidebar', 'menu', 'nav', 'navigation',
+    'comment', 'comments',
+    'newsletter', 'subscribe', 'signup',
+    'promo', 'promotion', 'sponsored',
+    'popup', 'modal', 'overlay',
+    'cookie', 'consent',
+    'footer', 'header'
+]
+
+CONST SELECTORS_TO_REMOVE = [
+    '//button', '//form', '//input', '//select', '//textarea',
+    '//nav', '//aside', '//footer',
+    '//*[@role="navigation"]', '//*[@role="banner"]',
+    '//*[@role="contentinfo"]', '//*[@role="complementary"]',
+    '//*[@aria-hidden="true"]'
+]
+
+FUNCTION cleanHtml(html: string, options: CleanerOptions = {}) -> string:
+    """
+    Sanitize and clean HTML content.
+    Removes ads, navigation, forms, etc.
+    """
+    
+    IF NOT html OR NOT html.trim():
+        RETURN ''
+    
+    # Decode HTML entities
+    decoded = he.decode(html)
+    
+    # Sanitize with allowed tags only
+    allowedTags = options.keepTags ? [...ALLOWED_TAGS, ...options.keepTags] : ALLOWED_TAGS
+    sanitized = sanitizeHtml(decoded, {
+        allowedTags,
+        allowedAttributes: ALLOWED_ATTRIBUTES,
+        allowedSchemes: ['http', 'https'],
+        disallowedTagsMode: 'discard'
+    })
+    
+    # Build selectors to remove
+    classesToRemove = [...DEFAULT_CLASSES_TO_REMOVE, ...(options.siteCleanupClasses OR [])]
+    selectorsToRemove = [...SELECTORS_TO_REMOVE, ...(options.additionalSelectors OR [])]
+    classSelectors = classesToRemove.map(cls => "//*[contains(@class, \"{cls}\")]")
+    allSelectors = [...classSelectors, ...selectorsToRemove]
+    
+    # Parse and remove elements
+    document = parseHTML("<html><body>{sanitized}</body></html>")
+    
+    FOR selector IN allSelectors:
+        TRY:
+            nodes = xpath.select(selector, document)
+            FOR node IN nodes:
+                IF node.parentNode:
+                    node.parentNode.removeChild(node)
+        CATCH:
+            # Invalid selector, skip
+            PASS
+    
+    # Extract body content
+    body = document.querySelector('body')
+    result = body ? body.innerHTML : ''
+    
+    RETURN collapseWhitespace(result)
+
+FUNCTION extractText(html: string, options: CleanerOptions = {}) -> string:
+    """
+    Extract plain text from HTML.
+    """
+    cleaned = cleanHtml(html, options)
+    document = parseHTML("<html><body>{cleaned}</body></html>")
+    text = document.body?.textContent OR ''
+    RETURN text.replace(/\s+/g, ' ').trim()
+
+FUNCTION toMarkdown(html: string, options: CleanerOptions = {}) -> string:
+    """
+    Convert HTML to Markdown.
+    """
+    cleaned = cleanHtml(html, options)
+    
+    turndown = new TurndownService({
+        headingStyle: 'atx',
+        codeBlockStyle: 'fenced',
+        bulletListMarker: '-'
+    })
+    
+    turndown.remove(['script', 'style', 'nav', 'aside', 'footer', 'header', 'form'])
+    
+    # Remove empty divs/spans
+    turndown.addRule('removeEmptyElements', {
+        filter: (node) => {
+            RETURN (node.nodeName == 'DIV' OR node.nodeName == 'SPAN') AND
+                   NOT node.textContent?.trim() AND
+                   NOT node.querySelector('img, video, audio, iframe')
+        },
+        replacement: () => ''
+    })
+    
+    markdown = turndown.turndown(cleaned)
+    
+    RETURN markdown.replace(/\n{3,}/g, '\n\n').trim()
+
+
+# ============================================================================
+# DATE UTILITIES
+# ============================================================================
+
+FUNCTION utcToday() -> string:
+    """Returns UTC date as YYYY-MM-DD"""
+    RETURN new Date().toISOString().slice(0, 10)
+
+FUNCTION utcNow() -> string:
+    """Returns current UTC timestamp as ISO 8601"""
+    RETURN new Date().toISOString()
+
+FUNCTION isOlderThanDays(dateStr: string, days: int) -> boolean:
+    """Check if date string is older than N days"""
+    date = new Date(dateStr)
+    cutoff = new Date()
+    cutoff.setUTCDate(cutoff.getUTCDate() - days)
+    RETURN date < cutoff
+
+FUNCTION formatDuration(ms: int) -> string:
+    """Format milliseconds as human-readable duration"""
+    IF ms < 1000:
+        RETURN "{ms}ms"
+    RETURN "{(ms / 1000).toFixed(1)}s"
+
+FUNCTION formatNumber(n: int) -> string:
+    """Format number with locale separators"""
+    RETURN n.toLocaleString('en-US')
+
+
+# ============================================================================
+# PROXY UTILITIES
+# ============================================================================
+
+FUNCTION parseProxyUrl(url: string) -> ParsedProxy | null:
+    """
+    Parse proxy URL into components.
+    Format: protocol://[user:pass@]host:port
+    """
+    TRY:
+        parsed = new URL(url)
+        protocol = parsed.protocol.replace(':', '')
+        
+        IF protocol NOT IN ['http', 'https', 'socks4', 'socks5']:
+            LOG warn "Invalid proxy protocol", { protocol }
+            RETURN null
+        
+        RETURN {
+            protocol,
+            host: parsed.hostname,
+            port: parseInt(parsed.port, 10) OR 8080,
+            username: parsed.username OR undefined,
+            password: parsed.password OR undefined
+        }
+    CATCH error:
+        LOG error "Failed to parse proxy URL", { error }
+        RETURN null
+
+FUNCTION buildSessionProxyUrl(
+    host: string,
+    login: string,
+    password: string,
+    sessionMinutes: int = 2
+) -> string:
+    """
+    Build session-specific proxy URL for 2Captcha residential proxy.
+    Format: http://user-session-{UUID}-sessTime-{minutes}:password@host
+    """
+    sessionId = crypto.randomUUID().slice(0, 8)  # e.g., "a1b2c3d4"
+    
+    # Strip any existing session params from login
+    baseLogin = login.split('-session-')[0]
+    
+    # Build username with session params
+    sessionLogin = "{baseLogin}-session-{sessionId}-sessTime-{sessionMinutes}"
+    
+    # URL-encode credentials
+    encodedLogin = encodeURIComponent(sessionLogin)
+    encodedPassword = encodeURIComponent(password)
+    
+    # Construct full URL
+    proxyUrl = "http://{encodedLogin}:{encodedPassword}@{host}"
+    
+    LOG debug "Built session proxy URL", {
+        sessionId,
+        stickyMinutes: sessionMinutes,
+        baseLogin,
+        host
+    }
+    
+    RETURN proxyUrl
+
+
+# ============================================================================
+# HTML ESCAPING
+# ============================================================================
+
+FUNCTION escapeHtml(text: string) -> string:
+    """Escape HTML special characters for safe rendering"""
+    RETURN text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;')
