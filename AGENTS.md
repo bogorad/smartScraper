@@ -241,9 +241,9 @@ bd sync               # Commit and push changes
 ### Workflow Pattern
 
 1. **Start**: Run `bd ready` to find actionable work
-2. **Claim**: Use `bd update <id> --status=in_progress` and immediately `bd sync --flush-only` to that `bv` can monitor
+2. **Claim**: Use `bd update <id> --status=in_progress` and immediately `bd sync --flush-only` so that `bv` can monitor
 3. **Work**: Implement the task
-4. **Complete**: Use `bd close <id>` and immediately `bd sync --flush-only` to that `bv` can monitor
+4. **Complete**: Use `bd close <id>` and immediately `bd sync --flush-only` so that `bv` can monitor
 5. **Sync**: Always run `bd sync` at session end
 
 ### Key Concepts
