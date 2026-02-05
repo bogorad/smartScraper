@@ -86,7 +86,7 @@
   {
     "domainPattern": "ft.com",
     "xpathMainContent": "//div[@class='article__content']",
-    "lastSuccessfulScrapeTimestamp": "2025-12-07T14:03:10.708Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T15:43:04.168Z",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -128,7 +128,7 @@
     "domainPattern": "nypost.com",
     "xpathMainContent": "//div[@class='single__content entry-content m-bottom']",
     "failureCountSinceLastSuccess": 0,
-    "lastSuccessfulScrapeTimestamp": "2026-01-09T17:40:32.827Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T15:40:05.284Z",
     "siteCleanupClasses": [
       "featured-image__wrapper",
       "inline-module--more",
@@ -138,7 +138,7 @@
   {
     "domainPattern": "nytimes.com",
     "xpathMainContent": "//section[@name='articleBody']",
-    "lastSuccessfulScrapeTimestamp": "2025-12-07T14:03:27.183Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T15:41:43.117Z",
     "failureCountSinceLastSuccess": 0
   },
   {
@@ -255,7 +255,7 @@
     "domainPattern": "unherd.com",
     "xpathMainContent": "//article[contains(@class, 'post-')]",
     "lastSuccessfulScrapeTimestamp": "2025-12-07T14:02:17.728Z",
-    "failureCountSinceLastSuccess": 0,
+    "failureCountSinceLastSuccess": 2,
     "discoveredByLlm": true
   },
   {

@@ -6,25 +6,18 @@
 
 set -o pipefail
 
-# Configuration
-PROXY="${SMART_SCRAPER_PROXY:-socks5://r5s.bruc:1080}"
+# Configuration - use empty string as default for PROXY (no proxy by default)
+PROXY="${SMART_SCRAPER_PROXY:-}"
 SERVER="${SMART_SCRAPER_SERVER:-http://localhost:5555}"
 TIMEOUT="${SMART_SCRAPER_TIMEOUT:-120}"
 URLS_FILE="testing/urls_for_testing.txt"
 
-# Decrypt secrets
-SECRETS=$(sops decrypt secrets.yaml --output-type=json 2>/dev/null)
-if [[ $? -ne 0 ]]; then
-    echo "Error: Failed to decrypt secrets.yaml"
+# Decrypt secrets using sops -d | yq
+SMART_SCRAPER=$(sops -d secrets.yaml | yq -r '.smart_scraper')
+if [[ -z "$SMART_SCRAPER" ]]; then
+    echo "Error: Failed to get smart_scraper token from secrets.yaml"
     exit 1
 fi
-
-if [[ -z "$SECRETS" || "$SECRETS" == "{}" ]]; then
-    echo "Error: secrets.yaml decrypted but is empty"
-    exit 1
-fi
-
-eval "$(echo "$SECRETS" | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
 
 # Check server health
 if ! curl -sf "$SERVER/health" > /dev/null 2>&1; then
@@ -57,22 +50,66 @@ echo "Server: $SERVER"
 echo "Timeout: ${TIMEOUT}s"
 echo ""
 
-# Function to scrape a URL and return result
-scrape_url() {
+# Build curl args
+build_curl_args() {
     local url="$1"
-    local label="$2"
-    local start_time=$(date +%s.%N)
-    
-    local response
-    response=$(curl -sf --proxy "$PROXY" -X POST "$SERVER/api/scrape" \
-        -H "Authorization: Bearer $SMART_SCRAPER" \
-        -H "Content-Type: application/json" \
-        -d "{\"url\": \"$url\", \"outputType\": \"metadata_only\"}" \
-        --max-time "$TIMEOUT" 2>&1)
-    local exit_code=$?
-    
-    local end_time=$(date +%s.%N)
-    local duration=$(echo "$end_time - $start_time" | bc)
+    echo "-sf -X POST $SERVER/api/scrape -H 'Authorization: Bearer $SMART_SCRAPER' -H 'Content-Type: application/json' -d '{\"url\": \"$url\", \"outputType\": \"metadata_only\"}' --max-time $TIMEOUT"
+}
+
+# Temp files for output
+OUT1=$(mktemp)
+OUT2=$(mktemp)
+TIME1=$(mktemp)
+TIME2=$(mktemp)
+
+echo "Starting concurrent scrapes..."
+echo ""
+
+# Build curl commands
+CURL_BASE=(-sf -X POST "$SERVER/api/scrape"
+    -H "Authorization: Bearer $SMART_SCRAPER"
+    -H "Content-Type: application/json"
+    --max-time "$TIMEOUT")
+
+if [[ -n "$PROXY" ]]; then
+    CURL_BASE+=(--proxy "$PROXY")
+fi
+
+# Launch both in parallel using process substitution
+{
+    start=$(date +%s)
+    curl "${CURL_BASE[@]}" -d "{\"url\": \"$URL1\", \"outputType\": \"metadata_only\"}" > "$OUT1" 2>&1
+    echo $? > "$TIME1.exit"
+    echo $(($(date +%s) - start)) > "$TIME1"
+} &
+PID1=$!
+
+{
+    start=$(date +%s)
+    curl "${CURL_BASE[@]}" -d "{\"url\": \"$URL2\", \"outputType\": \"metadata_only\"}" > "$OUT2" 2>&1
+    echo $? > "$TIME2.exit"
+    echo $(($(date +%s) - start)) > "$TIME2"
+} &
+PID2=$!
+
+# Wait for both
+wait $PID1
+wait $PID2
+
+# Read results
+EXIT1=$(cat "$TIME1.exit")
+EXIT2=$(cat "$TIME2.exit")
+DUR1=$(cat "$TIME1")
+DUR2=$(cat "$TIME2")
+RESP1=$(cat "$OUT1")
+RESP2=$(cat "$OUT2")
+
+# Parse results
+parse_result() {
+    local label="$1"
+    local exit_code="$2"
+    local response="$3"
+    local duration="$4"
     
     if [[ $exit_code -ne 0 ]]; then
         echo "$label: FAILED (curl exit $exit_code) [${duration}s]"
@@ -91,44 +128,26 @@ scrape_url() {
     fi
 }
 
-# Run both scrapes concurrently in background
-echo "Starting concurrent scrapes..."
-echo ""
-
-# Temp files for results
-RESULT1=$(mktemp)
-RESULT2=$(mktemp)
-
-# Launch both in parallel
-(scrape_url "$URL1" "URL1"; echo $? > "$RESULT1") &
-PID1=$!
-
-(scrape_url "$URL2" "URL2"; echo $? > "$RESULT2") &
-PID2=$!
-
-# Wait for both to complete
-wait $PID1
-wait $PID2
-
-# Read exit codes
-EXIT1=$(cat "$RESULT1")
-EXIT2=$(cat "$RESULT2")
+parse_result "URL1" "$EXIT1" "$RESP1" "$DUR1"
+R1=$?
+parse_result "URL2" "$EXIT2" "$RESP2" "$DUR2"
+R2=$?
 
 # Cleanup
-rm -f "$RESULT1" "$RESULT2"
+rm -f "$OUT1" "$OUT2" "$TIME1" "$TIME2" "$TIME1.exit" "$TIME2.exit"
 
 echo ""
 echo "=== Results ==="
 
 FAILED=0
-if [[ "$EXIT1" != "0" ]]; then
+if [[ $R1 -ne 0 ]]; then
     echo "URL1: FAILED"
     FAILED=$((FAILED + 1))
 else
     echo "URL1: PASSED"
 fi
 
-if [[ "$EXIT2" != "0" ]]; then
+if [[ $R2 -ne 0 ]]; then
     echo "URL2: FAILED"
     FAILED=$((FAILED + 1))
 else
