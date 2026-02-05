@@ -128,7 +128,7 @@
     "domainPattern": "nypost.com",
     "xpathMainContent": "//div[@class='single__content entry-content m-bottom']",
     "failureCountSinceLastSuccess": 0,
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T15:40:05.284Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T17:04:10.848Z",
     "siteCleanupClasses": [
       "featured-image__wrapper",
       "inline-module--more",
@@ -313,25 +313,33 @@
   {
     "domainPattern": "thelocal.es",
     "xpathMainContent": "//div[@id='articleBody']",
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:41:29.990Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T17:02:40.991Z",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "cjr.org",
     "xpathMainContent": "//div[contains(@class, 'entry-content')]",
-    "lastSuccessfulScrapeTimestamp": "2025-12-07T14:02:44.577Z",
-    "failureCountSinceLastSuccess": 2
+    "failureCountSinceLastSuccess": 1,
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T17:07:06.796Z",
+    "discoveredByLlm": true
   },
   {
     "domainPattern": "thetimes.com",
     "xpathMainContent": "//div[@data-testid='article-content-body']",
-    "lastSuccessfulScrapeTimestamp": "2025-12-07T14:04:36.828Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:45:32.687Z",
     "failureCountSinceLastSuccess": 0
   },
   {
     "domainPattern": "variety.com",
     "xpathMainContent": "//div[contains(@class, 'vy-cx-page-content')]",
     "lastSuccessfulScrapeTimestamp": "2025-12-07T14:02:31.874Z",
-    "failureCountSinceLastSuccess": 0
+    "failureCountSinceLastSuccess": 2
+  },
+  {
+    "domainPattern": "reuters.com",
+    "xpathMainContent": "//main[@id='main-content']//div[contains(@class, 'article-body')]",
+    "failureCountSinceLastSuccess": 1,
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T16:44:23.344Z",
+    "discoveredByLlm": true
   }
 ]

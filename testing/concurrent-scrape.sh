@@ -3,6 +3,9 @@
 # E2E test: Run two URLs concurrently and verify both succeed
 # Requires: running server (just dev), decrypted secrets
 #
+# For diagnostics, check server logs:
+#   tail -f data/logs/scraper-$(date +%Y-%m-%d).jsonl | jq -c '{ts: .timestamp, msg: .message, err: .error}'
+#
 
 set -o pipefail
 
@@ -82,7 +85,7 @@ CURL_BASE=(-sf -X POST "$SERVER/api/scrape"
 # Launch both in parallel
 {
     start=$(date +%s)
-    curl "${CURL_BASE[@]}" -d "{\"url\": \"$URL1\", \"outputType\": \"metadata_only\"}" > "$OUT1" 2>&1
+    curl "${CURL_BASE[@]}" -d "{\"url\": \"$URL1\", \"outputType\": \"metadata_only\", \"debug\": true}" > "$OUT1" 2>&1
     echo "$?" > "$TIME1.exit"
     echo "$(($(date +%s) - start))" > "$TIME1"
 } &
@@ -90,7 +93,7 @@ PID1=$!
 
 {
     start=$(date +%s)
-    curl "${CURL_BASE[@]}" -d "{\"url\": \"$URL2\", \"outputType\": \"metadata_only\"}" > "$OUT2" 2>&1
+    curl "${CURL_BASE[@]}" -d "{\"url\": \"$URL2\", \"outputType\": \"metadata_only\", \"debug\": true}" > "$OUT2" 2>&1
     echo "$?" > "$TIME2.exit"
     echo "$(($(date +%s) - start))" > "$TIME2"
 } &
@@ -117,12 +120,14 @@ parse_result() {
     
     if [[ $exit_code -ne 0 ]]; then
         echo "$label: FAILED (curl exit $exit_code) [${duration}s]"
+        echo "  Response: $response"
         return 1
     fi
     
     # Validate JSON before parsing
     if ! echo "$response" | jq -e . >/dev/null 2>&1; then
         echo "$label: FAILED (invalid JSON response) [${duration}s]"
+        echo "  Response: ${response:0:200}"
         return 1
     fi
     
@@ -133,7 +138,8 @@ parse_result() {
         return 0
     else
         local error=$(echo "$response" | jq -r '.error // "unknown error"')
-        echo "$label: FAILED ($error) [${duration}s]"
+        local errorType=$(echo "$response" | jq -r '.errorType // "unknown"')
+        echo "$label: FAILED [$errorType] $error [${duration}s]"
         return 1
     fi
 }
@@ -147,9 +153,14 @@ echo ""
 echo "=== Results ==="
 
 FAILED=0
+FAILED_DOMAINS=()
+
 if [[ $R1 -ne 0 ]]; then
     echo "URL1: FAILED"
     FAILED=$((FAILED + 1))
+    # Extract domain for log lookup
+    DOMAIN1=$(echo "$URL1" | sed -E 's|https?://([^/]+).*|\1|' | sed 's/^www\.//')
+    FAILED_DOMAINS+=("$DOMAIN1")
 else
     echo "URL1: PASSED"
 fi
@@ -157,8 +168,26 @@ fi
 if [[ $R2 -ne 0 ]]; then
     echo "URL2: FAILED"
     FAILED=$((FAILED + 1))
+    DOMAIN2=$(echo "$URL2" | sed -E 's|https?://([^/]+).*|\1|' | sed 's/^www\.//')
+    FAILED_DOMAINS+=("$DOMAIN2")
 else
     echo "URL2: PASSED"
+fi
+
+# Show diagnostic logs for failed domains
+if [[ $FAILED -gt 0 ]]; then
+    echo ""
+    echo "=== Diagnostics (from server logs) ==="
+    LOG_FILE="data/logs/scraper-$(date +%Y-%m-%d).jsonl"
+    if [[ -f "$LOG_FILE" ]]; then
+        for domain in "${FAILED_DOMAINS[@]}"; do
+            echo ""
+            echo "--- $domain ---"
+            grep "\"$domain\"" "$LOG_FILE" | tail -10 | jq -c '{level: .level, msg: .message, err: .error}' 2>/dev/null || echo "(no log entries found)"
+        done
+    else
+        echo "(log file not found: $LOG_FILE)"
+    fi
 fi
 
 echo ""
