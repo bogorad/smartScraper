@@ -27,20 +27,21 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   }
 
   private async load(): Promise<SiteConfig[]> {
-    if (this.cache) return this.cache;
+    if (this.cache) return [...this.cache]; // Return copy to prevent external mutation
     await this.ensureFile();
     const content = await fs.readFile(getSitesFile(), 'utf-8');
     this.cache = parse(content) as unknown as SiteConfig[];
     logger.debug(`[SITES] Loaded ${this.cache.length} site configs`);
-    return this.cache;
+    return [...this.cache];
   }
 
-  private async flush(): Promise<void> {
+  private async flush(configs: SiteConfig[]): Promise<void> {
     await this.ensureFile();
     const tempFile = getSitesFile() + '.tmp';
-    const content = stringify(this.cache, null, 2);
+    const content = stringify(configs, null, 2);
     await fs.writeFile(tempFile, content);
     await fs.rename(tempFile, getSitesFile());
+    this.cache = configs; // Update cache only after successful write
   }
 
   // Reads use cache directly - no queue needed
@@ -61,8 +62,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
         configs.push(config);
       }
       
-      this.cache = configs;
-      await this.flush();
+      await this.flush(configs);
     });
   }
 
@@ -73,8 +73,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
       
       if (config) {
         config.failureCountSinceLastSuccess++;
-        this.cache = configs;
-        await this.flush();
+        await this.flush(configs);
       }
     });
   }
@@ -87,8 +86,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
       if (config) {
         config.failureCountSinceLastSuccess = 0;
         config.lastSuccessfulScrapeTimestamp = utcNow();
-        this.cache = configs;
-        await this.flush();
+        await this.flush(configs);
       }
     });
   }
@@ -97,8 +95,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
       const filtered = configs.filter(c => c.domainPattern !== domain);
-      this.cache = filtered;
-      await this.flush();
+      await this.flush(filtered);
     });
   }
 

@@ -15,6 +15,11 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
+if [[ -z "$SECRETS" || "$SECRETS" == "{}" ]]; then
+    echo "Error: secrets.yaml decrypted but is empty"
+    exit 1
+fi
+
 eval "$(echo "$SECRETS" | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
 
 URLS_FILE="testing/urls_for_testing.txt"
