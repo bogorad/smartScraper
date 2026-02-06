@@ -21,6 +21,9 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 | [013](013-centralized-configuration.md) | Centralized Configuration | Accepted |
 | [014](014-auth-security-strategy.md) | Authentication Security Strategy | Accepted |
 | [015](015-sse-dashboard.md) | Real-time Dashboard Updates (SSE + HTMX) | Accepted |
+| [016](016-testing-strategy.md) | Testing Strategy | Accepted |
+| [017](017-timeout-constants.md) | Timeout Constants Are Sacred | Accepted |
+| [018](018-puppeteer-websocket-server.md) | Minimal Puppeteer WebSocket Server | Proposed |
 
 ## Overview
 
@@ -52,6 +55,9 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 
 ### Deployment
 - **[ADR-012](012-nix-deployment.md)** - Nix flake, devShell, NixOS module, sops-nix secrets
+
+### Infrastructure
+- **[ADR-018](018-puppeteer-websocket-server.md)** - Minimal Puppeteer WebSocket server to replace browserless for rsshub
 
 ## ADR Format
 
