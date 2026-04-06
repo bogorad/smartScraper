@@ -191,35 +191,39 @@
               default = false;
               description = "Open firewall port for the service";
             };
+
+            user = lib.mkOption {
+              type = lib.types.str;
+              default = "smartscraper";
+              description = "User account under which the service runs";
+            };
+
+            group = lib.mkOption {
+              type = lib.types.str;
+              default = "smartscraper";
+              description = "Group under which the service runs";
+            };
           };
 
           config = lib.mkIf cfg.enable {
-            sops.secrets = {
-              "api_keys/smart_scraper" = {
-                sopsFile = cfg.sopsSecretsFile;
-                owner = "smartscraper";
-                group = "smartscraper";
-              };
-              "api_keys/openrouter" = {
-                sopsFile = cfg.sopsSecretsFile;
-                owner = "smartscraper";
-                group = "smartscraper";
-              };
-              "api_keys/twocaptcha" = {
-                sopsFile = cfg.sopsSecretsFile;
-                owner = "smartscraper";
-                group = "smartscraper";
-              };
-            };
+            sops.secrets = lib.genAttrs [
+              "api_keys/smart_scraper"
+              "api_keys/openrouter"
+              "api_keys/twocaptcha"
+            ] (_: {
+              sopsFile = cfg.sopsSecretsFile;
+              owner = cfg.user;
+              group = cfg.group;
+            });
 
-            users.users.smartscraper = {
+            users.users.${cfg.user} = {
               isSystemUser = true;
-              group = "smartscraper";
+              group = cfg.group;
               home = cfg.dataDir;
               createHome = true;
             };
 
-            users.groups.smartscraper = { };
+            users.groups.${cfg.group} = { };
 
             systemd.services.smart-scraper = {
               description = "SmartScraper web scraping service";
@@ -234,8 +238,8 @@
 
               serviceConfig = {
                 Type = "simple";
-                User = "smartscraper";
-                Group = "smartscraper";
+                User = cfg.user;
+                Group = cfg.group;
                 WorkingDirectory = cfg.dataDir;
 
                 ExecStartPre = pkgs.writeShellScript "smart-scraper-pre" ''

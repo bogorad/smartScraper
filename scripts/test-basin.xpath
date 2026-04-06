@@ -1,0 +1,1 @@
+//*[@id='aca-drop']/div[contains(@class,'current-text')]/div[contains(@class,'number')]/span[contains(@class,'percentage')]

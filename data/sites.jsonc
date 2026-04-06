@@ -128,7 +128,7 @@
     "domainPattern": "nypost.com",
     "xpathMainContent": "//div[@class='single__content entry-content m-bottom']",
     "failureCountSinceLastSuccess": 0,
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:25:59.560Z",
+    "lastSuccessfulScrapeTimestamp": "2026-02-06T13:58:53.066Z",
     "siteCleanupClasses": [
       "featured-image__wrapper",
       "inline-module--more",
@@ -320,7 +320,8 @@
     "domainPattern": "cjr.org",
     "xpathMainContent": "//div[contains(@class,'entry-content')]",
     "failureCountSinceLastSuccess": 0,
-    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:39:47.416Z"
+    "lastSuccessfulScrapeTimestamp": "2026-02-05T18:39:47.416Z",
+    "discoveredByLlm": true
   },
   {
     "domainPattern": "thetimes.com",

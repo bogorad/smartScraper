@@ -1,11 +1,11 @@
 {
-  "scrapeTotal": 191,
-  "failTotal": 86,
-  "todayDate": "2026-02-05",
-  "scrapeToday": 77,
-  "failToday": 44,
+  "scrapeTotal": 202,
+  "failTotal": 89,
+  "todayDate": "2026-02-06",
+  "scrapeToday": 11,
+  "failToday": 3,
   "domainCounts": {
-    "nypost.com": 22,
+    "nypost.com": 25,
     "example.com": 62,
     "unherd.com": 6,
     "variety.com": 5,
@@ -20,8 +20,9 @@
     "thetimes.com": 19,
     "wsj.com": 25,
     "marketwatch.com": 3,
-    "aca.gencat.cat": 2,
+    "aca.gencat.cat": 9,
     "example.org": 1,
-    "thelocal.com": 1
+    "thelocal.com": 1,
+    "racket.news": 1
   }
 }
