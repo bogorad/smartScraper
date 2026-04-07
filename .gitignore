@@ -25,3 +25,8 @@ test-orchestrator/test-orchestrator
 test-orchestrator/logs/
 .test-cache.json
 .beads/.bv.lock
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
