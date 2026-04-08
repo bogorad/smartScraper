@@ -30,3 +30,6 @@ test-orchestrator/logs/
 .dolt/
 *.db
 .beads-credential-key
+.beads/dolt-config.log
+tmp/
+.tmp/
