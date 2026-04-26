@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { diag } from '@opentelemetry/api';
 
 type LoggerModule = typeof import('./logger.js');
 
@@ -32,8 +33,11 @@ describe('logger OTLP export', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    diag.disable();
     vi.doUnmock('../config.js');
-    vi.doUnmock('@opentelemetry/exporter-logs-otlp-http');
+    vi.doUnmock('@opentelemetry/otlp-exporter-base');
+    vi.doUnmock('@opentelemetry/otlp-exporter-base/node-http');
+    vi.doUnmock('@opentelemetry/otlp-transformer');
     vi.doUnmock('@opentelemetry/sdk-logs');
   });
 
@@ -72,12 +76,22 @@ describe('logger OTLP export', () => {
     await loggerModule.logger.flush();
 
     expect(exporterMock).toHaveBeenCalledWith({
-      url: 'http://victorialogs:9428/insert/opentelemetry/v1/logs',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        'VL-Stream-Fields': 'service.name,deployment.environment.name'
+      options: {
+        config: {
+          url: 'http://victorialogs:9428/insert/opentelemetry/v1/logs',
+          headers: {
+            Authorization: 'Bearer secret-token',
+            'VL-Stream-Fields': 'service.name,deployment.environment.name'
+          },
+          timeoutMillis: 2500
+        },
+        requiredHeaders: {
+          'Content-Type': 'application/x-protobuf'
+        },
+        signalIdentifier: 'LOGS',
+        signalResourcePath: 'v1/logs'
       },
-      timeoutMillis: 2500
+      serializer: 'protobuf-logs-serializer'
     });
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     expect(processorMock).toHaveBeenCalledWith(expect.anything(), {
@@ -118,6 +132,15 @@ describe('logger OTLP export', () => {
     expect(shutdownMock).toHaveBeenCalledOnce();
   });
 
+  it('routes OpenTelemetry export failures to the local logger', async () => {
+    const loggerModule = await loadLogger(true);
+
+    loggerModule.logger.info('queued', undefined, 'TEST');
+    diag.error('export response failure (status: 400)');
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[LOGGER]', 'OTLP export error:', 'export response failure (status: 400)');
+  });
+
   async function loadLogger(otlpEnabled: boolean, logLevel = 'DEBUG'): Promise<LoggerModule> {
     vi.doMock('../config.js', () => ({
       getDataDir: () => './data',
@@ -135,12 +158,31 @@ describe('logger OTLP export', () => {
       isDebugMode: () => false,
       isVictoriaLogsOtlpEnabled: () => otlpEnabled
     }));
-    vi.doMock('@opentelemetry/exporter-logs-otlp-http', () => ({
-      OTLPLogExporter: class {
-        constructor(config: unknown) {
-          exporterMock(config);
+    vi.doMock('@opentelemetry/otlp-exporter-base', () => ({
+      OTLPExporterBase: class {
+        constructor(delegate: unknown) {
+          exporterMock(delegate);
         }
       }
+    }));
+    vi.doMock('@opentelemetry/otlp-exporter-base/node-http', () => ({
+      convertLegacyHttpOptions: (
+        config: unknown,
+        signalIdentifier: string,
+        signalResourcePath: string,
+        requiredHeaders: Record<string, string>
+      ) => ({
+        config,
+        requiredHeaders,
+        signalIdentifier,
+        signalResourcePath
+      }),
+      createOtlpHttpExportDelegate: (options: unknown, serializer: unknown) => {
+        return { options, serializer };
+      }
+    }));
+    vi.doMock('@opentelemetry/otlp-transformer', () => ({
+      ProtobufLogsSerializer: 'protobuf-logs-serializer'
     }));
     vi.doMock('@opentelemetry/sdk-logs', () => ({
       BatchLogRecordProcessor: class {

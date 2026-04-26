@@ -1,10 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import { diag, DiagLogLevel, type DiagLogger } from '@opentelemetry/api';
 import type { Logger as OtelLogger } from '@opentelemetry/api-logs';
 import { SeverityNumber } from '@opentelemetry/api-logs';
-import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
+import { OTLPExporterBase } from '@opentelemetry/otlp-exporter-base';
+import { convertLegacyHttpOptions, createOtlpHttpExportDelegate } from '@opentelemetry/otlp-exporter-base/node-http';
+import { ProtobufLogsSerializer } from '@opentelemetry/otlp-transformer';
 import { resourceFromAttributes } from '@opentelemetry/resources';
-import { BatchLogRecordProcessor, LoggerProvider } from '@opentelemetry/sdk-logs';
+import { BatchLogRecordProcessor, LoggerProvider, type LogRecordExporter, type ReadableLogRecord } from '@opentelemetry/sdk-logs';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 
 import {
@@ -50,6 +53,26 @@ let debugEnabled = false;
 let otelLoggerProvider: LoggerProvider | null = null;
 let otelLogger: OtelLogger | null = null;
 let otlpInitialized = false;
+let otlpDiagnosticsInitialized = false;
+
+interface OtlpHttpExporterConfig {
+  url?: string;
+  headers?: Record<string, string>;
+  timeoutMillis?: number;
+}
+
+class ProtobufOTLPLogExporter extends OTLPExporterBase<ReadableLogRecord[]> implements LogRecordExporter {
+  constructor(config: OtlpHttpExporterConfig = {}) {
+    super(
+      createOtlpHttpExportDelegate(
+        convertLegacyHttpOptions(config, 'LOGS', 'v1/logs', {
+          'Content-Type': 'application/x-protobuf'
+        }),
+        ProtobufLogsSerializer
+      )
+    );
+  }
+}
 
 function writeConsole(level: LogLevel, prefix: string, message: string, data?: unknown) {
   const args = data === undefined ? [prefix, message] : [prefix, message, data];
@@ -65,6 +88,33 @@ function writeConsole(level: LogLevel, prefix: string, message: string, data?: u
 
 function writeInternal(level: LogLevel, message: string, data?: unknown) {
   writeConsole(level, '[LOGGER]', message, data);
+}
+
+function formatDiagnostic(message: string, args: unknown[]): string {
+  if (args.length === 0) {
+    return message;
+  }
+
+  const formattedArgs = args.map((arg) => (arg instanceof Error ? arg.message : String(arg))).join(' ');
+  return `${message} ${formattedArgs}`;
+}
+
+function initOtlpDiagnostics() {
+  if (otlpDiagnosticsInitialized) return;
+  otlpDiagnosticsInitialized = true;
+
+  const diagnosticLogger: DiagLogger = {
+    error: (message, ...args) => writeInternal('ERROR', 'OTLP export error:', formatDiagnostic(message, args)),
+    warn: (message, ...args) => writeInternal('WARN', 'OTLP export warning:', formatDiagnostic(message, args)),
+    info: (message, ...args) => writeInternal('INFO', 'OTLP export info:', formatDiagnostic(message, args)),
+    debug: (message, ...args) => writeInternal('DEBUG', 'OTLP export debug:', formatDiagnostic(message, args)),
+    verbose: (message, ...args) => writeInternal('DEBUG', 'OTLP export verbose:', formatDiagnostic(message, args))
+  };
+
+  diag.setLogger(diagnosticLogger, {
+    logLevel: DiagLogLevel.WARN,
+    suppressOverrideMessage: true
+  });
 }
 
 function initLogFile() {
@@ -129,6 +179,8 @@ function initOtlpLogger() {
       return;
     }
 
+    initOtlpDiagnostics();
+
     const endpoint = getVictoriaLogsOtlpEndpoint();
     if (!endpoint) {
       writeInternal('WARN', 'VICTORIALOGS_OTLP_ENABLED is true but VICTORIALOGS_OTLP_ENDPOINT is empty.');
@@ -136,7 +188,7 @@ function initOtlpLogger() {
     }
 
     const timeoutMillis = getVictoriaLogsOtlpTimeoutMs();
-    const exporter = new OTLPLogExporter({
+    const exporter = new ProtobufOTLPLogExporter({
       url: endpoint,
       headers: getVictoriaLogsOtlpHeaders(),
       timeoutMillis
