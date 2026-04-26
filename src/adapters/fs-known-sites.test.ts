@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
+import { parse } from "comment-json";
 import {
   afterEach,
   beforeEach,
@@ -29,6 +30,7 @@ describe("FsKnownSitesAdapter", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await fs.rm(testState.dataDir, {
       recursive: true,
       force: true,
@@ -65,5 +67,51 @@ describe("FsKnownSitesAdapter", () => {
         "utf-8",
       ),
     ).resolves.toBe("{ not jsonc");
+  });
+
+  it("uses unique temp files for concurrent writes", async () => {
+    const { FsKnownSitesAdapter } =
+      await import("./fs-known-sites.js");
+    const writeFileSpy = vi.spyOn(fs, "writeFile");
+    const firstAdapter = new FsKnownSitesAdapter();
+    const secondAdapter = new FsKnownSitesAdapter();
+
+    await Promise.all([
+      firstAdapter.saveConfig({
+        domainPattern: "example.com",
+        xpathMainContent: "//article",
+        failureCountSinceLastSuccess: 0,
+      }),
+      secondAdapter.saveConfig({
+        domainPattern: "example.org",
+        xpathMainContent: "//main",
+        failureCountSinceLastSuccess: 0,
+      }),
+    ]);
+
+    const tempWrites = writeFileSpy.mock.calls
+      .map(([file]) => String(file))
+      .filter(
+        (file) =>
+          file.includes("sites.jsonc.") &&
+          file.endsWith(".tmp"),
+      );
+
+    expect(tempWrites).toHaveLength(2);
+    expect(new Set(tempWrites).size).toBe(2);
+
+    const files = await fs.readdir(testState.dataDir);
+    expect(files).not.toContain("sites.jsonc.tmp");
+    expect(files.filter((file) => file.endsWith(".tmp"))).toEqual(
+      [],
+    );
+
+    const sites = parse(
+      await fs.readFile(
+        path.join(testState.dataDir, "sites.jsonc"),
+        "utf-8",
+      ),
+    ) as unknown;
+    expect(Array.isArray(sites)).toBe(true);
   });
 });

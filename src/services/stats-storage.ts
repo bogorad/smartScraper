@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import PQueue from "p-queue";
+import { randomUUID } from "crypto";
 import type { Stats } from "../domain/models.js";
 import { utcToday } from "../utils/date.js";
 import { getDataDir } from "../config.js";
@@ -20,6 +21,10 @@ const DEFAULT_STATS: Stats = {
 
 function getStatsFile(): string {
   return path.join(getDataDir(), "stats.json");
+}
+
+function getTempFile(targetFile: string): string {
+  return `${targetFile}.${process.pid}-${Date.now()}-${randomUUID()}.tmp`;
 }
 
 function defaultStats(): Stats {
@@ -86,12 +91,13 @@ async function loadFromDisk(): Promise<Stats> {
 async function flush(): Promise<void> {
   if (!cache) return;
   await ensureFile();
-  const tempFile = getStatsFile() + ".tmp";
+  const statsFile = getStatsFile();
+  const tempFile = getTempFile(statsFile);
   await fs.writeFile(
     tempFile,
     JSON.stringify(cache, null, 2),
   );
-  await fs.rename(tempFile, getStatsFile());
+  await fs.rename(tempFile, statsFile);
 }
 
 // Reads use cache directly - no queue needed

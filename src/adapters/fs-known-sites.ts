@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import PQueue from "p-queue";
 import { parse, stringify } from "comment-json";
+import { randomUUID } from "crypto";
 import type { KnownSitesPort } from "../ports/known-sites.js";
 import type { SiteConfig } from "../domain/models.js";
 import { utcNow } from "../utils/date.js";
@@ -10,6 +11,10 @@ import { logger } from "../utils/logger.js";
 
 function getSitesFile(): string {
   return path.join(getDataDir(), "sites.jsonc");
+}
+
+function getTempFile(targetFile: string): string {
+  return `${targetFile}.${process.pid}-${Date.now()}-${randomUUID()}.tmp`;
 }
 
 async function quarantineCorruptSitesFile(
@@ -73,10 +78,11 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
     configs: SiteConfig[],
   ): Promise<void> {
     await this.ensureFile();
-    const tempFile = getSitesFile() + ".tmp";
+    const sitesFile = getSitesFile();
+    const tempFile = getTempFile(sitesFile);
     const content = stringify(configs, null, 2);
     await fs.writeFile(tempFile, content);
-    await fs.rename(tempFile, getSitesFile());
+    await fs.rename(tempFile, sitesFile);
     this.cache = configs; // Update cache only after successful write
   }
 
