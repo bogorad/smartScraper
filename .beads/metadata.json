@@ -2,8 +2,8 @@
   "database": "dolt",
   "backend": "dolt",
   "dolt_mode": "server",
-  "dolt_server_host": "doltsrv.lan",
-  "dolt_server_port": 3307,
+  "dolt_server_host": "127.0.0.1",
+  "dolt_server_port": 3308,
   "dolt_server_user": "root",
   "dolt_database": "smartScraper",
   "project_id": "5db5cffd-91b6-4dc9-845f-197b15b8a26b"

@@ -5,6 +5,3 @@ memories = true
 command = "npx"
 args = ["-y", "mcp-remote", "http://victorialogs.lan:51428/sse", "--allow-http"]
 
-[mcp_servers.neon]
-url = "https://mcp.neon.tech/mcp"
-
