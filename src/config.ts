@@ -104,6 +104,19 @@ const ConfigSchema = z.object({
 
 type Config = z.infer<typeof ConfigSchema>;
 
+const SECRET_KEYS = [
+  { yamlKey: 'smart_scraper', configKey: 'api_token' },
+  { yamlKey: 'openrouter', configKey: 'openrouter_api_key' },
+  { yamlKey: 'twocaptcha', configKey: 'twocaptcha_api_key' },
+  { yamlKey: 'datadome_proxy_host', configKey: 'datadome_proxy_host' },
+  { yamlKey: 'datadome_proxy_login', configKey: 'datadome_proxy_login' },
+  { yamlKey: 'datadome_proxy_password', configKey: 'datadome_proxy_password' },
+  { yamlKey: 'victorialogs_otlp_endpoint', configKey: 'victorialogs_otlp_endpoint' },
+  { yamlKey: 'victorialogs_otlp_headers', configKey: 'victorialogs_otlp_headers' },
+  { yamlKey: 'victorialogs_otlp_auth_header_name', configKey: 'victorialogs_otlp_auth_header_name' },
+  { yamlKey: 'victorialogs_otlp_auth_header_value', configKey: 'victorialogs_otlp_auth_header_value' }
+] as const;
+
 // Load secrets from YAML if available
 function loadSecretsFromYaml(): Record<string, string> {
   const secretsPath = 'secrets.yaml';
@@ -115,34 +128,14 @@ function loadSecretsFromYaml(): Record<string, string> {
     const content = fs.readFileSync(secretsPath, 'utf-8');
     const data = YAML.parse(content);
 
-    // Support simplified flat structure or legacy nested structure
     const apiKeys: Record<string, string> = {};
+    const nestedApiKeys = data?.api_keys;
 
-    // Flat structure check
-    if (data?.smart_scraper || data?.openrouter || data?.twocaptcha) {
-      apiKeys.api_token = data.smart_scraper || '';
-      apiKeys.openrouter_api_key = data.openrouter || '';
-      apiKeys.twocaptcha_api_key = data.twocaptcha || '';
-      apiKeys.datadome_proxy_host = data.datadome_proxy_host || '';
-      apiKeys.datadome_proxy_login = data.datadome_proxy_login || '';
-      apiKeys.datadome_proxy_password = data.datadome_proxy_password || '';
-      apiKeys.victorialogs_otlp_endpoint = data.victorialogs_otlp_endpoint || '';
-      apiKeys.victorialogs_otlp_headers = data.victorialogs_otlp_headers || '';
-      apiKeys.victorialogs_otlp_auth_header_name = data.victorialogs_otlp_auth_header_name || '';
-      apiKeys.victorialogs_otlp_auth_header_value = data.victorialogs_otlp_auth_header_value || '';
-    }
-    // Legacy nested check
-    else if (data?.api_keys) {
-      apiKeys.api_token = data.api_keys.smart_scraper || '';
-      apiKeys.openrouter_api_key = data.api_keys.openrouter || '';
-      apiKeys.twocaptcha_api_key = data.api_keys.twocaptcha || '';
-      apiKeys.datadome_proxy_host = data.api_keys.datadome_proxy_host || '';
-      apiKeys.datadome_proxy_login = data.api_keys.datadome_proxy_login || '';
-      apiKeys.datadome_proxy_password = data.api_keys.datadome_proxy_password || '';
-      apiKeys.victorialogs_otlp_endpoint = data.api_keys.victorialogs_otlp_endpoint || '';
-      apiKeys.victorialogs_otlp_headers = data.api_keys.victorialogs_otlp_headers || '';
-      apiKeys.victorialogs_otlp_auth_header_name = data.api_keys.victorialogs_otlp_auth_header_name || '';
-      apiKeys.victorialogs_otlp_auth_header_value = data.api_keys.victorialogs_otlp_auth_header_value || '';
+    for (const { yamlKey, configKey } of SECRET_KEYS) {
+      const value = data?.[yamlKey] ?? nestedApiKeys?.[yamlKey];
+      if (value !== undefined && value !== null) {
+        apiKeys[configKey] = String(value);
+      }
     }
 
     return apiKeys;
@@ -200,10 +193,10 @@ function mapEnvVars(): Record<string, string | undefined> {
     flaresolverrUrl: process.env.FLARESOLVERR_URL,
     flaresolverrTimeout: process.env.FLARESOLVERR_TIMEOUT,
 
-    // DataDome proxy (ONLY from environment variables - sops exec-env decrypts these)
-    datadomeProxyHost: process.env.DATADOME_PROXY_HOST,
-    datadomeProxyLogin: process.env.DATADOME_PROXY_LOGIN,
-    datadomeProxyPassword: process.env.DATADOME_PROXY_PASSWORD,
+    // DataDome proxy
+    datadomeProxyHost: process.env.DATADOME_PROXY_HOST || secrets.datadome_proxy_host,
+    datadomeProxyLogin: process.env.DATADOME_PROXY_LOGIN || secrets.datadome_proxy_login,
+    datadomeProxyPassword: process.env.DATADOME_PROXY_PASSWORD || secrets.datadome_proxy_password,
 
     // Auth
     apiToken: process.env.API_TOKEN || process.env.SMART_SCRAPER || secrets.api_token,

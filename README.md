@@ -120,6 +120,12 @@ SmartScraper uses a **centralized configuration system** with Zod validation. Al
        smart_scraper: "your_api_token"
        openrouter: "your_openrouter_key"
        twocaptcha: "your_2captcha_key"
+       datadome_proxy_host: "host:port"
+       datadome_proxy_login: "proxy_login"
+       datadome_proxy_password: "proxy_password"
+       victorialogs_otlp_endpoint: "http://victorialogs:9428/insert/opentelemetry/v1/logs"
+       victorialogs_otlp_auth_header_name: "Authorization"
+       victorialogs_otlp_auth_header_value: "Bearer token"
      ```
 
 3. **Default values** (lowest priority)
@@ -163,7 +169,16 @@ api_keys:
   smart_scraper: "your_api_token"
   openrouter: "your_openrouter_key"
   twocaptcha: "your_2captcha_key"
+  datadome_proxy_host: "host:port"
+  datadome_proxy_login: "proxy_login"
+  datadome_proxy_password: "proxy_password"
+  victorialogs_otlp_endpoint: "http://victorialogs:9428/insert/opentelemetry/v1/logs"
+  victorialogs_otlp_auth_header_name: "Authorization"
+  victorialogs_otlp_auth_header_value: "Bearer token"
 ```
+
+Flat `secrets.yaml` keys are also supported for the same names, without the
+`api_keys:` wrapper.
 
 Then set other config via environment variables:
 ```bash
@@ -192,6 +207,11 @@ These must be set for the application to function:
 | `API_TOKEN` | Token for API authentication | `.env` or `secrets.yaml` |
 | `OPENROUTER_API_KEY` | OpenRouter API key for LLM features | `.env` or `secrets.yaml` |
 | `TWOCAPTCHA_API_KEY` | 2Captcha API key (only if scraping CAPTCHA sites) | `.env` or `secrets.yaml` |
+| `DATADOME_PROXY_HOST` | DataDome proxy host and port | `.env` or `secrets.yaml` |
+| `DATADOME_PROXY_LOGIN` | DataDome proxy login | `.env` or `secrets.yaml` |
+| `DATADOME_PROXY_PASSWORD` | DataDome proxy password | `.env` or `secrets.yaml` |
+| `VICTORIALOGS_OTLP_ENDPOINT` | VictoriaLogs OTLP endpoint | `.env` or `secrets.yaml` |
+| `VICTORIALOGS_OTLP_AUTH_HEADER_VALUE` | VictoriaLogs OTLP auth token/header value | `.env` or `secrets.yaml` |
 
 ### Optional Configuration
 
@@ -203,6 +223,7 @@ See `.env.example` for all available options including:
 - `EXECUTABLE_PATH` - Chrome/Chromium path
 - `EXTENSION_PATHS` - Browser extensions to load
 - `PROXY_SERVER` - HTTP proxy for scraping
+- `VICTORIALOGS_OTLP_ENABLED` - Enable OTLP logging to VictoriaLogs
 - `LOG_LEVEL` - Logging level (default: INFO)
 - And more...
 

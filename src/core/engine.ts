@@ -37,6 +37,7 @@ import {
   extractText,
   toMarkdown,
 } from "../utils/html-cleaner.js";
+import { extractEmbeddedArticleFromHtml } from "./embedded-article.js";
 import { scoreElement } from "./scoring.js";
 import { recordScrapeOutcome } from "../services/scrape-events.js";
 import { logger } from "../utils/logger.js";
@@ -532,9 +533,7 @@ export class CoreScraperEngine {
             "[ENGINE] XPath discovery failed, trying embedded JSON extraction",
           );
           const embeddedContent =
-            await this.browserPort.extractEmbeddedArticle(
-              pageId,
-            );
+            extractEmbeddedArticleFromHtml(html);
 
           if (
             embeddedContent &&

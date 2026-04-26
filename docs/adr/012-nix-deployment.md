@@ -136,10 +136,16 @@ Secrets are loaded from sops-nix at runtime:
 
 | Secret Path | Environment Variable | Required |
 |-------------|---------------------|----------|
-| `smart-scraper/api_token` | `API_TOKEN` | Yes |
-| `smart-scraper/openrouter_api_key` | `OPENROUTER_API_KEY` | Yes |
-| `smart-scraper/twocaptcha_api_key` | `TWOCAPTCHA_API_KEY` | No |
-| `smart-scraper/proxy_server` | `PROXY_SERVER` | No |
+| `api_keys/smart_scraper` | `API_TOKEN` | Yes |
+| `api_keys/openrouter` | `OPENROUTER_API_KEY` | Yes |
+| `api_keys/twocaptcha` | `TWOCAPTCHA_API_KEY` | No |
+| `api_keys/datadome_proxy_host` | `DATADOME_PROXY_HOST` | No |
+| `api_keys/datadome_proxy_login` | `DATADOME_PROXY_LOGIN` | No |
+| `api_keys/datadome_proxy_password` | `DATADOME_PROXY_PASSWORD` | No |
+| `api_keys/victorialogs_otlp_endpoint` | `VICTORIALOGS_OTLP_ENDPOINT` | No |
+| `api_keys/victorialogs_otlp_headers` | `VICTORIALOGS_OTLP_HEADERS` | No |
+| `api_keys/victorialogs_otlp_auth_header_name` | `VICTORIALOGS_OTLP_AUTH_HEADER_NAME` | No |
+| `api_keys/victorialogs_otlp_auth_header_value` | `VICTORIALOGS_OTLP_AUTH_HEADER_VALUE` | No |
 
 **ExecStart loads secrets:**
 ```bash
@@ -231,7 +237,19 @@ nix build
   sops.secrets."smart-scraper/twocaptcha_api_key" = {
     owner = "smartscraper";
   };
-  sops.secrets."smart-scraper/proxy_server" = {
+  sops.secrets."api_keys/datadome_proxy_host" = {
+    owner = "smartscraper";
+  };
+  sops.secrets."api_keys/datadome_proxy_login" = {
+    owner = "smartscraper";
+  };
+  sops.secrets."api_keys/datadome_proxy_password" = {
+    owner = "smartscraper";
+  };
+  sops.secrets."api_keys/victorialogs_otlp_endpoint" = {
+    owner = "smartscraper";
+  };
+  sops.secrets."api_keys/victorialogs_otlp_auth_header_value" = {
     owner = "smartscraper";
   };
 
@@ -250,11 +268,17 @@ nix build
 
 **secrets.yaml (encrypted with sops):**
 ```yaml
-smart-scraper:
-  api_token: ENC[AES256_GCM,data:...,tag:...]
-  openrouter_api_key: ENC[AES256_GCM,data:...,tag:...]
-  twocaptcha_api_key: ENC[AES256_GCM,data:...,tag:...]
-  proxy_server: ENC[AES256_GCM,data:...,tag:...]
+api_keys:
+  smart_scraper: ENC[AES256_GCM,data:...,tag:...]
+  openrouter: ENC[AES256_GCM,data:...,tag:...]
+  twocaptcha: ENC[AES256_GCM,data:...,tag:...]
+  datadome_proxy_host: ENC[AES256_GCM,data:...,tag:...]
+  datadome_proxy_login: ENC[AES256_GCM,data:...,tag:...]
+  datadome_proxy_password: ENC[AES256_GCM,data:...,tag:...]
+  victorialogs_otlp_endpoint: ENC[AES256_GCM,data:...,tag:...]
+  victorialogs_otlp_headers: ENC[AES256_GCM,data:...,tag:...]
+  victorialogs_otlp_auth_header_name: ENC[AES256_GCM,data:...,tag:...]
+  victorialogs_otlp_auth_header_value: ENC[AES256_GCM,data:...,tag:...]
 ```
 
 ---

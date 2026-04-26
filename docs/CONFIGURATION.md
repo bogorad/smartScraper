@@ -81,7 +81,21 @@ api_keys:
   smart_scraper: "your_api_token"
   openrouter: "your_openrouter_key"
   twocaptcha: "your_2captcha_key"
+  datadome_proxy_host: "host:port"
+  datadome_proxy_login: "proxy_login"
+  datadome_proxy_password: "proxy_password"
+  victorialogs_otlp_endpoint: "http://victorialogs:9428/insert/opentelemetry/v1/logs"
+  victorialogs_otlp_headers: "X-Scope=prod"
+  victorialogs_otlp_auth_header_name: "Authorization"
+  victorialogs_otlp_auth_header_value: "Bearer token"
 ```
+
+Flat `secrets.yaml` keys are also supported for these same secret names:
+`smart_scraper`, `openrouter`, `twocaptcha`, `datadome_proxy_host`,
+`datadome_proxy_login`, `datadome_proxy_password`,
+`victorialogs_otlp_endpoint`, `victorialogs_otlp_headers`,
+`victorialogs_otlp_auth_header_name`, and
+`victorialogs_otlp_auth_header_value`.
 
 Can be encrypted with sops:
 ```bash
@@ -136,13 +150,26 @@ Sensible defaults for non-critical configuration are defined in `src/constants.t
 
 *Required if scraping sites with CAPTCHAs
 
+### DataDome Proxy Secrets
+
+| Variable | Type | Default | Required | Description |
+|----------|------|---------|----------|-------------|
+| `DATADOME_PROXY_HOST` | string | '' | Yes* | Residential proxy host and port |
+| `DATADOME_PROXY_LOGIN` | string | '' | Yes* | Proxy login without generated session suffixes |
+| `DATADOME_PROXY_PASSWORD` | string | '' | Yes* | Proxy password |
+
+*Required when a site is configured with `needsProxy: "datadome"`.
+
+These values can be loaded from environment variables, flat `secrets.yaml`
+keys, or nested `api_keys.*` keys.
+
 ### Authentication
 
 | Variable | Type | Default | Required | Description |
 |----------|------|---------|----------|-------------|
 | `API_TOKEN` | string | '' | Yes | API authentication token |
 
-Can be loaded from `secrets.yaml` (`api_keys.smart_scraper`) or environment variable.
+Can be loaded from `secrets.yaml` (`smart_scraper` or `api_keys.smart_scraper`) or environment variable.
 
 ### Logging & Debug
 
@@ -155,6 +182,25 @@ Debug features (enabled when `LOG_LEVEL=DEBUG`):
 - Verbose logging
 - HTML snapshots on errors/success
 - Detailed error messages
+
+### VictoriaLogs OTLP Logging
+
+| Variable | Type | Default | Secret | Description |
+|----------|------|---------|--------|-------------|
+| `VICTORIALOGS_OTLP_ENABLED` | boolean | false | No | Enable OTLP log export |
+| `VICTORIALOGS_OTLP_ENDPOINT` | string | '' | Yes | OTLP/HTTP logs endpoint |
+| `VICTORIALOGS_OTLP_HEADERS` | string | '' | Yes | Extra headers as JSON or comma-separated entries |
+| `VICTORIALOGS_OTLP_AUTH_HEADER_NAME` | string | '' | Yes | Optional auth header name |
+| `VICTORIALOGS_OTLP_AUTH_HEADER_VALUE` | string | '' | Yes | Optional auth header value |
+| `VICTORIALOGS_OTLP_STREAM_FIELDS` | string | '' | No | Value for the `VL-Stream-Fields` header |
+| `VICTORIALOGS_OTLP_TIMEOUT_MS` | number | 10000 | No | Export timeout in milliseconds |
+| `VICTORIALOGS_OTLP_BATCH_DELAY_MS` | number | 5000 | No | Batch delay in milliseconds |
+| `VICTORIALOGS_OTLP_MAX_QUEUE_SIZE` | number | 2048 | No | Max pending log records |
+| `VICTORIALOGS_OTLP_MAX_EXPORT_BATCH_SIZE` | number | 512 | No | Max records per export batch |
+
+VictoriaLogs secret fields can be loaded from environment variables, flat
+`secrets.yaml` keys, or nested `api_keys.*` keys. Runtime switches and
+batching values stay in environment variables or `.env`.
 
 ### DOM Structure Extraction (Advanced)
 
@@ -343,7 +389,7 @@ The config module automatically detects legacy names and uses them as fallback, 
 
 **Check:**
 1. API_TOKEN is set in `.env`, environment, or `secrets.yaml`
-2. `secrets.yaml` has correct structure: `api_keys.smart_scraper`
+2. `secrets.yaml` has a supported flat key such as `smart_scraper` or nested key such as `api_keys.smart_scraper`
 3. Secrets.yaml is readable (check file permissions)
 
 ### "Chromium executable not found"

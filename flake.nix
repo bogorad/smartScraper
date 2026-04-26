@@ -17,6 +17,50 @@
       flake-utils,
       sops-nix,
     }:
+    let
+      secretEnvKeys = [
+        {
+          yamlKey = "smart_scraper";
+          envKey = "API_TOKEN";
+        }
+        {
+          yamlKey = "openrouter";
+          envKey = "OPENROUTER_API_KEY";
+        }
+        {
+          yamlKey = "twocaptcha";
+          envKey = "TWOCAPTCHA_API_KEY";
+        }
+        {
+          yamlKey = "datadome_proxy_host";
+          envKey = "DATADOME_PROXY_HOST";
+        }
+        {
+          yamlKey = "datadome_proxy_login";
+          envKey = "DATADOME_PROXY_LOGIN";
+        }
+        {
+          yamlKey = "datadome_proxy_password";
+          envKey = "DATADOME_PROXY_PASSWORD";
+        }
+        {
+          yamlKey = "victorialogs_otlp_endpoint";
+          envKey = "VICTORIALOGS_OTLP_ENDPOINT";
+        }
+        {
+          yamlKey = "victorialogs_otlp_headers";
+          envKey = "VICTORIALOGS_OTLP_HEADERS";
+        }
+        {
+          yamlKey = "victorialogs_otlp_auth_header_name";
+          envKey = "VICTORIALOGS_OTLP_AUTH_HEADER_NAME";
+        }
+        {
+          yamlKey = "victorialogs_otlp_auth_header_value";
+          envKey = "VICTORIALOGS_OTLP_AUTH_HEADER_VALUE";
+        }
+      ];
+    in
     flake-utils.lib.eachDefaultSystem (
       system:
       let
@@ -109,7 +153,11 @@
             # Load secrets from sops-encrypted secrets.yaml
             if [ -f secrets.yaml ]; then
               echo "Loading secrets from secrets.yaml..."
-              eval "$(sops decrypt secrets.yaml 2>/dev/null | yq e 'to_entries | map("export " + (.key | upcase) + "=" + (.value | @sh)) | .[]' -)" && {
+              SMART_SCRAPER_SECRETS="$(sops decrypt secrets.yaml 2>/dev/null)" && {
+                ${pkgs.lib.concatMapStringsSep "\n                " (secret: ''
+                  export ${secret.envKey}="$(printf '%s\n' "$SMART_SCRAPER_SECRETS" | yq e '.${secret.yamlKey} // .api_keys.${secret.yamlKey} // ""' -)"
+                '') secretEnvKeys}
+                unset SMART_SCRAPER_SECRETS
                 echo "Secrets loaded."
               } || echo "Warning: Failed to decrypt secrets.yaml (check sops config)"
             else
@@ -209,11 +257,7 @@
           config = lib.mkIf cfg.enable {
             sops.secrets =
               lib.genAttrs
-                [
-                  "api_keys/smart_scraper"
-                  "api_keys/openrouter"
-                  "api_keys/twocaptcha"
-                ]
+                (map (secret: "api_keys/${secret.yamlKey}") secretEnvKeys)
                 (_: {
                   sopsFile = cfg.sopsSecretsFile;
                   owner = cfg.user;
@@ -261,13 +305,11 @@
                   ''}
 
                   # Load secrets from sops-nix
-                  export API_TOKEN=$(cat ${config.sops.secrets."api_keys/smart_scraper".path} 2>/dev/null || echo "")
-                  export OPENROUTER_API_KEY=$(cat ${
-                    config.sops.secrets."api_keys/openrouter".path
-                  } 2>/dev/null || echo "")
-                  export TWOCAPTCHA_API_KEY=$(cat ${
-                    config.sops.secrets."api_keys/twocaptcha".path
-                  } 2>/dev/null || echo "")
+                  ${lib.concatMapStringsSep "\n                  " (secret: ''
+                    export ${secret.envKey}="$(cat ${
+                      config.sops.secrets."api_keys/${secret.yamlKey}".path
+                    } 2>/dev/null || echo "")"
+                  '') secretEnvKeys}
 
                   exec ${pkg}/bin/smart-scraper
                 '';

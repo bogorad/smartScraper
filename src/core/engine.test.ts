@@ -97,9 +97,6 @@ describe("CoreScraperEngine", () => {
       injectTurnstileToken: vi
         .fn()
         .mockResolvedValue(undefined),
-      extractEmbeddedArticle: vi
-        .fn()
-        .mockResolvedValue(null),
     };
 
     mockLlm = {
@@ -743,10 +740,15 @@ describe("CoreScraperEngine", () => {
       mockKnownSites.getConfig = vi
         .fn()
         .mockResolvedValue(undefined);
+      // Content must be >= 200 chars (SCORING.MIN_CONTENT_CHARS)
+      const longContent =
+        "This is a long article extracted from embedded JSON. ".repeat(
+          10,
+        );
       mockBrowser.getPageHtml = vi
         .fn()
         .mockResolvedValue(
-          "<html><body>Content</body></html>",
+          `<html><body><script type="application/ld+json">{"articleBody":${JSON.stringify(longContent)}}</script></body></html>`,
         );
       // LLM returns suggestions, but they all fail validation (getElementDetails returns null)
       mockLlm.suggestXPaths = vi.fn().mockResolvedValue([
@@ -758,14 +760,6 @@ describe("CoreScraperEngine", () => {
       mockBrowser.getElementDetails = vi
         .fn()
         .mockResolvedValue(null); // All suggestions fail
-      // Content must be >= 200 chars (SCORING.MIN_CONTENT_CHARS)
-      const longContent =
-        "This is a long article extracted from embedded JSON. ".repeat(
-          10,
-        );
-      mockBrowser.extractEmbeddedArticle = vi
-        .fn()
-        .mockResolvedValue(longContent);
 
       const result = await engine.scrapeUrl(
         "https://example.com/article",
@@ -773,9 +767,6 @@ describe("CoreScraperEngine", () => {
 
       expect(result.success).toBe(true);
       expect(result.xpath).toBe("embedded_json");
-      expect(
-        mockBrowser.extractEmbeddedArticle,
-      ).toHaveBeenCalledWith("page-123");
     });
 
     it("should fail when embedded JSON content is too short", async () => {
@@ -785,7 +776,7 @@ describe("CoreScraperEngine", () => {
       mockBrowser.getPageHtml = vi
         .fn()
         .mockResolvedValue(
-          "<html><body>Content</body></html>",
+          '<html><body><script type="application/ld+json">{"articleBody":"Too short"}</script></body></html>',
         );
       mockLlm.suggestXPaths = vi.fn().mockResolvedValue([
         {
@@ -796,9 +787,6 @@ describe("CoreScraperEngine", () => {
       mockBrowser.getElementDetails = vi
         .fn()
         .mockResolvedValue(null);
-      mockBrowser.extractEmbeddedArticle = vi
-        .fn()
-        .mockResolvedValue("Too short");
 
       const result = await engine.scrapeUrl(
         "https://example.com/article",
@@ -826,9 +814,6 @@ describe("CoreScraperEngine", () => {
       mockBrowser.getElementDetails = vi
         .fn()
         .mockResolvedValue(null);
-      mockBrowser.extractEmbeddedArticle = vi
-        .fn()
-        .mockResolvedValue(null);
 
       const result = await engine.scrapeUrl(
         "https://example.com/article",
@@ -845,7 +830,7 @@ describe("CoreScraperEngine", () => {
       mockBrowser.getPageHtml = vi
         .fn()
         .mockResolvedValue(
-          "<html><body>Content</body></html>",
+          `<html><body><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"article":{"body":${JSON.stringify("A".repeat(300))}}}}}</script></body></html>`,
         );
       mockLlm.suggestXPaths = vi.fn().mockResolvedValue([
         {
@@ -856,10 +841,6 @@ describe("CoreScraperEngine", () => {
       mockBrowser.getElementDetails = vi
         .fn()
         .mockResolvedValue(null);
-      const content = "A".repeat(300); // Long enough content
-      mockBrowser.extractEmbeddedArticle = vi
-        .fn()
-        .mockResolvedValue(content);
 
       const result = await engine.scrapeUrl(
         "https://example.com/article",
@@ -875,14 +856,14 @@ describe("CoreScraperEngine", () => {
       });
     });
 
-    it("should handle exceptions from extractEmbeddedArticle gracefully", async () => {
+    it("should ignore malformed embedded JSON", async () => {
       mockKnownSites.getConfig = vi
         .fn()
         .mockResolvedValue(undefined);
       mockBrowser.getPageHtml = vi
         .fn()
         .mockResolvedValue(
-          "<html><body>Content</body></html>",
+          '<html><body><script type="application/ld+json">{not json}</script></body></html>',
         );
       mockLlm.suggestXPaths = vi.fn().mockResolvedValue([
         {
@@ -893,24 +874,13 @@ describe("CoreScraperEngine", () => {
       mockBrowser.getElementDetails = vi
         .fn()
         .mockResolvedValue(null);
-      mockBrowser.extractEmbeddedArticle = vi
-        .fn()
-        .mockRejectedValue(
-          new Error("Browser context error"),
-        );
 
       const result = await engine.scrapeUrl(
         "https://example.com/article",
       );
 
-      // Verify the fallback path was attempted
-      expect(
-        mockBrowser.extractEmbeddedArticle,
-      ).toHaveBeenCalledWith("page-123");
-
-      // Engine should handle the exception and return an error result
       expect(result.success).toBe(false);
-      expect(result.errorType).toBe(ERROR_TYPES.UNKNOWN);
+      expect(result.errorType).toBe(ERROR_TYPES.EXTRACTION);
     });
   });
 
