@@ -52,8 +52,6 @@ function normalizeSiteConfigMethod(
   method: unknown,
 ): SiteConfigMethod | undefined {
   if (method === undefined) return undefined;
-  if (method === "puppeteer_stealth") return "chrome";
-  if (method === "obscura_simple_fetch") return "curl";
   if (
     typeof method === "string" &&
     SITE_CONFIG_METHODS.has(method as SiteConfigMethod)
@@ -161,6 +159,7 @@ async function quarantineCorruptSitesFile(
 
 export class FsKnownSitesAdapter implements KnownSitesPort {
   private cache: SiteConfig[] | null = null;
+  private cacheSignature: string | null = null;
   private writeQueue = new PQueue({ concurrency: 1 });
 
   private async ensureFile(): Promise<void> {
@@ -174,24 +173,29 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   }
 
   private async load(): Promise<SiteConfig[]> {
-    if (this.cache) return [...this.cache]; // Return copy to prevent external mutation
     await this.ensureFile();
-    const content = await fs.readFile(
-      getSitesFile(),
-      "utf-8",
-    );
+    const sitesFile = getSitesFile();
+    const stat = await fs.stat(sitesFile);
+    const signature = `${stat.mtimeMs}:${stat.size}`;
+    if (this.cache && this.cacheSignature === signature) {
+      return [...this.cache]; // Return copy to prevent external mutation
+    }
+    const content = await fs.readFile(sitesFile, "utf-8");
     try {
       const parsed = parse(content) as unknown;
       if (!Array.isArray(parsed)) {
         throw new Error("sites file must contain an array");
       }
       this.cache = (parsed as SiteConfig[]).map(normalizeSiteConfig);
+      this.cacheSignature = signature;
     } catch (error) {
       await quarantineCorruptSitesFile(
-        getSitesFile(),
+        sitesFile,
         error,
       );
       this.cache = [];
+      const recoveredStat = await fs.stat(sitesFile);
+      this.cacheSignature = `${recoveredStat.mtimeMs}:${recoveredStat.size}`;
     }
     logger.debug(
       `[SITES] Loaded ${this.cache.length} site configs`,
@@ -209,6 +213,8 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
     await fs.writeFile(tempFile, content);
     await fs.rename(tempFile, sitesFile);
     this.cache = configs; // Update cache only after successful write
+    const stat = await fs.stat(sitesFile);
+    this.cacheSignature = `${stat.mtimeMs}:${stat.size}`;
   }
 
   // Reads use cache directly - no queue needed

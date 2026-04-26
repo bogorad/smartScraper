@@ -33,18 +33,34 @@ func EnsureSocketDir() error {
 
 // Start creates a new detached tmux session, killing any existing one first
 func (t *TmuxSession) Start(verbose bool) error {
-	// Kill any existing session first (ignore error if none exists)
-	_ = t.Kill()
+	// Kill any existing session first, then remove stale socket files left by a
+	// crashed tmux server. Each worker uses a dedicated socket.
+	t.CleanupStaleState(verbose)
 
 	// Create new detached session
-	cmd := exec.Command("tmux", "-S", t.Socket, "new", "-d", "-s", t.Name)
+	args := []string{"-S", t.Socket, "new", "-d", "-s", t.Name}
+	cmd := exec.Command("tmux", args...)
 	if verbose {
 		fmt.Printf("[tmux] Creating session: %s (socket: %s)\n", t.Name, t.Socket)
 	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to create tmux session %s: %w (output: %s)", t.Name, err, string(output))
+		t.CleanupStaleState(verbose)
+		retryOutput, retryErr := exec.Command("tmux", args...).CombinedOutput()
+		if retryErr == nil {
+			output = retryOutput
+		} else {
+			return fmt.Errorf("failed to create tmux session %s: %w (socket: %s, command: %s, output: %s, retry: %v, retry output: %s)",
+				t.Name,
+				err,
+				t.Socket,
+				tmuxCommandString(args),
+				strings.TrimSpace(string(output)),
+				retryErr,
+				strings.TrimSpace(string(retryOutput)),
+			)
+		}
 	}
 
 	// Wait for session to be fully ready (window :0.0 must exist)
@@ -56,7 +72,7 @@ func (t *TmuxSession) Start(verbose bool) error {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	return fmt.Errorf("tmux session %s created but not ready after 500ms", t.Name)
+	return fmt.Errorf("tmux session %s created but not ready after 500ms (socket: %s, command: %s)", t.Name, t.Socket, tmuxCommandString(args))
 }
 
 // SendCommand sends a command to the tmux session
@@ -86,6 +102,17 @@ func (t *TmuxSession) Kill() error {
 	return nil
 }
 
+// CleanupStaleState removes stale per-worker tmux state before startup.
+func (t *TmuxSession) CleanupStaleState(verbose bool) {
+	if err := t.Kill(); err != nil && verbose {
+		fmt.Printf("[tmux] No existing session killed for %s: %v\n", t.Name, err)
+	}
+
+	if err := os.Remove(t.Socket); err != nil && !os.IsNotExist(err) && verbose {
+		fmt.Printf("[tmux] Failed to remove stale socket %s: %v\n", t.Socket, err)
+	}
+}
+
 // Exists checks if the tmux session exists
 func (t *TmuxSession) Exists() bool {
 	cmd := exec.Command("tmux", "-S", t.Socket, "has-session", "-t", t.Name)
@@ -105,4 +132,8 @@ func (t *TmuxSession) CapturePaneOutput(lines int) (string, error) {
 	}
 
 	return strings.TrimSpace(string(output)), nil
+}
+
+func tmuxCommandString(args []string) string {
+	return "tmux " + strings.Join(args, " ")
 }

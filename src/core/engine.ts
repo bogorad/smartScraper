@@ -2,19 +2,23 @@ import PQueue from "p-queue";
 import fs from "fs";
 import path from "path";
 import { EventEmitter } from "events";
-import { parseHTML } from "linkedom";
 import type {
   BrowserPort,
   LlmPort,
   CaptchaPort,
   KnownSitesPort,
-  SimpleFetchPort,
 } from "../ports/index.js";
+import type {
+  CurlFetchFailure,
+  CurlFetchPort,
+} from "../ports/curl-fetch.js";
 import type {
   ScrapeOptions,
   ScrapeResult,
   ScrapeContext,
-  ElementDetails,
+  SiteConfig,
+  SiteConfigCaptcha,
+  SiteConfigProxy,
 } from "../domain/models.js";
 import {
   METHODS,
@@ -38,6 +42,7 @@ import {
   toMarkdown,
 } from "../utils/html-cleaner.js";
 import { extractEmbeddedArticleFromHtml } from "./embedded-article.js";
+import { extractStaticArticleFromHtml } from "./static-html.js";
 import { scoreElement } from "./scoring.js";
 import { recordScrapeOutcome } from "../services/scrape-events.js";
 import { logger } from "../utils/logger.js";
@@ -47,11 +52,19 @@ import {
   getDatadomeProxyLogin,
   getDatadomeProxyPassword,
   getConcurrency,
-  getExtensionPaths,
   getProxyServer,
 } from "../config.js";
 
 export const workerEvents = new EventEmitter();
+
+interface CurlFailureEvidence {
+  reason: string;
+  message: string;
+  statusCode?: number;
+  stderr?: string;
+  exitCode?: number;
+  htmlLength?: number;
+}
 
 export class CoreScraperEngine {
   private static readonly MAX_QUEUE_SIZE = 100;
@@ -64,7 +77,7 @@ export class CoreScraperEngine {
     private llmPort: LlmPort,
     private captchaPort: CaptchaPort,
     private knownSitesPort: KnownSitesPort,
-    private simpleFetchPort?: SimpleFetchPort,
+    private curlFetchPort?: CurlFetchPort,
   ) {
     this.maxWorkers = getConcurrency();
     this.queue = new PQueue({
@@ -101,7 +114,7 @@ export class CoreScraperEngine {
     rawContent: string,
     outputType: string,
     cleanerOptions?: { siteCleanupClasses?: string[] },
-    method: MethodValue = METHODS.PUPPETEER_STEALTH,
+    method: MethodValue = METHODS.CHROME,
     fullHtml?: string,
   ): Promise<ScrapeResult> {
     let data: string | object;
@@ -244,6 +257,14 @@ export class CoreScraperEngine {
 
     let result: ScrapeResult;
     let pageId: string | null = null;
+    let curlFailureEvidence:
+      | CurlFailureEvidence
+      | undefined;
+    let discoveredXPath = false;
+    let captchaStrategy: SiteConfigCaptcha = CAPTCHA_TYPES.NONE;
+    let proxyStrategy: SiteConfigProxy = "none";
+    context.captchaStrategy = captchaStrategy;
+    context.proxyStrategy = proxyStrategy;
 
     try {
       context.siteConfig =
@@ -269,41 +290,99 @@ export class CoreScraperEngine {
           ? headers
           : undefined;
 
-      const datadomePageProxy =
+      const shouldTryCurl =
+        !options?.xpathOverride &&
+        this.curlFetchPort &&
+        (!context.siteConfig ||
+          context.siteConfig.method === METHODS.CURL);
+      if (shouldTryCurl) {
+        context.methodAttempted = METHODS.CURL;
+        const curlResult = await this.tryCurlScrape(
+          url,
+          options,
+          pageLoadHeaders,
+          userAgentString,
+          context.siteConfig?.xpathMainContent,
+        );
+
+        if (curlResult.result) {
+          result = curlResult.result;
+          await this.saveSuccessfulStrategyConfig(
+            context,
+            result.xpath ?? "embedded_json",
+            METHODS.CURL,
+            CAPTCHA_TYPES.NONE,
+            "none",
+            false,
+          );
+          await this.recordResult(
+            context,
+            result,
+            startTime,
+            curlResult.contentLength,
+          );
+          return result;
+        }
+
+        curlFailureEvidence = curlResult.failure;
+        logger.warn(
+          "[ENGINE] Curl scrape failed; falling back to chrome",
+          {
+            scrapeId,
+            url,
+            domain,
+            curlFailure: curlFailureEvidence,
+          },
+          "ENGINE",
+        );
+      }
+
+      const datadomeSolverProxyRequired =
+        context.siteConfig?.captcha === CAPTCHA_TYPES.DATADOME ||
+        context.siteConfig?.proxy === "datadome" ||
         context.siteConfig?.needsProxy ===
-        PROXY_MODES.DATADOME
-          ? this.buildDatadomeProxyUrl(
-              scrapeId,
-              domain,
-              "site requires DataDome proxy",
-            )
-          : undefined;
+          PROXY_MODES.DATADOME;
+      const datadomeSolverProxy = datadomeSolverProxyRequired
+        ? this.buildDatadomeProxyUrl(
+            scrapeId,
+            domain,
+            "site requires DataDome solver proxy",
+          )
+        : undefined;
 
       const defaultProxy = getProxyServer() || undefined;
       const pageLoadProxy =
-        datadomePageProxy ??
         context.proxyDetails?.server ??
-        defaultProxy;
+        (context.siteConfig?.proxy === "none"
+          ? undefined
+          : defaultProxy);
+      const loadPageProxy =
+        pageLoadProxy ?? (context.siteConfig?.proxy === "none"
+          ? false
+          : undefined);
+      proxyStrategy = this.siteConfigProxyStrategy(
+        pageLoadProxy,
+      );
+      context.proxyStrategy = proxyStrategy;
+      logger.debug(
+        "Resolved page and solver proxy strategies",
+        {
+          pageProxyStrategy: proxyStrategy,
+          solverProxyStrategy: datadomeSolverProxy
+            ? "datadome"
+            : "none",
+          siteProxy: context.siteConfig?.proxy,
+          needsProxy: context.siteConfig?.needsProxy,
+        },
+        "ENGINE",
+      );
 
-      const simpleFetchResult =
-        await this.trySimpleFetchScrape(
-          context,
-          options,
-          startTime,
-          userAgentString,
-          pageLoadHeaders,
-          pageLoadProxy,
-        );
-
-      if (simpleFetchResult) {
-        return simpleFetchResult;
-      }
-
+      context.methodAttempted = METHODS.CHROME;
       const { pageId: pid } =
         await this.browserPort.loadPage(url, {
           timeout:
             options?.timeoutMs || DEFAULTS.TIMEOUT_MS,
-          proxy: pageLoadProxy,
+          proxy: loadPageProxy,
           userAgentString,
           headers: pageLoadHeaders,
         });
@@ -322,11 +401,45 @@ export class CoreScraperEngine {
       );
 
       if (captchaDetection.type !== CAPTCHA_TYPES.NONE) {
+        if (captchaDetection.type === CAPTCHA_TYPES.DATADOME) {
+          captchaStrategy = CAPTCHA_TYPES.DATADOME;
+          proxyStrategy = "datadome";
+          context.captchaStrategy = captchaStrategy;
+          context.proxyStrategy = proxyStrategy;
+        }
         logger.captchaDetected(
           scrapeId,
           url,
           captchaDetection.type,
         );
+
+        const unsupportedCaptchaType =
+          this.unsupportedCaptchaType(
+            captchaDetection.type,
+          );
+        if (unsupportedCaptchaType) {
+          captchaStrategy =
+            unsupportedCaptchaType as SiteConfigCaptcha;
+          context.captchaStrategy = captchaStrategy;
+          result = {
+            success: false,
+            errorType: ERROR_TYPES.CAPTCHA,
+            error: `Unsupported CAPTCHA type: ${unsupportedCaptchaType}`,
+            details: {
+              captchaType: unsupportedCaptchaType,
+            },
+          };
+          this.attachCurlFailureEvidence(
+            result,
+            curlFailureEvidence,
+          );
+          await this.recordResult(
+            context,
+            result,
+            startTime,
+          );
+          return result;
+        }
 
         const captchaStart = Date.now();
         const solveResult =
@@ -337,11 +450,12 @@ export class CoreScraperEngine {
             captchaTypeHint: captchaDetection.type,
             siteKey: captchaDetection.siteKey,
             proxyDetails:
-              captchaDetection.type === CAPTCHA_TYPES.DATADOME
+              captchaDetection.type ===
+              CAPTCHA_TYPES.DATADOME
                 ? this.getDatadomeCaptchaProxyDetails(
                     scrapeId,
                     domain,
-                    datadomePageProxy,
+                    datadomeSolverProxy,
                   )
                 : pageLoadProxy
                   ? { server: pageLoadProxy }
@@ -365,6 +479,10 @@ export class CoreScraperEngine {
             error:
               solveResult.reason || "CAPTCHA solve failed",
           };
+          this.attachCurlFailureEvidence(
+            result,
+            curlFailureEvidence,
+          );
           await this.recordResult(
             context,
             result,
@@ -373,21 +491,7 @@ export class CoreScraperEngine {
           return result;
         }
 
-        // Handle Cloudflare Turnstile token injection
-        if (
-          captchaDetection.type ===
-            CAPTCHA_TYPES.CLOUDFLARE &&
-          solveResult.token
-        ) {
-          await this.browserPort.injectTurnstileToken(
-            pageId,
-            solveResult.token,
-          );
-          await this.browserPort.reload(
-            pageId,
-            options?.timeoutMs || DEFAULTS.TIMEOUT_MS,
-          );
-        } else if (solveResult.updatedCookie) {
+        if (solveResult.updatedCookie) {
           await this.browserPort.setCookies(
             pageId,
             solveResult.updatedCookie,
@@ -429,6 +533,30 @@ export class CoreScraperEngine {
             logger.debug(
               `[ENGINE] Validation failed for cached XPath ${xpath}, but discovery is disabled.`,
             );
+            result = {
+              success: false,
+              errorType: ERROR_TYPES.EXTRACTION,
+              error:
+                "Cached XPath content did not meet minimum content length and discovery is disabled",
+              details: {
+                xpath,
+                contentLength: extracted?.[0]?.length || 0,
+                minContentLength: SCORING.MIN_CONTENT_CHARS,
+              },
+            };
+            this.attachCurlFailureEvidence(
+              result,
+              curlFailureEvidence,
+            );
+            await this.knownSitesPort.incrementFailure(
+              domain,
+            );
+            await this.recordResult(
+              context,
+              result,
+              startTime,
+            );
+            return result;
           } else {
             needsDiscovery = true;
             xpath = undefined; // Reset xpath so discovery result is used
@@ -464,20 +592,6 @@ export class CoreScraperEngine {
           `[ENGINE] LLM returned ${suggestions.length} suggestions`,
         );
 
-        if (suggestions.length === 0) {
-          result = {
-            success: false,
-            errorType: ERROR_TYPES.LLM,
-            error: "No XPath suggestions",
-          };
-          await this.recordResult(
-            context,
-            result,
-            startTime,
-          );
-          return result;
-        }
-
         for (const suggestion of suggestions) {
           const details =
             await this.browserPort.getElementDetails(
@@ -499,14 +613,7 @@ export class CoreScraperEngine {
             logger.debug(
               `[ENGINE] Accepted new XPath: ${xpath}`,
             );
-
-            await this.knownSitesPort.saveConfig({
-              domainPattern: domain,
-              xpathMainContent: xpath,
-              failureCountSinceLastSuccess: 0,
-              lastSuccessfulScrapeTimestamp: utcNow(),
-              discoveredByLlm: true,
-            });
+            discoveredXPath = true;
             break;
           }
         }
@@ -536,6 +643,18 @@ export class CoreScraperEngine {
               "embedded_json",
               embeddedContent,
               outputType,
+            );
+            this.attachCurlFailureEvidence(
+              result,
+              curlFailureEvidence,
+            );
+            await this.saveSuccessfulStrategyConfig(
+              context,
+              "embedded_json",
+              METHODS.CHROME,
+              captchaStrategy,
+              proxyStrategy,
+              false,
             );
 
             await this.recordResult(
@@ -574,6 +693,10 @@ export class CoreScraperEngine {
             errorType: ERROR_TYPES.EXTRACTION,
             error: "No valid XPath found",
           };
+          this.attachCurlFailureEvidence(
+            result,
+            curlFailureEvidence,
+          );
           await this.recordResult(
             context,
             result,
@@ -625,6 +748,10 @@ export class CoreScraperEngine {
           errorType: ERROR_TYPES.EXTRACTION,
           error: "Extraction returned empty",
         };
+        this.attachCurlFailureEvidence(
+          result,
+          curlFailureEvidence,
+        );
         await this.knownSitesPort.incrementFailure(domain);
         await this.recordResult(context, result, startTime);
         return result;
@@ -647,6 +774,20 @@ export class CoreScraperEngine {
         outputType,
         cleanerOptions,
       );
+      this.attachCurlFailureEvidence(
+        result,
+        curlFailureEvidence,
+      );
+      if (discoveredXPath) {
+        await this.saveSuccessfulStrategyConfig(
+          context,
+          xpath!,
+          METHODS.CHROME,
+          captchaStrategy,
+          proxyStrategy,
+          true,
+        );
+      }
 
       await this.recordResult(
         context,
@@ -672,6 +813,10 @@ export class CoreScraperEngine {
         errorType: ERROR_TYPES.UNKNOWN,
         error: message,
       };
+      this.attachCurlFailureEvidence(
+        result,
+        curlFailureEvidence,
+      );
       await this.recordResult(context, result, startTime);
       return result;
     } finally {
@@ -702,149 +847,167 @@ export class CoreScraperEngine {
     });
   }
 
-  private async trySimpleFetchScrape(
+  private async saveSuccessfulStrategyConfig(
     context: ScrapeContext,
-    options: ScrapeOptions | undefined,
-    startTime: number,
-    userAgentString: string | undefined,
-    headers: Record<string, string> | undefined,
-    pageLoadProxy: string | undefined,
-  ): Promise<ScrapeResult | null> {
-    if (
-      !this.isSimpleFetchEligible(
-        context,
-        options,
-        headers,
-        pageLoadProxy,
-      )
-    ) {
-      return null;
-    }
-
-    try {
-      const html = await this.simpleFetchPort!.fetchHtml(
-        context.targetUrl,
-        {
-          timeoutMs:
-            options?.timeoutMs || DEFAULTS.TIMEOUT_MS,
-          userAgentString,
-        },
-      );
-
-      let xpathSelector: string | undefined =
-        options?.xpathOverride;
-      let needsDiscovery =
-        !options?.disableDiscovery &&
-        !xpathSelector &&
-        (!context.siteConfig?.xpathMainContent ||
-          context.siteConfig.failureCountSinceLastSuccess >=
-            DEFAULTS.MAX_REDISCOVERY_FAILURES);
-
-      if (
-        !xpathSelector &&
-        !needsDiscovery &&
-        context.siteConfig?.xpathMainContent
-      ) {
-        xpathSelector = context.siteConfig.xpathMainContent;
-        const extracted = this.evaluateHtmlXPath(
-          html,
-          xpathSelector,
-        );
-
-        if (
-          !extracted ||
-          extracted.length === 0 ||
-          extracted[0].length < SCORING.MIN_CONTENT_CHARS
-        ) {
-          if (options?.disableDiscovery) {
-            return null;
-          }
-
-          needsDiscovery = true;
-          xpathSelector = undefined;
-        }
-      }
-
-      if (needsDiscovery) {
-        const suggestions =
-          await this.llmPort.suggestXPaths({
-            simplifiedDom: simplifyDom(html),
-            snippets: extractSnippets(html),
-            url: context.targetUrl,
-          });
-
-        for (const suggestion of suggestions) {
-          const details = this.getHtmlElementDetails(
-            html,
-            suggestion.xpath,
-          );
-          if (!details) continue;
-
-          const score = scoreElement(details);
-          if (
-            score >= SCORING.MIN_SCORE_THRESHOLD &&
-            details.textLength >= SCORING.MIN_CONTENT_CHARS
-          ) {
-            xpathSelector = suggestion.xpath;
-            await this.knownSitesPort.saveConfig({
-              domainPattern: context.normalizedDomain,
-              xpathMainContent: xpathSelector,
-              failureCountSinceLastSuccess: 0,
-              lastSuccessfulScrapeTimestamp: utcNow(),
-              discoveredByLlm: true,
-            });
-            break;
-          }
-        }
-
-        if (!xpathSelector) {
-          return null;
-        }
-      }
-
-      const extracted = this.evaluateHtmlXPath(
-        html,
-        xpathSelector!,
-      );
-      if (!extracted || extracted.length === 0) {
-        return null;
-      }
-
-      await this.knownSitesPort.markSuccess(
+    xpath: string,
+    method: MethodValue,
+    captcha: SiteConfigCaptcha,
+    proxy: SiteConfigProxy,
+    discoveredByLlm: boolean,
+  ): Promise<void> {
+    const config: SiteConfig = {
+      ...(context.siteConfig ?? {}),
+      domainPattern:
+        context.siteConfig?.domainPattern ??
         context.normalizedDomain,
-      );
+      xpathMainContent: xpath,
+      failureCountSinceLastSuccess: 0,
+      lastSuccessfulScrapeTimestamp: utcNow(),
+      discoveredByLlm,
+      method,
+      captcha,
+      proxy,
+      needsProxy:
+        proxy === "datadome"
+          ? PROXY_MODES.DATADOME
+          : PROXY_MODES.OFF,
+    };
 
-      const outputType =
-        options?.outputType || OUTPUT_TYPES.CONTENT_ONLY;
-      const rawHtml = extracted.join("\n");
-      const result = await this.buildSuccessResult(
-        null,
-        xpathSelector!,
-        rawHtml,
-        outputType,
-        {
-          siteCleanupClasses:
-            context.siteConfig?.siteCleanupClasses,
+    await this.knownSitesPort.saveConfig(config);
+    context.siteConfig = config;
+  }
+
+  private siteConfigProxyStrategy(
+    pageLoadProxy: string | undefined,
+  ): SiteConfigProxy {
+    return pageLoadProxy ? "default" : "none";
+  }
+
+  private async tryCurlScrape(
+    url: string,
+    options: ScrapeOptions | undefined,
+    headers: Record<string, string> | undefined,
+    userAgentString: string | undefined,
+    preferredXPath?: string,
+  ): Promise<{
+    result?: ScrapeResult;
+    failure?: CurlFailureEvidence;
+    contentLength?: number;
+  }> {
+    if (!this.curlFetchPort) {
+      return {
+        failure: {
+          reason: "not_configured",
+          message: "Curl fetch port is not configured",
         },
-        'obscura_simple_fetch' as MethodValue,
-        html,
-      );
-
-      await this.recordResult(
-        context,
-        result,
-        startTime,
-        rawHtml.length,
-      );
-      return result;
-    } catch (error) {
-      logger.debug(
-        "Obscura simple fetch skipped after failure",
-        { error: String(error), url: context.targetUrl },
-        "ENGINE",
-      );
-      return null;
+      };
     }
+
+    const curlResult = await this.curlFetchPort.fetchHtml(
+      url,
+      {
+        timeoutMs:
+          options?.timeoutMs || DEFAULTS.TIMEOUT_MS,
+        headers,
+        userAgentString,
+        proxy: false,
+      },
+    );
+
+    if (!curlResult.ok) {
+      return {
+        failure: this.buildCurlFailureEvidence(curlResult),
+      };
+    }
+
+    const embeddedContent = extractEmbeddedArticleFromHtml(
+      curlResult.html,
+    );
+
+    const staticContent =
+      !embeddedContent ||
+      embeddedContent.length < SCORING.MIN_CONTENT_CHARS
+        ? extractStaticArticleFromHtml(
+            curlResult.html,
+            preferredXPath,
+          )
+        : null;
+    const content = embeddedContent ?? staticContent?.html;
+    const contentXPath = embeddedContent
+      ? "embedded_json"
+      : staticContent?.xpath;
+
+    if (!content || !contentXPath) {
+      return {
+        failure: {
+          reason: "unusable_content",
+          message:
+            "Curl response did not contain usable article content",
+          statusCode: curlResult.statusCode,
+          htmlLength: curlResult.html.length,
+        },
+      };
+    }
+
+    const outputType =
+      options?.outputType || OUTPUT_TYPES.CONTENT_ONLY;
+    const result = await this.buildSuccessResult(
+      null,
+      contentXPath,
+      content,
+      outputType,
+      undefined,
+      METHODS.CURL,
+      curlResult.html,
+    );
+
+    logger.info(
+      "[ENGINE] Curl scrape succeeded for unknown site",
+      {
+        url,
+        statusCode: curlResult.statusCode,
+        contentLength: content.length,
+      },
+      "ENGINE",
+    );
+
+    return {
+      result,
+      contentLength: content.length,
+    };
+  }
+
+  private buildCurlFailureEvidence(
+    failure: CurlFetchFailure,
+  ): CurlFailureEvidence {
+    return {
+      reason: failure.reason,
+      message: failure.message,
+      statusCode: failure.statusCode,
+      stderr: failure.stderr,
+      exitCode: failure.exitCode,
+    };
+  }
+
+  private attachCurlFailureEvidence(
+    result: ScrapeResult,
+    failure: CurlFailureEvidence | undefined,
+  ): void {
+    if (!failure) {
+      return;
+    }
+
+    result.details = {
+      ...(typeof result.details === "object" &&
+      result.details !== null
+        ? result.details
+        : {}),
+      curlFallback: {
+        attemptedMethod: METHODS.CURL,
+        finalMethod: result.method ?? METHODS.CHROME,
+        failure,
+      },
+    };
   }
 
   private buildDatadomeProxyUrl(
@@ -898,178 +1061,23 @@ export class CoreScraperEngine {
     return proxy ? { server: proxy } : undefined;
   }
 
-  private isSimpleFetchEligible(
-    context: ScrapeContext,
-    options: ScrapeOptions | undefined,
-    headers: Record<string, string> | undefined,
-    pageLoadProxy: string | undefined,
-  ): boolean {
-    return (
-      !!this.simpleFetchPort &&
-      getExtensionPaths().length === 0 &&
-      !getProxyServer() &&
-      !pageLoadProxy &&
-      !options?.proxyDetails &&
-      !headers &&
-      !options?.debug &&
-      context.siteConfig?.needsProxy !==
-        PROXY_MODES.DATADOME
-    );
-  }
-
-  private evaluateHtmlXPath(
-    html: string,
-    xpathSelector: string,
-  ): string[] | null {
-    const nodes = this.selectHtmlNodes(html, xpathSelector);
-    if (!nodes) {
-      return null;
+  private unsupportedCaptchaType(
+    captchaType: string,
+  ): string | null {
+    switch (captchaType) {
+      case CAPTCHA_TYPES.RECAPTCHA:
+        return CAPTCHA_TYPES.RECAPTCHA;
+      case CAPTCHA_TYPES.TURNSTILE:
+      case "cloudflare":
+        return CAPTCHA_TYPES.TURNSTILE;
+      case CAPTCHA_TYPES.HCAPTCHA:
+        return CAPTCHA_TYPES.HCAPTCHA;
+      case CAPTCHA_TYPES.UNSUPPORTED:
+      case "generic":
+        return CAPTCHA_TYPES.UNSUPPORTED;
+      default:
+        return null;
     }
-
-    return nodes
-      .map((node) => this.htmlNodeValue(node))
-      .filter((value): value is string => !!value);
-  }
-
-  private getHtmlElementDetails(
-    html: string,
-    xpathSelector: string,
-  ): ElementDetails | null {
-    const nodes = this.selectHtmlNodes(html, xpathSelector);
-    const element = nodes?.find(
-      (node) => node.nodeType === 1,
-    ) as Element | undefined;
-    if (!element) {
-      return null;
-    }
-
-    const text = element.textContent || "";
-    const links = Array.from(element.querySelectorAll("a"));
-    const linkText = links
-      .map((link) => link.textContent || "")
-      .join("");
-
-    return {
-      xpath: xpathSelector,
-      textLength: text.length,
-      linkDensity:
-        text.length > 0 ? linkText.length / text.length : 0,
-      paragraphCount: element.querySelectorAll("p").length,
-      headingCount: element.querySelectorAll(
-        "h1,h2,h3,h4,h5,h6",
-      ).length,
-      hasMedia:
-        element.querySelectorAll("img,video,audio").length >
-        0,
-      domDepth: this.getDomDepth(element),
-      semanticScore: [
-        "article",
-        "main",
-        "section",
-      ].includes(element.tagName.toLowerCase())
-        ? 1
-        : 0,
-      unwantedTagScore: [
-        "nav",
-        "aside",
-        "footer",
-        "header",
-      ].includes(element.tagName.toLowerCase())
-        ? 1
-        : 0,
-    };
-  }
-
-  private selectHtmlNodes(
-    html: string,
-    xpathSelector: string,
-  ): Element[] | null {
-    const cssSelector = this.xpathToCss(xpathSelector);
-    if (!cssSelector) {
-      return null;
-    }
-
-    try {
-      const { document } = parseHTML(html);
-      return Array.from(
-        document.querySelectorAll(cssSelector),
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  private xpathToCss(xpathSelector: string): string | null {
-    const trimmed = xpathSelector.trim();
-    if (
-      !trimmed.startsWith("//") ||
-      trimmed.includes("|")
-    ) {
-      return null;
-    }
-
-    const parts = trimmed
-      .slice(2)
-      .split(/\/+/)
-      .map((part) => this.xpathStepToCss(part))
-      .filter((part): part is string => !!part);
-
-    return parts.length > 0 ? parts.join(" ") : null;
-  }
-
-  private xpathStepToCss(step: string): string | null {
-    const tagMatch = step.match(/^(\*|[a-zA-Z][\w-]*)/);
-    if (!tagMatch) {
-      return null;
-    }
-
-    const tag = tagMatch[1] === "*" ? "" : tagMatch[1];
-    const idMatch = step.match(/\[@id=(["'])([^"']+)\1\]/);
-    if (idMatch) {
-      return `${tag}#${this.cssEscape(idMatch[2])}`;
-    }
-
-    const classMatch = step.match(
-      /\[@class=(["'])([^"']+)\1\]/,
-    );
-    if (classMatch) {
-      return `${tag}[class~="${classMatch[2].replaceAll('"', '\\"')}"]`;
-    }
-
-    const containsClassMatch = step.match(
-      /contains\(\s*@class\s*,\s*(["'])([^"']+)\1\s*\)/,
-    );
-    if (containsClassMatch) {
-      return `${tag}[class*="${containsClassMatch[2].replaceAll('"', '\\"')}"]`;
-    }
-
-    return tag || "*";
-  }
-
-  private cssEscape(value: string): string {
-    return value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
-  }
-
-  private htmlNodeValue(node: Node): string | null {
-    if (node.nodeType === 1) {
-      return (node as Element).outerHTML;
-    }
-
-    if (node.nodeType === 2 || node.nodeType === 3) {
-      return node.nodeValue;
-    }
-
-    return null;
-  }
-
-  private getDomDepth(element: Element): number {
-    let depth = 0;
-    let current: Element | null = element;
-    while (current) {
-      depth++;
-      current = current.parentElement;
-    }
-    return depth;
   }
 }
 
@@ -1089,14 +1097,14 @@ export function initializeEngine(
   llmPort: LlmPort,
   captchaPort: CaptchaPort,
   knownSitesPort: KnownSitesPort,
-  simpleFetchPort?: SimpleFetchPort,
+  curlFetchPort?: CurlFetchPort,
 ): CoreScraperEngine {
   defaultEngine = new CoreScraperEngine(
     browserPort,
     llmPort,
     captchaPort,
     knownSitesPort,
-    simpleFetchPort,
+    curlFetchPort,
   );
   return defaultEngine;
 }

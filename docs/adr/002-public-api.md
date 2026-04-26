@@ -45,8 +45,8 @@ async function scrapeUrl(
 
 ```typescript
 const METHODS = {
-  PUPPETEER_STEALTH: 'puppeteer_stealth',
-  OBSCURA_SIMPLE_FETCH: 'obscura_simple_fetch'
+  CURL: 'curl',
+  CHROME: 'chrome'
 } as const;
 
 const OUTPUT_TYPES = {

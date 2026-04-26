@@ -11,7 +11,7 @@ SmartScraper exhibits a thoughtful hexagonal architecture with clearly separated
 - Hexagonal layout is respected: `src/core` orchestrates scraping, `src/ports` define contracts, `src/adapters` implement Puppeteer/OpenRouter/2Captcha/JSONC, `src/services` handle stats & logs, and Hono routes + HTMX components expose API/dashboard.
 - **New Utility**: `check-sites.ts` (run via `npm run check-sites`) validates the syntax and structure of the `data/sites.jsonc` configuration file.
 - `CoreScraperEngine` (PQueue concurrency = 1) serializes all scrapes; each request launches a new Chromium session and closes the entire adapter afterward, leading to high latency and poor throughput.
-- `TwoCaptchaAdapter` supports DataDome and generic CAPTCHA solving (integrated with config).
+- `TwoCaptchaAdapter` supports DataDome solving and explicit unsupported results for reCAPTCHA, Turnstile, and hCaptcha.
 - Configuration is centralized in `src/config.ts`.
 
 ### 2. Dependencies & Security

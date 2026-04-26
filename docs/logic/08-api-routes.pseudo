@@ -52,7 +52,7 @@ ROUTE POST /api/scrape:
     RESPONSE (success):
         {
             "success": true,
-            "method": "puppeteer_stealth",
+            "method": "chrome",
             "xpath": "//article[@class='post-content']",
             "data": "Article content text..."
         }

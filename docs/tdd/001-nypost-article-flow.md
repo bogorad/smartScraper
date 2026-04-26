@@ -98,7 +98,7 @@ BrowserPort.detectCaptcha("page-001")
 
 **Tests:**
 - `detects DataDome by iframe src pattern`
-- `detects generic CAPTCHAs (reCAPTCHA, hCaptcha)`
+- `detects unsupported CAPTCHAs (reCAPTCHA, hCaptcha)`
 - `returns "none" when no CAPTCHA present`
 
 ### Step 7: DOM Preparation for LLM
@@ -224,7 +224,7 @@ BrowserPort.close()
 Return ScrapeResult:
 {
   success: true,
-  method: "puppeteer_stealth",
+  method: "chrome",
   xpath: "//article[@class='article-content']",
   data: "Breaking news: Mayor announces new policy..."
 }
@@ -284,7 +284,7 @@ KnownSitesPort.markSuccess("nypost.com")
 ```
 {
   success: true,
-  method: "puppeteer_stealth",
+  method: "chrome",
   xpath: "//article[@class='article-content']",
   data: "Another article content..."
 }

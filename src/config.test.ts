@@ -149,12 +149,15 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getProxyServer()).toBe('http://explicit.example:8080');
   });
 
-  it('does not load raw SOPS encrypted values from secrets.yaml', async () => {
+  it('does not parse secrets.yaml at runtime', async () => {
     fs.writeFileSync(
       'secrets.yaml',
       [
-        'default_socks5_proxy: ENC[AES256_GCM,data:ciphertext,iv:iv,tag:tag,type:str]',
-        'datadome_proxy_host: ENC[AES256_GCM,data:ciphertext,iv:iv,tag:tag,type:str]'
+        'smart_scraper: token-from-yaml',
+        'openrouter: openrouter-from-yaml',
+        'twocaptcha: twocaptcha-from-yaml',
+        'default_socks5_proxy: socks5://yaml-default.example:1080',
+        'datadome_proxy_host: yaml-datadome.example:8000'
       ].join('\n')
     );
 
@@ -163,6 +166,9 @@ describe('config VictoriaLogs OTLP settings', () => {
     config.initConfig();
 
     expect(config.getProxyServer()).toBe('');
+    expect(config.getApiToken()).toBeNull();
+    expect(config.getOpenrouterApiKey()).toBe('');
+    expect(config.getTwocaptchaApiKey()).toBe('');
     expect(config.getDatadomeProxyHost()).toBe('');
   });
 
@@ -207,30 +213,25 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(() => config.initConfig()).toThrow(/browserNonExtensionPostNavWaitMs/);
   });
 
-  it('loads DataDome and VictoriaLogs secrets from flat secrets.yaml keys', async () => {
-    fs.writeFileSync(
-      'secrets.yaml',
-      [
-        'smart_scraper: token-from-flat',
-        'openrouter: openrouter-from-flat',
-        'twocaptcha: twocaptcha-from-flat',
-        'datadome_proxy_host: datadome.example:8000',
-        'datadome_proxy_login: datadome-login',
-        'datadome_proxy_password: datadome-password',
-        'default_socks5_proxy: socks5://default.example:1080',
-        'victorialogs_otlp_endpoint: http://victorialogs:9428/insert/opentelemetry/v1/logs',
-        'victorialogs_otlp_auth_header_name: Authorization',
-        'victorialogs_otlp_auth_header_value: Bearer vl-token'
-      ].join('\n')
-    );
+  it('loads uppercase env values exported by the dev secrets wrapper', async () => {
+    process.env.SMART_SCRAPER = 'token-from-env';
+    process.env.OPENROUTER = 'openrouter-from-env';
+    process.env.TWOCAPTCHA = 'twocaptcha-from-env';
+    process.env.DATADOME_PROXY_HOST = 'datadome.example:8000';
+    process.env.DATADOME_PROXY_LOGIN = 'datadome-login';
+    process.env.DATADOME_PROXY_PASSWORD = 'datadome-password';
+    process.env.DEFAULT_SOCKS5_PROXY = 'socks5://default.example:1080';
+    process.env.VICTORIALOGS_OTLP_ENDPOINT = 'http://victorialogs:9428/insert/opentelemetry/v1/logs';
+    process.env.VICTORIALOGS_OTLP_AUTH_HEADER_NAME = 'Authorization';
+    process.env.VICTORIALOGS_OTLP_AUTH_HEADER_VALUE = 'Bearer vl-token';
 
     const config = await import('./config.js');
 
     config.initConfig();
 
-    expect(config.getApiToken()).toBe('token-from-flat');
-    expect(config.getOpenrouterApiKey()).toBe('openrouter-from-flat');
-    expect(config.getTwocaptchaApiKey()).toBe('twocaptcha-from-flat');
+    expect(config.getApiToken()).toBe('token-from-env');
+    expect(config.getOpenrouterApiKey()).toBe('openrouter-from-env');
+    expect(config.getTwocaptchaApiKey()).toBe('twocaptcha-from-env');
     expect(config.getDatadomeProxyHost()).toBe('datadome.example:8000');
     expect(config.getDatadomeProxyLogin()).toBe('datadome-login');
     expect(config.getDatadomeProxyPassword()).toBe('datadome-password');
@@ -238,43 +239,6 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getVictoriaLogsOtlpEndpoint()).toBe('http://victorialogs:9428/insert/opentelemetry/v1/logs');
     expect(config.getVictoriaLogsOtlpHeaders()).toEqual({
       Authorization: 'Bearer vl-token'
-    });
-  });
-
-  it('loads DataDome and VictoriaLogs secrets from nested api_keys secrets.yaml keys', async () => {
-    fs.writeFileSync(
-      'secrets.yaml',
-      [
-        'api_keys:',
-        '  smart_scraper: token-from-nested',
-        '  openrouter: openrouter-from-nested',
-        '  twocaptcha: twocaptcha-from-nested',
-        '  datadome_proxy_host: nested-datadome.example:8000',
-        '  datadome_proxy_login: nested-datadome-login',
-        '  datadome_proxy_password: nested-datadome-password',
-        '  default_socks5_proxy: socks5://nested-default.example:1080',
-        '  victorialogs_otlp_endpoint: http://nested-victorialogs:9428/insert/opentelemetry/v1/logs',
-        '  victorialogs_otlp_headers: X-Scope=nested',
-        '  victorialogs_otlp_auth_header_name: Authorization',
-        '  victorialogs_otlp_auth_header_value: Bearer nested-vl-token'
-      ].join('\n')
-    );
-
-    const config = await import('./config.js');
-
-    config.initConfig();
-
-    expect(config.getApiToken()).toBe('token-from-nested');
-    expect(config.getOpenrouterApiKey()).toBe('openrouter-from-nested');
-    expect(config.getTwocaptchaApiKey()).toBe('twocaptcha-from-nested');
-    expect(config.getDatadomeProxyHost()).toBe('nested-datadome.example:8000');
-    expect(config.getDatadomeProxyLogin()).toBe('nested-datadome-login');
-    expect(config.getDatadomeProxyPassword()).toBe('nested-datadome-password');
-    expect(config.getProxyServer()).toBe('socks5://nested-default.example:1080');
-    expect(config.getVictoriaLogsOtlpEndpoint()).toBe('http://nested-victorialogs:9428/insert/opentelemetry/v1/logs');
-    expect(config.getVictoriaLogsOtlpHeaders()).toEqual({
-      'X-Scope': 'nested',
-      Authorization: 'Bearer nested-vl-token'
     });
   });
 });

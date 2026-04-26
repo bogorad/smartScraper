@@ -8,7 +8,7 @@ SmartScraper uses a **centralized configuration system** with the following feat
 
 - **Single Source of Truth**: All configuration is managed through `src/config.ts`
 - **Zod Validation**: All config is validated at startup with clear error messages
-- **Multiple Sources**: Support for `.env` files, `secrets.yaml`, and environment variables
+- **Multiple Sources**: Support for environment variables and `.env` files
 - **Secret Protection**: Secrets are never logged or exposed in error messages
 - **Backward Compatibility**: Legacy environment variable names are supported
 
@@ -16,11 +16,10 @@ SmartScraper uses a **centralized configuration system** with the following feat
 
 The `src/config.ts` module:
 1. Loads `.env` file automatically via dotenv
-2. Attempts to load `secrets.yaml` for sensitive data
-3. Maps environment variable names (supporting legacy names)
-4. Applies runtime defaults from `src/constants.ts`
-5. Validates all config against Zod schema at startup
-6. Provides typed getter functions for accessing config throughout the app
+2. Maps environment variable names (supporting legacy names)
+3. Applies runtime defaults from `src/constants.ts`
+4. Validates all config against Zod schema at startup
+5. Provides typed getter functions for accessing config throughout the app
 
 ### Direct process.env Usage - REMOVED
 
@@ -72,9 +71,12 @@ cp .env.example .env
 nix develop --command just dev
 ```
 
-### 3. secrets.yaml File
+### 3. secrets.yaml Development Loader
 
-For encrypted sensitive data:
+Development secrets are stored in encrypted `secrets.yaml`, but app code does
+not parse that file. Use `scripts/with-secrets.sh -- <command>` or a `just`
+recipe that wraps it; the wrapper decrypts with sops and exports uppercase
+environment variables for the child process.
 
 ```yaml
 api_keys:
@@ -91,7 +93,7 @@ victorialogs_otlp_auth_header_name: "Authorization"
 victorialogs_otlp_auth_header_value: "Bearer token"
 ```
 
-Flat `secrets.yaml` keys are also supported for these same secret names:
+Flat `secrets.yaml` keys are exported by the wrapper for these same secret names:
 `smart_scraper`, `openrouter`, `twocaptcha`, `default_socks5_proxy`,
 `datadome_proxy_host`, `datadome_proxy_login`, `datadome_proxy_password`,
 `victorialogs_otlp_endpoint`, `victorialogs_otlp_headers`,
@@ -143,9 +145,9 @@ Sensible defaults for non-critical configuration are defined in `src/constants.t
 - `HTTP_PROXY` → `PROXY_SERVER`
 
 Proxy precedence is:
-`PROXY_SERVER` → `DEFAULT_SOCKS5_PROXY` / `default_socks5_proxy` →
-`HTTP_PROXY`. Per-request proxy details and DataDome site proxy settings still
-override the default proxy for their own scrape.
+`PROXY_SERVER` → `DEFAULT_SOCKS5_PROXY` → `HTTP_PROXY`. Per-request proxy
+details and DataDome site proxy settings still override the default proxy for
+their own scrape.
 
 ### CAPTCHA Configuration
 
@@ -167,8 +169,9 @@ override the default proxy for their own scrape.
 
 *Required when a site is configured with `needsProxy: "datadome"`.
 
-These values can be loaded from environment variables, flat `secrets.yaml`
-keys, or nested `api_keys.*` keys.
+These values must be present as environment variables at runtime. In
+development, `scripts/with-secrets.sh` exports them from encrypted
+`secrets.yaml`.
 
 DataDome CAPTCHA solving uses the `DATADOME_PROXY_*` proxy credentials. It does
 not use `DEFAULT_SOCKS5_PROXY`, because 2Captcha DataDome tasks require a
@@ -181,7 +184,9 @@ scrape result reports it as a DataDome solver proxy configuration error.
 |----------|------|---------|----------|-------------|
 | `API_TOKEN` | string | '' | Yes | API authentication token |
 
-Can be loaded from `secrets.yaml` (`smart_scraper` or `api_keys.smart_scraper`) or environment variable.
+Set this as `API_TOKEN` or `SMART_SCRAPER`. In development,
+`scripts/with-secrets.sh` exports `smart_scraper` from `secrets.yaml` as
+`SMART_SCRAPER`.
 
 ### Logging & Debug
 
@@ -210,9 +215,10 @@ Debug features (enabled when `LOG_LEVEL=DEBUG`):
 | `VICTORIALOGS_OTLP_MAX_QUEUE_SIZE` | number | 2048 | No | Max pending log records |
 | `VICTORIALOGS_OTLP_MAX_EXPORT_BATCH_SIZE` | number | 512 | No | Max records per export batch |
 
-VictoriaLogs secret fields can be loaded from environment variables, flat
-`secrets.yaml` keys, or nested `api_keys.*` keys. Runtime switches and
-batching values stay in environment variables or `.env`.
+VictoriaLogs secret fields must be environment variables at runtime. In
+development, `scripts/with-secrets.sh` can export matching uppercase variables
+from encrypted `secrets.yaml`. Runtime switches and batching values stay in
+environment variables or `.env`.
 
 ### DOM Structure Extraction (Advanced)
 
@@ -326,7 +332,8 @@ openrouterApiKey: String must contain at least 1 character(s)
 
 ### ✅ DO
 
-- Use `secrets.yaml` with sops encryption in production
+- Use the deployment secret manager to inject environment variables in production
+- Use `secrets.yaml` with sops encryption for local development secrets
 - Set sensitive variables via Docker secrets or Kubernetes vault
 - Use strong, randomly generated tokens
 - Rotate keys periodically
@@ -400,9 +407,8 @@ The config module automatically detects legacy names and uses them as fallback, 
 ### "API token not configured on server"
 
 **Check:**
-1. API_TOKEN is set in `.env`, environment, or `secrets.yaml`
-2. `secrets.yaml` has a supported flat key such as `smart_scraper` or nested key such as `api_keys.smart_scraper`
-3. Secrets.yaml is readable (check file permissions)
+1. `API_TOKEN` or `SMART_SCRAPER` is set in `.env` or the environment
+2. Local development commands that need secrets run through `scripts/with-secrets.sh`
 
 ### "Chromium executable not found"
 
@@ -427,7 +433,7 @@ The config module automatically detects legacy names and uses them as fallback, 
 smart-scraper/
 ├── .env                    # Runtime environment variables (not in git)
 ├── .env.example           # Template for configuration
-├── secrets.yaml           # Encrypted secrets (not in git)
+├── secrets.yaml           # Encrypted local dev secrets (not parsed by app code)
 ├── .gitignore             # Prevents committing secrets
 ├── src/
 │   └── config.ts          # Configuration module (source of truth)
@@ -449,4 +455,4 @@ For configuration issues:
 1. Check `.env.example` for correct variable names
 2. Run `nix develop --command just check` to validate TypeScript
 3. Check application logs for validation errors
-4. Verify secrets are properly loaded from `.env` or `secrets.yaml`
+4. Verify secrets are present in the process environment

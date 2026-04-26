@@ -303,12 +303,14 @@ The orchestrator implements intelligent test result caching to skip unchanged pa
 
 ### How It Works
 
-1. **File Hash Tracking**: Each test file's MD5 hash is stored in `.test-cache.json`
+1. **File Hash Tracking**: Each test function stores its file's MD5 hash in `.test-cache.json`
 2. **Result Recording**: After each test, the result (pass/fail) is recorded with the file hash
 3. **Cache Lookup**: On subsequent runs, tests are skipped if:
    - The test file hash matches the cached hash (file unchanged)
+   - The project source signature matches the cached hash
    - The previous run passed
 4. **Helpers Tracking**: Changes to `helpers.go` invalidate ALL cached results
+5. **Project Tracking**: Changes under `src/`, dependency manifests, TypeScript config, `.justfile`, or test fixtures invalidate ALL cached results
 
 ### Cache Invalidation
 
@@ -317,6 +319,7 @@ Tests will re-run when:
 - **Previously failed**: Last run did not pass
 - **Not in cache**: New test or cache cleared
 - **Helpers changed**: `helpers.go` was modified (invalidates all tests)
+- **Project changed**: Source, config, dependency, or fixture inputs changed
 - **Force full**: `--full` flag bypasses cache entirely
 
 ### Cache File Location

@@ -17,7 +17,7 @@ vi.mock("./core/engine.js", () => ({
   getDefaultEngine: () => ({
     scrapeUrl: vi.fn().mockResolvedValue({
       success: true,
-      method: "puppeteer_stealth",
+      method: "chrome",
       xpath: "//article",
       data: "Extracted content",
     }),

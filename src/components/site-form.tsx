@@ -15,7 +15,11 @@ export const SiteForm: FC<SiteFormProps> = ({ site, isNew }) => {
 
   return (
     <form
-      hx-post={`/dashboard/sites/${encodeURIComponent(site.domainPattern)}`}
+      hx-post={
+        isNew
+          ? "/dashboard/sites/new"
+          : `/dashboard/sites/${encodeURIComponent(site.domainPattern)}`
+      }
       hx-swap="outerHTML"
       class="card"
     >
@@ -81,16 +85,111 @@ export const SiteForm: FC<SiteFormProps> = ({ site, isNew }) => {
       </div>
 
       <div class="form-group">
-        <label for="needsProxy">Proxy Mode</label>
-        <select id="needsProxy" name="needsProxy">
-          <option value="off" selected={!site.needsProxy || site.needsProxy === 'off'}>
-            Off (use global if set)
+        <label for="method">Method Strategy</label>
+        <select id="method" name="method">
+          <option value="" selected={!site.method}>
+            Not recorded
           </option>
-          <option value="datadome" selected={site.needsProxy === 'datadome'}>
-            DataDome (residential proxy)
+          <option
+            value="curl"
+            selected={site.method === 'curl'}
+          >
+            curl
+          </option>
+          <option
+            value="chrome"
+            selected={site.method === 'chrome'}
+          >
+            chrome
           </option>
         </select>
-        <div class="form-hint">Use 'datadome' for sites protected by DataDome CAPTCHA</div>
+        <div class="form-hint">
+          Recorded fetch method for this site
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="captcha">CAPTCHA Strategy</label>
+        <select id="captcha" name="captcha">
+          <option value="" selected={!site.captcha}>
+            Not recorded
+          </option>
+          <option
+            value="none"
+            selected={site.captcha === 'none'}
+          >
+            none
+          </option>
+          <option
+            value="datadome"
+            selected={site.captcha === 'datadome'}
+          >
+            DataDome
+          </option>
+          <option
+            value="recaptcha"
+            selected={site.captcha === 'recaptcha'}
+          >
+            reCAPTCHA unsupported
+          </option>
+          <option
+            value="turnstile"
+            selected={site.captcha === 'turnstile'}
+          >
+            Turnstile unsupported
+          </option>
+          <option
+            value="hcaptcha"
+            selected={site.captcha === 'hcaptcha'}
+          >
+            hCaptcha unsupported
+          </option>
+          <option
+            value="unsupported"
+            selected={site.captcha === 'unsupported'}
+          >
+            Unsupported challenge
+          </option>
+        </select>
+        <div class="form-hint">
+          Recorded challenge type; only DataDome has solver support
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="proxy">Proxy Strategy</label>
+        <select id="proxy" name="proxy">
+          <option
+            value=""
+            selected={!site.proxy && !site.needsProxy}
+          >
+            Not recorded
+          </option>
+          <option
+            value="none"
+            selected={site.proxy === 'none'}
+          >
+            none
+          </option>
+          <option
+            value="default"
+            selected={site.proxy === 'default'}
+          >
+            default
+          </option>
+          <option
+            value="datadome"
+            selected={
+              site.proxy === 'datadome' ||
+              site.needsProxy === 'datadome'
+            }
+          >
+            DataDome
+          </option>
+        </select>
+        <div class="form-hint">
+          Recorded proxy path for page loads and DataDome tasks
+        </div>
       </div>
 
       <div class="btn-group">

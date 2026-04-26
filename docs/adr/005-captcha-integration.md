@@ -13,38 +13,15 @@ Many target sites use CAPTCHAs and anti-bot services (especially DataDome). The 
 
 Detection via HTML markers:
 - DataDome iframes from `captcha-delivery.com` or `geo.captcha-delivery.com`
-- Generic CAPTCHA elements (reCAPTCHA, hCaptcha, Turnstile)
+- Unsupported challenge elements (reCAPTCHA, hCaptcha, Turnstile)
 
-Classification result: `'none' | 'generic' | 'datadome'`
+Classification result: `'none' | 'datadome' | 'recaptcha' | 'turnstile' | 'hcaptcha' | 'unsupported'`
 
-### 2Captcha: Generic CAPTCHAs
+### Unsupported CAPTCHA Families
 
-**Environment Variables:**
-- `CAPTCHA_SERVICE_NAME` (expected: `2captcha`)
-- `TWOCAPTCHA_API_KEY` (required)
-- `CAPTCHA_DEFAULT_TIMEOUT` (seconds, default: 120)
-- `CAPTCHA_POLLING_INTERVAL` (ms, default: 5000)
-
-**Submit Request:**
-```
-POST https://2captcha.com/in.php
-Query:
-  key: TWOCAPTCHA_API_KEY
-  method: userrecaptcha | hcaptcha | turnstile
-  pageurl: target page URL
-  sitekey/googlekey: CAPTCHA site key
-  json: 1
-```
-
-**Poll Request:**
-```
-GET https://2captcha.com/res.php
-Query:
-  key: TWOCAPTCHA_API_KEY
-  action: get
-  id: captchaId
-  json: 1
-```
+reCAPTCHA, hCaptcha, and Turnstile are detected but not solved in the current
+runtime strategy. The scraper returns explicit unsupported CAPTCHA results for
+those families instead of falling through to a generic extraction failure.
 
 ### 2Captcha: DataDome (DataDomeSliderTask)
 
@@ -97,8 +74,7 @@ DataDome solving requires a DataDome-compatible proxy from
 and is not passed to 2Captcha DataDome tasks.
 
 If 2Captcha reports a proxy error such as `ERROR_BAD_PROXY`, the adapter returns
-a DataDome solver proxy configuration failure instead of a generic CAPTCHA
-failure.
+a DataDome solver proxy configuration failure instead of a generic failure.
 
 ### Optimal Flow
 

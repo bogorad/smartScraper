@@ -31,6 +31,10 @@ type TestInfo struct {
 	FilePath string // e.g., "test-orchestrator/e2e/basic_test.go"
 }
 
+func (t TestInfo) CacheKey() string {
+	return t.FilePath + "::" + t.FuncName
+}
+
 // Orchestrator coordinates test discovery, worker management, and parallel execution.
 type Orchestrator struct {
 	config       *Config
@@ -215,7 +219,7 @@ func (o *Orchestrator) filterTestFunctions(tests []TestInfo, pattern string) []T
 // filterByCache returns tests that need to run and tests that can be skipped.
 func (o *Orchestrator) filterByCache(tests []TestInfo) (toRun, skipped []TestInfo) {
 	for _, test := range tests {
-		needsRun, reason := o.cache.NeedsRunWithReason(test.FilePath)
+		needsRun, reason := o.cache.NeedsRunWithReason(test.CacheKey(), test.FilePath)
 		if needsRun {
 			if o.config.Verbose {
 				fmt.Printf("[cache] %s: %s\n", test.FuncName, reason)
@@ -324,12 +328,12 @@ func (o *Orchestrator) runSingleTest(ctx context.Context, worker *Worker, test T
 	cmd.Dir = filepath.Join(cwd, "test-orchestrator")
 
 	// Set environment:
-	// - Worker environment (TEST_BASE_URL, DATA_DIR, API_TOKEN)
-	// - Secrets (OPENROUTER_API_KEY, TWOCAPTCHA_API_KEY, PROXY_SERVER)
+	// - Secrets first (OPENROUTER_API_KEY, TWOCAPTCHA_API_KEY, PROXY_SERVER)
+	// - Worker environment last so isolated API_TOKEN/DATA_DIR/TEST_BASE_URL wins
 	// - Inherit some system env vars
 	env := os.Environ()
-	env = append(env, worker.Env()...)
 	env = append(env, o.secrets.Env()...)
+	env = append(env, worker.Env()...)
 	cmd.Env = env
 
 	// Capture output
@@ -356,7 +360,7 @@ func (o *Orchestrator) runSingleTest(ctx context.Context, worker *Worker, test T
 		fmt.Printf("FAIL %s (%v)\n", test.FuncName, elapsed.Round(time.Millisecond))
 
 		// Mark as failed in cache
-		if cacheErr := o.cache.MarkFailed(test.FilePath); cacheErr != nil && o.config.Verbose {
+		if cacheErr := o.cache.MarkFailed(test.CacheKey(), test.FilePath); cacheErr != nil && o.config.Verbose {
 			fmt.Printf("[cache] Warning: failed to mark %s as failed: %v\n", test.FuncName, cacheErr)
 		}
 
@@ -381,7 +385,7 @@ func (o *Orchestrator) runSingleTest(ctx context.Context, worker *Worker, test T
 		fmt.Printf("PASS %s (%v)\n", test.FuncName, elapsed.Round(time.Millisecond))
 
 		// Mark as passed in cache
-		if cacheErr := o.cache.MarkPassed(test.FilePath); cacheErr != nil && o.config.Verbose {
+		if cacheErr := o.cache.MarkPassed(test.CacheKey(), test.FilePath); cacheErr != nil && o.config.Verbose {
 			fmt.Printf("[cache] Warning: failed to mark %s as passed: %v\n", test.FuncName, cacheErr)
 		}
 	}

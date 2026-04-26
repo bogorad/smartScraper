@@ -1,13 +1,13 @@
-https://unherd.com/2026/04/starmers-weaponised-incompetence/
-https://variety.com/2026/biz/news/president-trump-evacuated-white-house-correspondents-dinner-1236730592/
-https://www.cjr.org/the_media_today/lawfare-trump-court-decisions-first-amendment-new-york-times-wall-street-journal-whca-correspondents-dinner.php
-https://www.foreignaffairs.com/united-states/trump-grand-strategy-consolidation-wes-mitchell
-https://www.ft.com/content/2f922f3f-8232-4541-bfeb-66697b1d8790
-https://www.nytimes.com/2026/04/26/us/politics/correspondents-dinner-shooting-suspect-california-man.html
-https://www.nzz.ch/international/trump-wird-nach-schuessen-am-korrespondentendinner-evakuiert-das-ist-bis-jetzt-bekannt-ld.10004516
-https://www.reuters.com/world/middle-east/pakistan-places-15-billion-sudan-weapons-sale-hold-after-saudi-objection-sources-2026-04-20/
-https://www.spiegel.de/kultur/tv/tatort-heute-aus-wien-gegen-die-zeit-im-schnellcheck-a-dcc7e357-4fed-4575-a69c-ad41cdcf2de0
-https://www.thelocal.es/20260426/geopolitics-threatens-70th-anniversary-of-eurovision
-https://www.thetimes.com/us/american-politics/article/trump-shooting-latest-news-assassination-attempt-dinner-nw2655zqt
-https://www.wsj.com/politics/policy/dhs-is-considering-reality-show-where-immigrants-compete-for-citizenship-47de277c?st=sP9592
-https://nypost.com/2026/04/26/us-news/white-house-correspondents-dinner-shooting-suspect-cole-allen-admits-he-was-targeting-trump-officials-report/
+# Format: required|URL or diagnostic|CLASSIFICATION|URL
+required|https://unherd.com/2026/04/starmers-weaponised-incompetence/
+required|https://variety.com/2026/biz/news/president-trump-evacuated-white-house-correspondents-dinner-1236730592/
+required|https://www.cjr.org/the_media_today/lawfare-trump-court-decisions-first-amendment-new-york-times-wall-street-journal-whca-correspondents-dinner.php
+required|https://www.foreignaffairs.com/united-states/trump-grand-strategy-consolidation-wes-mitchell
+diagnostic|external-paywall|https://www.ft.com/content/2f922f3f-8232-4541-bfeb-66697b1d8790
+required|https://www.nytimes.com/2026/04/26/us/politics/correspondents-dinner-shooting-suspect-california-man.html
+required|https://www.nzz.ch/international/trump-wird-nach-schuessen-am-korrespondentendinner-evakuiert-das-ist-bis-jetzt-bekannt-ld.10004516
+required|https://www.spiegel.de/kultur/tv/tatort-heute-aus-wien-gegen-die-zeit-im-schnellcheck-a-dcc7e357-4fed-4575-a69c-ad41cdcf2de0
+required|https://www.thelocal.es/20260426/geopolitics-threatens-70th-anniversary-of-eurovision
+diagnostic|external-paywall|https://www.thetimes.com/us/american-politics/article/trump-shooting-latest-news-assassination-attempt-dinner-nw2655zqt
+diagnostic|external-paywall|https://www.wsj.com/politics/policy/dhs-is-considering-reality-show-where-immigrants-compete-for-citizenship-47de277c?st=sP9592
+required|https://nypost.com/2026/04/26/us-news/white-house-correspondents-dinner-shooting-suspect-cole-allen-admits-he-was-targeting-trump-officials-report/

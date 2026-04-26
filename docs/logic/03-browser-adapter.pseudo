@@ -17,7 +17,6 @@ INTERFACE BrowserPort:
     FUNCTION getCookies(pageId: string) -> string
     FUNCTION setCookies(pageId: string, cookies: string) -> void
     FUNCTION reload(pageId: string, timeoutMs?: int) -> void
-    FUNCTION injectTurnstileToken(pageId: string, token: string) -> boolean
 
 
 # ============================================================================
@@ -372,44 +371,6 @@ CLASS PuppeteerBrowserAdapter IMPLEMENTS BrowserPort:
             waitUntil: 'networkidle2',
             timeout: timeoutMs OR 120000
         })
-
-
-# ============================================================================
-# CLOUDFLARE TURNSTILE SUPPORT
-# ============================================================================
-
-    FUNCTION injectTurnstileToken(pageId: string, token: string) -> boolean:
-        """
-        Inject a Turnstile token into the page's callback.
-        Used after solving Turnstile via external service.
-        """
-        session = this.sessions.get(pageId)
-        IF NOT session:
-            RETURN false
-        
-        TRY:
-            result = await session.page.evaluate((token) => {
-                # Find and call Turnstile callback
-                IF window.turnstileCallback:
-                    window.turnstileCallback(token)
-                    RETURN true
-                
-                # Try to find callback in Turnstile widget
-                widgets = document.querySelectorAll('[data-sitekey]')
-                FOR widget IN widgets:
-                    IF widget._turnstileCallback:
-                        widget._turnstileCallback(token)
-                        RETURN true
-                
-                RETURN false
-            }, token)
-            
-            LOG debug "Turnstile token injection result: {result}"
-            RETURN result
-        
-        CATCH error:
-            LOG error "Turnstile injection error:", error
-            RETURN false
 
 
 # ============================================================================

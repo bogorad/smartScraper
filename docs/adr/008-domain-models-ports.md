@@ -25,7 +25,6 @@ interface BrowserPort {
   getCookies(pageId: string): Promise<string>;
   setCookies(pageId: string, cookies: string): Promise<void>;
   reload(pageId: string, timeoutMs?: number): Promise<void>;
-  injectTurnstileToken(pageId: string, token: string): Promise<void>;
 }
 ```
 
@@ -47,7 +46,7 @@ interface LlmPort {
 interface CaptchaPort {
   solveIfPresent(input: {
     pageId: string;
-    captchaTypeHint?: 'generic' | 'datadome';
+    captchaTypeHint?: 'none' | 'datadome' | 'recaptcha' | 'turnstile' | 'hcaptcha' | 'unsupported';
     proxyDetails?: { server: string };
     userAgentString?: string;
   }): Promise<{

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -12,7 +13,12 @@ import {
 } from "../../components/test-form.js";
 import { knownSitesAdapter } from "../../adapters/fs-known-sites.js";
 import { getDefaultEngine } from "../../core/engine.js";
-import type { SiteConfig } from "../../domain/models.js";
+import type {
+  SiteConfig,
+  SiteConfigCaptcha,
+  SiteConfigMethod,
+  SiteConfigProxy,
+} from "../../domain/models.js";
 import { logger } from "../../utils/logger.js";
 import { applyDashboardRoutePolicy } from "./policy.js";
 
@@ -41,6 +47,105 @@ const querySchema = z.object({
 export const sitesRouter = new Hono();
 
 applyDashboardRoutePolicy(sitesRouter);
+
+const siteConfigMethods = new Set<SiteConfigMethod>([
+  "curl",
+  "chrome",
+]);
+
+const siteConfigCaptchas = new Set<SiteConfigCaptcha>([
+  "none",
+  "datadome",
+  "recaptcha",
+  "turnstile",
+  "hcaptcha",
+  "unsupported",
+]);
+
+const siteConfigProxies = new Set<SiteConfigProxy>([
+  "none",
+  "default",
+  "datadome",
+]);
+
+function parseOptionalStrategy<T extends string>(
+  value:
+    | FormDataEntryValue
+    | FormDataEntryValue[]
+    | undefined,
+  allowed: ReadonlySet<T>,
+  fieldName: string,
+): T | undefined {
+  if (typeof value !== "string" || value === "") {
+    return undefined;
+  }
+
+  if (!allowed.has(value as T)) {
+    throw new Error(`Invalid ${fieldName}.`);
+  }
+
+  return value as T;
+}
+
+function normalizeSubmittedDomain(domain: string): string {
+  return domain.trim().toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+}
+
+function validateDomain(domain: string): string | null {
+  if (!domain) return "Domain is required.";
+  if (domain.includes("*") || domain.includes("/")) {
+    return "Domain must be a hostname without wildcards or paths.";
+  }
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(domain)) {
+    return "Domain must be a valid hostname such as example.com.";
+  }
+  return null;
+}
+
+function validateXPath(xpath: string): string | null {
+  if (!xpath) return "XPath main content is required.";
+  if (!xpath.startsWith("/")) {
+    return "XPath main content must start with / or //.";
+  }
+  return null;
+}
+
+function parseHeaders(headersText: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const line of headersText.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const separatorIndex = trimmed.indexOf(":");
+    if (separatorIndex === -1) {
+      throw new Error("Custom headers must use Name: Value format.");
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) || !value) {
+      throw new Error("Custom headers must include a valid name and value.");
+    }
+    headers[key] = value;
+  }
+
+  return headers;
+}
+
+function renderSiteFormError(
+  c: Context,
+  site: SiteConfig,
+  message: string,
+  isNew: boolean,
+) {
+  return c.html(
+    <>
+      <div class="alert alert-error mb-4">{message}</div>
+      <SiteForm site={site} isNew={isNew} />
+    </>,
+    400,
+  );
+}
 
 sitesRouter.get(
   "/",
@@ -389,40 +494,98 @@ sitesRouter.get("/:domain", async (c) => {
   );
 });
 
-sitesRouter.post("/:domain", async (c) => {
-  const domain = decodeURIComponent(c.req.param("domain"));
+async function saveSiteConfig(
+  c: Context,
+  domain: string,
+  isNew: boolean,
+) {
   const body = await c.req.parseBody();
 
-  const actualDomain =
-    (body.domainPattern as string) || domain;
+  const rawDomain =
+    typeof body.domainPattern === "string" && body.domainPattern.trim()
+      ? body.domainPattern
+      : domain;
+  const actualDomain = normalizeSubmittedDomain(rawDomain);
+  const xpathMainContent =
+    typeof body.xpathMainContent === "string"
+      ? body.xpathMainContent.trim()
+      : "";
+  const submittedSite: SiteConfig = {
+    domainPattern: actualDomain,
+    xpathMainContent,
+    failureCountSinceLastSuccess: 0,
+  };
+
+  const domainError = validateDomain(actualDomain);
+  if (domainError) {
+    return renderSiteFormError(c, submittedSite, domainError, isNew);
+  }
+
+  const xpathError = validateXPath(xpathMainContent);
+  if (xpathError) {
+    return renderSiteFormError(c, submittedSite, xpathError, isNew);
+  }
 
   const headersText =
-    (body.siteSpecificHeaders as string) || "";
-  const siteSpecificHeaders: Record<string, string> = {};
-  for (const line of headersText.split("\n")) {
-    const [key, ...rest] = line.split(":");
-    if (key && rest.length) {
-      siteSpecificHeaders[key.trim()] = rest
-        .join(":")
-        .trim();
-    }
+    typeof body.siteSpecificHeaders === "string"
+      ? body.siteSpecificHeaders
+      : "";
+  let siteSpecificHeaders: Record<string, string>;
+  try {
+    siteSpecificHeaders = parseHeaders(headersText);
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Invalid custom headers.";
+    return renderSiteFormError(c, submittedSite, message, isNew);
   }
 
   const cleanupText =
-    (body.siteCleanupClasses as string) || "";
+    typeof body.siteCleanupClasses === "string"
+      ? body.siteCleanupClasses
+      : "";
   const siteCleanupClasses = cleanupText
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const needsProxy = body.needsProxy as string;
+  let method: SiteConfigMethod | undefined;
+  let captcha: SiteConfigCaptcha | undefined;
+  let proxy: SiteConfigProxy | undefined;
+  try {
+    method = parseOptionalStrategy(
+      body.method,
+      siteConfigMethods,
+      "method strategy",
+    );
+    captcha = parseOptionalStrategy(
+      body.captcha,
+      siteConfigCaptchas,
+      "CAPTCHA strategy",
+    );
+    proxy = parseOptionalStrategy(
+      body.proxy,
+      siteConfigProxies,
+      "proxy strategy",
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Invalid site strategy.";
+    return renderSiteFormError(c, submittedSite, message, isNew);
+  }
+
+  const needsProxy =
+    proxy === "datadome" || body.needsProxy === "datadome";
 
   const existingConfig =
     await knownSitesAdapter.getConfig(actualDomain);
 
   const config: SiteConfig = {
     domainPattern: actualDomain,
-    xpathMainContent: body.xpathMainContent as string,
+    xpathMainContent,
     failureCountSinceLastSuccess:
       existingConfig?.failureCountSinceLastSuccess || 0,
     lastSuccessfulScrapeTimestamp:
@@ -436,9 +599,14 @@ sitesRouter.post("/:domain", async (c) => {
       siteCleanupClasses.length > 0
         ? siteCleanupClasses
         : undefined,
-    userAgent: (body.userAgent as string) || undefined,
-    needsProxy:
-      needsProxy === "datadome" ? "datadome" : undefined,
+    userAgent:
+      typeof body.userAgent === "string" && body.userAgent.trim()
+        ? body.userAgent.trim()
+        : undefined,
+    method,
+    captcha,
+    proxy,
+    needsProxy: needsProxy ? "datadome" : undefined,
   };
 
   await knownSitesAdapter.saveConfig(config);
@@ -456,6 +624,15 @@ sitesRouter.post("/:domain", async (c) => {
   }
 
   return c.redirect("/dashboard/sites");
+}
+
+sitesRouter.post("/new", async (c) => {
+  return saveSiteConfig(c, "", true);
+});
+
+sitesRouter.post("/:domain", async (c) => {
+  const domain = decodeURIComponent(c.req.param("domain"));
+  return saveSiteConfig(c, domain, false);
 });
 
 sitesRouter.delete("/:domain", async (c) => {

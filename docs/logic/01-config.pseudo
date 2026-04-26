@@ -11,59 +11,19 @@ FUNCTION initConfig() -> Config:
     IF file_exists('.env'):
         dotenv.config()
     
-    # 2. Load secrets from YAML if available
-    secrets = loadSecretsFromYaml()
+    # 2. Map environment variables (with legacy name support)
+    envVars = mapEnvVars()
     
-    # 3. Map environment variables (with legacy name support)
-    envVars = mapEnvVars(secrets)
-    
-    # 4. Parse and validate with Zod schema
+    # 3. Parse and validate with Zod schema
     config = ConfigSchema.parse(envVars)
     
-    # 5. Cache config (singleton pattern)
+    # 4. Cache config (singleton pattern)
     STORE config globally
     
     RETURN config
 
 
-FUNCTION loadSecretsFromYaml() -> Map<string, string>:
-    secretsPath = 'secrets.yaml'
-    
-    IF NOT file_exists(secretsPath):
-        RETURN empty map
-    
-    TRY:
-        content = readFile(secretsPath)
-        data = YAML.parse(content)
-        
-        # Support two formats:
-        # Flat: { smart_scraper: "...", openrouter: "...", twocaptcha: "..." }
-        # Nested: { api_keys: { smart_scraper: "...", ... } }
-        
-        IF data.smart_scraper OR data.openrouter:
-            # Flat structure
-            RETURN {
-                api_token: data.smart_scraper,
-                openrouter_api_key: data.openrouter,
-                twocaptcha_api_key: data.twocaptcha,
-                datadome_proxy_host: data.datadome_proxy_host,
-                datadome_proxy_login: data.datadome_proxy_login,
-                datadome_proxy_password: data.datadome_proxy_password
-            }
-        ELSE IF data.api_keys:
-            # Legacy nested structure
-            RETURN {
-                api_token: data.api_keys.smart_scraper,
-                openrouter_api_key: data.api_keys.openrouter,
-                twocaptcha_api_key: data.api_keys.twocaptcha,
-                ...
-            }
-    CATCH error:
-        LOG warning "Failed to load secrets.yaml"
-        RETURN empty map
-
-
-FUNCTION mapEnvVars(secrets) -> Map<string, string?>:
+FUNCTION mapEnvVars() -> Map<string, string?>:
     # Check DEBUG mode override
     debugMode = env.DEBUG == 'true' OR env.DEBUG == '1'
     effectiveLogLevel = debugMode ? 'DEBUG' : env.LOG_LEVEL
@@ -80,18 +40,18 @@ FUNCTION mapEnvVars(secrets) -> Map<string, string?>:
         dataDir: env.DATA_DIR,
         logDir: env.LOG_DIR,
         
-        # LLM (priority: env > secrets)
-        openrouterApiKey: env.OPENROUTER_API_KEY OR env.OPENROUTER OR secrets.openrouter_api_key,
+        # LLM
+        openrouterApiKey: env.OPENROUTER_API_KEY OR env.OPENROUTER,
         llmModel: env.LLM_MODEL,
         llmTemperature: env.LLM_TEMPERATURE,
         
         # Browser (support legacy names)
         executablePath: env.EXECUTABLE_PATH OR env.PUPPETEER_EXECUTABLE_PATH,
         extensionPaths: env.EXTENSION_PATHS,
-        proxyServer: env.PROXY_SERVER OR env.DEFAULT_SOCKS5_PROXY OR secrets.default_socks5_proxy OR env.HTTP_PROXY,
+        proxyServer: env.PROXY_SERVER OR env.DEFAULT_SOCKS5_PROXY OR env.HTTP_PROXY,
         
         # CAPTCHA
-        twocaptchaApiKey: env.TWOCAPTCHA_API_KEY OR env.TWOCAPTCHA OR secrets.twocaptcha_api_key,
+        twocaptchaApiKey: env.TWOCAPTCHA_API_KEY OR env.TWOCAPTCHA,
         captchaDefaultTimeout: env.CAPTCHA_DEFAULT_TIMEOUT,
         captchaPollingInterval: env.CAPTCHA_POLLING_INTERVAL,
         
@@ -101,7 +61,7 @@ FUNCTION mapEnvVars(secrets) -> Map<string, string?>:
         datadomeProxyPassword: env.DATADOME_PROXY_PASSWORD,
         
         # Auth
-        apiToken: env.API_TOKEN OR env.SMART_SCRAPER OR secrets.api_token,
+        apiToken: env.API_TOKEN OR env.SMART_SCRAPER,
         
         # Logging
         logLevel: effectiveLogLevel,

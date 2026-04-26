@@ -5,7 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -24,8 +27,19 @@ type TestCacheEntry struct {
 type TestCache struct {
 	Entries     map[string]TestCacheEntry `json:"entries"`
 	HelpersHash string                    `json:"helpersHash"`
+	ProjectHash string                    `json:"projectHash"`
 	path        string
 	mu          sync.Mutex
+}
+
+var projectSignaturePaths = []string{
+	".justfile",
+	"data/sites.jsonc",
+	"package-lock.json",
+	"package.json",
+	"src",
+	"testing/urls_for_testing.txt",
+	"tsconfig.json",
 }
 
 // LoadCache loads the test cache from disk or creates a new empty cache.
@@ -74,18 +88,22 @@ func (c *TestCache) Save() error {
 
 // NeedsRun checks if a test file needs to run based on its hash and last result.
 func (c *TestCache) NeedsRun(filePath string) bool {
-	needsRun, _ := c.NeedsRunWithReason(filePath)
+	needsRun, _ := c.NeedsRunWithReason(filePath, filePath)
 	return needsRun
 }
 
-// NeedsRunWithReason checks if a test file needs to run and returns the reason.
-func (c *TestCache) NeedsRunWithReason(filePath string) (bool, string) {
+// NeedsRunWithReason checks if a test cache entry needs to run and returns the reason.
+func (c *TestCache) NeedsRunWithReason(cacheKey string, filePath string) (bool, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// Check if helpers changed
 	if c.CheckHelpersChanged() {
 		return true, "helpers.go changed"
+	}
+
+	if c.CheckProjectChanged() {
+		return true, "project source changed"
 	}
 
 	// Get current file hash
@@ -95,7 +113,7 @@ func (c *TestCache) NeedsRunWithReason(filePath string) (bool, string) {
 	}
 
 	// Check cache entry
-	entry, exists := c.Entries[filePath]
+	entry, exists := c.Entries[cacheKey]
 	if !exists {
 		return true, "not in cache"
 	}
@@ -112,7 +130,7 @@ func (c *TestCache) NeedsRunWithReason(filePath string) (bool, string) {
 }
 
 // MarkPassed records a passing test result and saves immediately.
-func (c *TestCache) MarkPassed(filePath string) error {
+func (c *TestCache) MarkPassed(cacheKey string, filePath string) error {
 	c.mu.Lock()
 
 	hash, err := FileHash(filePath)
@@ -121,7 +139,7 @@ func (c *TestCache) MarkPassed(filePath string) error {
 		return fmt.Errorf("failed to hash file: %w", err)
 	}
 
-	c.Entries[filePath] = TestCacheEntry{
+	c.Entries[cacheKey] = TestCacheEntry{
 		Hash:    hash,
 		LastRun: time.Now().Unix(),
 		Passed:  true,
@@ -130,13 +148,15 @@ func (c *TestCache) MarkPassed(filePath string) error {
 	// Update helpers hash
 	helpersHash, _ := FileHash("test-orchestrator/e2e/helpers.go")
 	c.HelpersHash = helpersHash
+	projectHash, _ := ProjectHash()
+	c.ProjectHash = projectHash
 
 	c.mu.Unlock()
 	return c.Save()
 }
 
 // MarkFailed records a failing test result and saves immediately.
-func (c *TestCache) MarkFailed(filePath string) error {
+func (c *TestCache) MarkFailed(cacheKey string, filePath string) error {
 	c.mu.Lock()
 
 	hash, err := FileHash(filePath)
@@ -145,11 +165,16 @@ func (c *TestCache) MarkFailed(filePath string) error {
 		return fmt.Errorf("failed to hash file: %w", err)
 	}
 
-	c.Entries[filePath] = TestCacheEntry{
+	c.Entries[cacheKey] = TestCacheEntry{
 		Hash:    hash,
 		LastRun: time.Now().Unix(),
 		Passed:  false,
 	}
+
+	helpersHash, _ := FileHash("test-orchestrator/e2e/helpers.go")
+	c.HelpersHash = helpersHash
+	projectHash, _ := ProjectHash()
+	c.ProjectHash = projectHash
 
 	c.mu.Unlock()
 	return c.Save()
@@ -174,6 +199,22 @@ func (c *TestCache) CheckHelpersChanged() bool {
 	return c.HelpersHash != currentHash
 }
 
+// CheckProjectChanged checks if source, config, dependency, or fixture inputs
+// that affect E2E behavior have changed since the last cached run.
+// NOTE: Must be called with mutex held or from NeedsRunWithReason which holds it.
+func (c *TestCache) CheckProjectChanged() bool {
+	currentHash, err := ProjectHash()
+	if err != nil {
+		return true
+	}
+
+	if c.ProjectHash == "" {
+		return true
+	}
+
+	return c.ProjectHash != currentHash
+}
+
 // FileHash computes the MD5 hash of a file's contents.
 func FileHash(filePath string) (string, error) {
 	data, err := os.ReadFile(filePath)
@@ -183,4 +224,54 @@ func FileHash(filePath string) (string, error) {
 
 	hash := md5.Sum(data)
 	return hex.EncodeToString(hash[:]), nil
+}
+
+// ProjectHash computes a deterministic signature for project inputs that can
+// change E2E behavior without changing an E2E test file.
+func ProjectHash() (string, error) {
+	var files []string
+	for _, path := range projectSignaturePaths {
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", fmt.Errorf("failed to stat %s: %w", path, err)
+		}
+
+		if !info.IsDir() {
+			files = append(files, path)
+			continue
+		}
+
+		err = filepath.WalkDir(path, func(filePath string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			files = append(files, filePath)
+			return nil
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to walk %s: %w", path, err)
+		}
+	}
+
+	sort.Strings(files)
+
+	hash := md5.New()
+	for _, filePath := range files {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read %s: %w", filePath, err)
+		}
+		hash.Write([]byte(filePath))
+		hash.Write([]byte{0})
+		hash.Write(data)
+		hash.Write([]byte{0})
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }

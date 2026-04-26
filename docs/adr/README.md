@@ -25,6 +25,7 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 | [017](017-timeout-constants.md) | Timeout Constants Are Sacred | Accepted |
 | [018](018-puppeteer-websocket-server.md) | Minimal Puppeteer WebSocket Server | Proposed |
 | [019](019-victorialogs-otlp-logging.md) | VictoriaLogs OTLP Logging | Accepted |
+| [020](020-curl-chrome-discovery.md) | Curl and Chrome Discovery Strategy | Accepted |
 
 ## Overview
 
@@ -39,10 +40,11 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 - **[ADR-008](008-domain-models-ports.md)** - Port interfaces (`BrowserPort`, `LlmPort`, `CaptchaPort`, `KnownSitesPort`), domain models
 - **[ADR-009](009-decision-rules.md)** - Decision flow, known-config path vs discovery path, failure thresholds
 - **[ADR-013](013-centralized-configuration.md)** - Zod-based config validation, lazy loading, secrets management
+- **[ADR-020](020-curl-chrome-discovery.md)** - Curl-first unknown-site discovery, chrome fallback, strategy persistence, and CAPTCHA policy
 
 ### External Services
 - **[ADR-004](004-llm-xpath-discovery.md)** - OpenRouter LLM integration, XPath suggestion, content scoring
-- **[ADR-005](005-captcha-integration.md)** - 2Captcha integration for generic CAPTCHAs and DataDome
+- **[ADR-005](005-captcha-integration.md)** - 2Captcha integration for DataDome and explicit unsupported CAPTCHA handling
 - **[ADR-007](007-network-proxy.md)** - HTTP proxy configuration, User-Agent handling
 - **[ADR-010](010-llm-prompt-design.md)** - Prompt structure, DOM simplification, response parsing, token budget
 

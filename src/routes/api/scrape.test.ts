@@ -7,6 +7,10 @@ import {
 } from "vitest";
 import { scrapeRouter } from "./scrape.js";
 
+const engineMock = vi.hoisted(() => ({
+  scrapeUrl: vi.fn(),
+}));
+
 vi.mock("../../config.js", () => ({
   getApiToken: () => "test-api-token",
   getLogLevel: () => "NONE",
@@ -21,18 +25,19 @@ vi.mock("../../middleware/rate-limit.js", () => ({
 
 vi.mock("../../core/engine.js", () => ({
   getDefaultEngine: () => ({
-    scrapeUrl: vi.fn().mockResolvedValue({
-      success: true,
-      method: "puppeteer_stealth",
-      xpath: "//article",
-      data: "Extracted content",
-    }),
+    scrapeUrl: engineMock.scrapeUrl,
   }),
 }));
 
 describe("scrape route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    engineMock.scrapeUrl.mockResolvedValue({
+      success: true,
+      method: "chrome",
+      xpath: "//article",
+      data: "Extracted content",
+    });
   });
 
   function authorizedJsonRequest(body: unknown): Request {
@@ -269,5 +274,39 @@ describe("scrape route", () => {
     const res = await scrapeRouter.request(req);
 
     expect(res.status).toBe(400);
+  });
+
+  it("should return explicit unsupported CAPTCHA errors without leaking details", async () => {
+    engineMock.scrapeUrl.mockResolvedValueOnce({
+      success: false,
+      errorType: "CAPTCHA",
+      error: "Unsupported CAPTCHA type: recaptcha",
+      details: {
+        captchaType: "recaptcha",
+        proxyServer:
+          "http://user:secret-password@proxy.example:8080",
+      },
+    });
+
+    const res = await scrapeRouter.request(
+      authorizedJsonRequest({
+        url: "https://example.com",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({
+      success: false,
+      errorType: "CAPTCHA",
+      error: "Unsupported CAPTCHA type: recaptcha",
+      details: { captchaType: "recaptcha" },
+    });
+    expect(JSON.stringify(json)).not.toContain(
+      "secret-password",
+    );
+    expect(JSON.stringify(json)).not.toContain(
+      "No valid XPath found",
+    );
   });
 });

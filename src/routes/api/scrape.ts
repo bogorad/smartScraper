@@ -5,7 +5,10 @@ import { apiAuthMiddleware } from "../../middleware/auth.js";
 import { rateLimitMiddleware } from "../../middleware/rate-limit.js";
 import { getDefaultEngine } from "../../core/engine.js";
 import { DEFAULTS, OUTPUT_TYPES } from "../../constants.js";
-import { sanitizeErrorForClient } from "../../utils/error-sanitizer.js";
+import {
+  sanitizeErrorForClient,
+  sanitizeScrapeResultForClient,
+} from "../../utils/error-sanitizer.js";
 import { logger } from "../../utils/logger.js";
 
 const MAX_PROXY_SERVER_LENGTH = 2048;
@@ -138,7 +141,11 @@ scrapeRouter.post(
         debug: body.debug,
       });
 
-      return c.json(result);
+      return c.json(
+        result.success
+          ? result
+          : sanitizeScrapeResultForClient(result),
+      );
     } catch (error) {
       logger.error("[API] Scrape failed:", error);
       return c.json(

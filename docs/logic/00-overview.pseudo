@@ -88,7 +88,7 @@ SCRAPE_FLOW:
     
     4. Return ScrapeResult
        - success: boolean
-       - method: 'puppeteer_stealth'
+       - method: 'chrome'
        - xpath: string
        - data: extracted content
        - OR errorType + error message
@@ -100,8 +100,8 @@ SCRAPE_FLOW:
 
 CONSTANTS:
     METHODS:
-        PUPPETEER_STEALTH = 'puppeteer_stealth'
-        OBSCURA_SIMPLE_FETCH = 'obscura_simple_fetch'
+        CURL = 'curl'
+        CHROME = 'chrome'
     
     OUTPUT_TYPES:
         CONTENT_ONLY = 'content_only'     # Plain text
@@ -120,8 +120,11 @@ CONSTANTS:
     
     CAPTCHA_TYPES:
         NONE = 'none'
-        GENERIC = 'generic'      # reCAPTCHA, hCaptcha, Turnstile
         DATADOME = 'datadome'    # DataDome slider
+        RECAPTCHA = 'recaptcha'  # detected, not solved
+        TURNSTILE = 'turnstile'  # detected, not solved
+        HCAPTCHA = 'hcaptcha'    # detected, not solved
+        UNSUPPORTED = 'unsupported'
     
     PROXY_MODES:
         OFF = 'off'

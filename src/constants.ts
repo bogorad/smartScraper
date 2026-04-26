@@ -5,8 +5,8 @@ const pkg = require('../package.json');
 export const VERSION = pkg.version;
 
 export const METHODS = {
-  PUPPETEER_STEALTH: 'puppeteer_stealth',
-  OBSCURA_SIMPLE_FETCH: 'obscura_simple_fetch'
+  CURL: 'curl',
+  CHROME: 'chrome'
 } as const;
 
 export type MethodValue = (typeof METHODS)[keyof typeof METHODS];
@@ -34,9 +34,11 @@ export type ErrorTypeValue = (typeof ERROR_TYPES)[keyof typeof ERROR_TYPES];
 
 export const CAPTCHA_TYPES = {
   NONE: 'none',
-  GENERIC: 'generic',
   DATADOME: 'datadome',
-  CLOUDFLARE: 'cloudflare'
+  RECAPTCHA: 'recaptcha',
+  TURNSTILE: 'turnstile',
+  HCAPTCHA: 'hcaptcha',
+  UNSUPPORTED: 'unsupported'
 } as const;
 
 export type CaptchaTypeValue = (typeof CAPTCHA_TYPES)[keyof typeof CAPTCHA_TYPES];

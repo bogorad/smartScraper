@@ -56,14 +56,14 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     const extensionPaths = this.getExtensionPaths();
     const hasExtensions = extensionPaths.length > 0;
 
-    const proxyServer = options?.proxy || getProxyServer();
+    const proxyServer = this.resolveProxy(options?.proxy);
     let proxyAuth: { username: string; password: string } | null = null;
     
     if (proxyServer) {
       logger.debug('Browser launching with proxy', {
         url,
         proxyRedacted: redactProxyUrl(proxyServer),
-        explicit: !!options?.proxy
+        explicit: typeof options?.proxy === 'string'
       }, 'BROWSER');
       
       // Extract auth credentials if present (http://user:pass@host:port)
@@ -209,7 +209,15 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     return getExtensionPaths();
   }
 
-  private buildLaunchArgs(explicitProxy?: string): string[] {
+  private resolveProxy(explicitProxy?: string | false): string | undefined {
+    if (explicitProxy === false) {
+      return undefined;
+    }
+
+    return explicitProxy || getProxyServer() || undefined;
+  }
+
+  private buildLaunchArgs(explicitProxy?: string | false): string[] {
     const extensionPaths = this.getExtensionPaths();
     
     // Base args matching reference implementation
@@ -258,8 +266,8 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       logger.debug('Extension flags added', { count: extensionPaths.length, paths: extensionPaths }, 'BROWSER');
     }
 
-    // Priority: explicit proxy > global PROXY_SERVER
-    const proxyServer = explicitProxy || getProxyServer();
+    // Priority: explicit proxy > disabled proxy > global PROXY_SERVER
+    const proxyServer = this.resolveProxy(explicitProxy);
     if (proxyServer) {
       const chromiumProxyServer = buildChromiumProxyServer(proxyServer);
       if (!chromiumProxyServer) {
@@ -346,15 +354,15 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       return { type: CAPTCHA_TYPES.DATADOME, captchaUrl };
     }
 
-    // Cloudflare Turnstile detection - only if we can find a sitekey
-    // (other Cloudflare challenges like IUAM don't have sitekeys)
+    // Cloudflare Turnstile detection - only if we can find a sitekey.
+    // Other Cloudflare challenges like IUAM do not have sitekeys.
     if (html.includes('cf-turnstile') || html.includes('turnstile')) {
       const siteKey = await session.page.evaluate(() => {
-        const el = document.querySelector('.cf-turnstile[data-sitekey], [data-sitekey]');
+        const el = document.querySelector('.cf-turnstile[data-sitekey]');
         return el?.getAttribute('data-sitekey') || undefined;
       });
       if (siteKey) {
-        return { type: CAPTCHA_TYPES.CLOUDFLARE, siteKey };
+        return { type: CAPTCHA_TYPES.TURNSTILE, siteKey };
       }
       // No sitekey found - fall through to check other captcha types
     }
@@ -374,27 +382,48 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
         
         // Check if recaptcha/hcaptcha is visible and prominent
         // Use specific selectors that require data-sitekey attribute
-        const recaptcha = document.querySelector('.g-recaptcha[data-sitekey], .h-captcha[data-sitekey]');
-        if (!recaptcha) return false;
+        const captcha = document.querySelector('.g-recaptcha[data-sitekey], .h-captcha[data-sitekey]');
+        if (!captcha) return false;
         
         // Check computed visibility (display/visibility CSS)
-        const style = window.getComputedStyle(recaptcha);
+        const style = window.getComputedStyle(captcha);
         if (style.display === 'none' || style.visibility === 'hidden') {
           return false;
         }
         
-        const rect = recaptcha.getBoundingClientRect();
+        const rect = captcha.getBoundingClientRect();
         const isVisible = rect.width > 0 && rect.height > 0;
         
         return hasMinimalContent && isVisible;
       });
       
       if (isBlockingCaptcha) {
-        const siteKey = await session.page.evaluate(() => {
-          const el = document.querySelector('.g-recaptcha[data-sitekey], .h-captcha[data-sitekey], [data-sitekey]');
-          return el?.getAttribute('data-sitekey') || undefined;
+        const captcha = await session.page.evaluate(() => {
+          const recaptcha = document.querySelector('.g-recaptcha[data-sitekey]');
+          if (recaptcha) {
+            return {
+              type: 'recaptcha' as const,
+              siteKey: recaptcha.getAttribute('data-sitekey') || undefined
+            };
+          }
+
+          const hcaptcha = document.querySelector('.h-captcha[data-sitekey]');
+          if (hcaptcha) {
+            return {
+              type: 'hcaptcha' as const,
+              siteKey: hcaptcha.getAttribute('data-sitekey') || undefined
+            };
+          }
+
+          return undefined;
         });
-        return { type: CAPTCHA_TYPES.GENERIC, siteKey };
+        if (captcha?.type === 'recaptcha') {
+          return { type: CAPTCHA_TYPES.RECAPTCHA, siteKey: captcha.siteKey };
+        }
+        if (captcha?.type === 'hcaptcha') {
+          return { type: CAPTCHA_TYPES.HCAPTCHA, siteKey: captcha.siteKey };
+        }
+        return { type: CAPTCHA_TYPES.UNSUPPORTED };
       }
     }
 
@@ -468,29 +497,4 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     });
   }
 
-  async injectTurnstileToken(pageId: string, token: string): Promise<void> {
-    const session = this.sessions.get(pageId);
-    if (!session) return;
-
-    await session.page.evaluate((turnstileToken) => {
-      // Try cf-turnstile-response input first
-      const cfInput = document.querySelector('input[name="cf-turnstile-response"]');
-      if (cfInput) {
-        (cfInput as HTMLInputElement).value = turnstileToken;
-      }
-      
-      // Also try g-recaptcha-response for compatibility mode
-      const gInput = document.querySelector('input[name="g-recaptcha-response"]');
-      if (gInput) {
-        (gInput as HTMLInputElement).value = turnstileToken;
-      }
-
-      // Try to find and execute callback if available
-      if ((window as unknown as { tsCallback?: (token: string) => void }).tsCallback) {
-        (window as unknown as { tsCallback: (token: string) => void }).tsCallback(turnstileToken);
-      }
-    }, token);
-
-    logger.debug('Injected Turnstile token', { pageId }, 'BROWSER');
-  }
 }

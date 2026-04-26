@@ -113,7 +113,7 @@ Content-Type: application/json
 ```json
 {
   "success": true,
-  "method": "puppeteer_stealth",
+  "method": "chrome",
   "xpath": "//article[@class='post-content']",
   "data": "Article content text..."
 }
@@ -399,7 +399,7 @@ export function recordScrape(domain: string, success: boolean): void {
 
 **Format (JSON Lines):**
 ```
-{"ts":"2025-12-05T10:30:00.123Z","domain":"nypost.com","url":"https://nypost.com/...","success":true,"method":"puppeteer_stealth","xpath":"//article","ms":1250}
+{"ts":"2025-12-05T10:30:00.123Z","domain":"nypost.com","url":"https://nypost.com/...","success":true,"method":"chrome","xpath":"//article","ms":1250}
 {"ts":"2025-12-05T10:31:15.456Z","domain":"cnn.com","url":"https://cnn.com/...","success":false,"errorType":"CAPTCHA","error":"DataDome detected","ms":5400}
 ```
 

@@ -47,8 +47,13 @@ test5:
 test-basin:
     scripts/test-basin.sh
 
-# Run tests with parallel workers
+# Run unit tests and E2E tests with parallel workers
 test:
+    npm test -- --run
+    cd test-orchestrator && go run . --workers 4
+
+# Run only Go E2E tests with parallel workers
+test-e2e:
     cd test-orchestrator && go run . --workers 4
 
 # Run specific test by pattern

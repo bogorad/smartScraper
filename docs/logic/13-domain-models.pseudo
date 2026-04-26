@@ -34,7 +34,7 @@ STRUCT ScrapeOptions:
 
 STRUCT ScrapeResult:
     success: boolean
-    method: MethodValue?            # 'puppeteer_stealth' | 'obscura_simple_fetch'
+    method: MethodValue?            # 'curl' | 'chrome'
     xpath: string?                  # XPath used for extraction
     data: string | object?          # Extracted content (format depends on outputType)
     rawHtmlSnapshotPath: string?    # Path to debug HTML file
@@ -90,7 +90,7 @@ STRUCT LlmXPathSuggestion:
 STRUCT CaptchaSolveInput:
     pageId: string                  # Browser session ID
     pageUrl: string                 # URL being scraped
-    captchaTypeHint: CaptchaTypeValue?  # 'generic' | 'datadome'
+    captchaTypeHint: CaptchaTypeValue?  # 'datadome' | 'recaptcha' | 'turnstile' | 'hcaptcha' | 'unsupported'
     proxyDetails: {server: string}?
     userAgentString: string?
     siteKey: string?                # For reCAPTCHA/hCaptcha
@@ -102,7 +102,7 @@ STRUCT CaptchaSolveResult:
     reason: string?                 # Error reason if failed
 
 STRUCT CaptchaDetectionResult:
-    type: CaptchaTypeValue          # 'none' | 'generic' | 'datadome'
+    type: CaptchaTypeValue          # 'none' | 'datadome' | 'recaptcha' | 'turnstile' | 'hcaptcha' | 'unsupported'
     captchaUrl: string?             # DataDome iframe src URL
 
 

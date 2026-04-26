@@ -26,8 +26,8 @@ A single orchestrator class (`src/core/engine.ts`) that:
 │                   CoreScraperEngine                      │
 ├─────────────────────────────────────────────────────────┤
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
-│  │ Browser  │  │ Simple   │  │   LLM    │  │ CAPTCHA │ │
-│  │   Port   │  │ Fetch    │  │   Port   │  │   Port  │ │
+│  │ Browser  │  │  Curl    │  │   LLM    │  │ CAPTCHA │ │
+│  │   Port   │  │   Port   │  │   Port   │  │   Port  │ │
 │  └──────────┘  └──────────┘  └──────────┘  └─────────┘ │
 │  ┌──────────┐                                           │
 │  │ Known    │                                           │
@@ -40,8 +40,8 @@ A single orchestrator class (`src/core/engine.ts`) that:
 
 1. **Validation** - URL validation, early exit on invalid input
 2. **Config Lookup** - Check KnownSitesPort for existing domain config
-3. **Simple Fetch** - For eligible stored XPath requests, try the Obscura-backed SimpleFetchPort without browser extensions or proxies
-4. **Browser Fetch** - Launch browser, load page via BrowserPort when simple fetch is unavailable or fails
+3. **Curl Fetch** - For eligible stored XPath requests, try the curl path without browser extensions or proxies
+4. **Chrome Fetch** - Launch Chrome, load page via BrowserPort when curl is unavailable or fails
 5. **CAPTCHA Check** - Detect and optionally solve CAPTCHAs
 6. **Discovery** - If no XPath known, use LLM to suggest candidates
 7. **Scoring** - Rank XPath candidates via ContentScoringEngine
@@ -60,7 +60,7 @@ class CoreScraperEngine {
     private llmPort: LlmPort,
     private captchaPort: CaptchaPort,
     private knownSitesPort: KnownSitesPort,
-    private simpleFetchPort?: SimpleFetchPort
+    private curlFetchPort?: CurlFetchPort
   ) {}
 }
 ```

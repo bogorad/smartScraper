@@ -41,16 +41,17 @@ Implement a single, authoritative configuration module using Zod for validation 
    - Clear error messages for invalid/missing config
    - Type-safe throughout the application
 
-3. **Supports multiple configuration sources**
+3. **Supports explicit runtime configuration sources**
    - Environment variables (highest priority)
    - `.env` file via dotenv (loaded automatically)
-   - `secrets.yaml` for encrypted secrets (via sops)
+   - Development `secrets.yaml` only through `scripts/with-secrets.sh`, which
+     exports environment variables before app startup
    - Default values (lowest priority)
 
 4. **Protects secrets**
    - Never logs secret values
    - Error messages show field names only, not values
-   - Support for encrypted `secrets.yaml` files
+   - App runtime does not parse encrypted `secrets.yaml` files
 
 5. **Maintains backward compatibility**
    - Legacy variable names still work
@@ -75,8 +76,7 @@ const ConfigSchema = z.object({
   // ... all config fields
 });
 
-// 3. Load and parse
-function loadSecretsFromYaml(): Record<string, string> { /* ... */ }
+// 3. Load and parse environment values
 function mapEnvVars(): Record<string, string | undefined> { /* ... */ }
 function parseConfig(): Config { /* ... */ }
 
@@ -101,12 +101,13 @@ export function getOpenrouterApiKey(): string { /* ... */ }
    PORT=8080
    ```
 
-3. **`secrets.yaml`**
-   ```yaml
-   api_keys:
-     openrouter: sk-...
-     smart_scraper: token-...
+3. **Development `secrets.yaml` through wrapper**
+   ```bash
+   scripts/with-secrets.sh -- npm start
    ```
+
+   The wrapper decrypts `secrets.yaml` with sops and exports uppercase
+   environment variables. App code reads only the environment.
 
 4. **Default values** (lowest)
 
@@ -148,9 +149,6 @@ Secrets are never exposed in error messages or logs:
 // ✅ Error messages show field names only
 [CONFIG] Validation failed: openrouterApiKey: String required
 
-// ✅ Secrets from YAML are not logged (only error message)
-[CONFIG] Failed to load secrets.yaml: ENOENT
-
 // ✅ No secret values in validation errors
 if (!result.success) {
   const messages = result.error.errors.map(...) // No values shown
@@ -191,7 +189,7 @@ if (!result.success) {
 
 | Tradeoff | Reasoning |
 |----------|-----------|
-| Added dependencies (dotenv, yaml) | Worth it for standard practices, easy to remove if needed |
+| Added dependency (`dotenv`) | Worth it for standard `.env` loading, easy to remove if needed |
 | Initialization required | `initConfig()` must be called early, but we control startup |
 | All config must be strings in env | Zod coercion handles type conversion cleanly |
 
@@ -248,9 +246,6 @@ Configuration is tested by:
 ## Dependencies Added
 
 - `dotenv` - Load `.env` file automatically
-- `yaml` - Parse YAML for secrets.yaml support
-
-Both are lightweight, widely-used, and industry-standard libraries.
 
 ## Related Documentation
 
@@ -272,5 +267,4 @@ Possible future improvements (out of scope for this ADR):
 
 - [Zod Documentation](https://zod.dev/) - Schema validation
 - [dotenv Documentation](https://github.com/motdotla/dotenv) - .env loading
-- [YAML Specification](https://yaml.org/) - secrets.yaml format
 - [The Twelve-Factor App](https://12factor.net/config) - Configuration best practices

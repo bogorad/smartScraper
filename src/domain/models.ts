@@ -53,6 +53,8 @@ export interface ScrapeContext {
   normalizedDomain: string;
   siteConfig?: SiteConfig;
   methodAttempted?: MethodValue;
+  captchaStrategy?: SiteConfigCaptcha;
+  proxyStrategy?: SiteConfigProxy;
   proxyDetails?: { server: string };
   userAgentString?: string;
   debugContextId?: string;
@@ -78,7 +80,7 @@ export interface LlmXPathSuggestion {
 export interface LoadPageOptions {
   timeout?: number;
   waitUntil?: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2';
-  proxy?: string;
+  proxy?: string | false;
   userAgentString?: string;
   headers?: Record<string, string>;
 }
@@ -115,6 +117,12 @@ export interface LogEntry {
   url: string;
   success: boolean;
   method?: MethodValue;
+  attemptedMethod?: MethodValue;
+  finalMethod?: MethodValue;
+  curlFailureReason?: string;
+  chromeFailureReason?: string;
+  captchaStrategy?: SiteConfigCaptcha;
+  proxyStrategy?: SiteConfigProxy;
   xpath?: string;
   contentLength?: number;
   errorType?: ErrorTypeValue;

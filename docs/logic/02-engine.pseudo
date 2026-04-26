@@ -284,7 +284,7 @@ CLASS CoreScraperEngine:
             
             result = {
                 success: true,
-                method: 'puppeteer_stealth',
+                method: 'chrome',
                 xpath,
                 data
             }

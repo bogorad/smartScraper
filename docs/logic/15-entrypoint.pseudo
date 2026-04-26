@@ -165,7 +165,7 @@ main().catch((error) => {
 # ============================================================================
 
 """
-1. Load environment variables (.env, secrets.yaml)
+1. Load environment variables (.env; secrets.yaml only through wrapper-exported env)
 2. Validate configuration with Zod
 3. Create data directories
 4. Validate Chromium installation

@@ -2,7 +2,6 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import YAML from 'yaml';
 import { DEFAULTS } from './constants.js';
 import { logger } from './utils/logger.js';
 
@@ -100,56 +99,8 @@ const ConfigSchema = z.object({
 
 type Config = z.infer<typeof ConfigSchema>;
 
-const SECRET_KEYS = [
-  { yamlKey: 'smart_scraper', configKey: 'api_token' },
-  { yamlKey: 'openrouter', configKey: 'openrouter_api_key' },
-  { yamlKey: 'twocaptcha', configKey: 'twocaptcha_api_key' },
-  { yamlKey: 'datadome_proxy_host', configKey: 'datadome_proxy_host' },
-  { yamlKey: 'datadome_proxy_login', configKey: 'datadome_proxy_login' },
-  { yamlKey: 'datadome_proxy_password', configKey: 'datadome_proxy_password' },
-  { yamlKey: 'default_socks5_proxy', configKey: 'default_socks5_proxy' },
-  { yamlKey: 'victorialogs_otlp_endpoint', configKey: 'victorialogs_otlp_endpoint' },
-  { yamlKey: 'victorialogs_otlp_headers', configKey: 'victorialogs_otlp_headers' },
-  { yamlKey: 'victorialogs_otlp_auth_header_name', configKey: 'victorialogs_otlp_auth_header_name' },
-  { yamlKey: 'victorialogs_otlp_auth_header_value', configKey: 'victorialogs_otlp_auth_header_value' }
-] as const;
-
-function isEncryptedSopsValue(value: unknown): boolean {
-  return typeof value === 'string' && value.startsWith('ENC[');
-}
-
-// Load secrets from YAML if available
-function loadSecretsFromYaml(): Record<string, string> {
-  const secretsPath = 'secrets.yaml';
-  if (!fs.existsSync(secretsPath)) {
-    return {};
-  }
-
-  try {
-    const content = fs.readFileSync(secretsPath, 'utf-8');
-    const data = YAML.parse(content);
-
-    const apiKeys: Record<string, string> = {};
-    const nestedApiKeys = data?.api_keys;
-
-    for (const { yamlKey, configKey } of SECRET_KEYS) {
-      const value = data?.[yamlKey] ?? nestedApiKeys?.[yamlKey];
-      if (value !== undefined && value !== null && !isEncryptedSopsValue(value)) {
-        apiKeys[configKey] = String(value);
-      }
-    }
-
-    return apiKeys;
-  } catch (error) {
-    logger.warn('Failed to load secrets.yaml', { error }, 'CONFIG');
-    return {};
-  }
-}
-
 // Map environment variable names (supporting legacy names)
 function mapEnvVars(): Record<string, string | undefined> {
-  const secrets = loadSecretsFromYaml();
-
   // Check if DEBUG is set - if so, override LOG_LEVEL to DEBUG
   const debugMode = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
   const effectiveLogLevel = debugMode ? 'DEBUG' : process.env.LOG_LEVEL;
@@ -167,7 +118,7 @@ function mapEnvVars(): Record<string, string | undefined> {
     logDir: process.env.LOG_DIR,
 
     // LLM
-    openrouterApiKey: process.env.OPENROUTER_API_KEY || process.env.OPENROUTER || secrets.openrouter_api_key,
+    openrouterApiKey: process.env.OPENROUTER_API_KEY || process.env.OPENROUTER,
     llmModel: process.env.LLM_MODEL,
     llmTemperature: process.env.LLM_TEMPERATURE,
     llmHttpReferer: process.env.LLM_HTTP_REFERER,
@@ -176,11 +127,10 @@ function mapEnvVars(): Record<string, string | undefined> {
     // Browser - support legacy PUPPETEER_EXECUTABLE_PATH and EXECUTABLE_PATH
     executablePath: process.env.EXECUTABLE_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
     extensionPaths: process.env.EXTENSION_PATHS,
-    // Support explicit proxy env, the default_socks5_proxy secret, and legacy HTTP_PROXY.
+    // Support explicit proxy env, with legacy HTTP_PROXY fallback.
     proxyServer:
       process.env.PROXY_SERVER ||
       process.env.DEFAULT_SOCKS5_PROXY ||
-      secrets.default_socks5_proxy ||
       process.env.HTTP_PROXY,
     browserDumpio: process.env.BROWSER_DUMPIO,
     browserConsoleCapture: process.env.BROWSER_CONSOLE_CAPTURE,
@@ -190,27 +140,27 @@ function mapEnvVars(): Record<string, string | undefined> {
     browserNonExtensionPostNavWaitMs: process.env.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS,
 
     // CAPTCHA
-    twocaptchaApiKey: process.env.TWOCAPTCHA_API_KEY || process.env.TWOCAPTCHA || secrets.twocaptcha_api_key,
+    twocaptchaApiKey: process.env.TWOCAPTCHA_API_KEY || process.env.TWOCAPTCHA,
     captchaDefaultTimeout: process.env.CAPTCHA_DEFAULT_TIMEOUT,
     captchaPollingInterval: process.env.CAPTCHA_POLLING_INTERVAL,
 
     // DataDome proxy
-    datadomeProxyHost: process.env.DATADOME_PROXY_HOST || secrets.datadome_proxy_host,
-    datadomeProxyLogin: process.env.DATADOME_PROXY_LOGIN || secrets.datadome_proxy_login,
-    datadomeProxyPassword: process.env.DATADOME_PROXY_PASSWORD || secrets.datadome_proxy_password,
+    datadomeProxyHost: process.env.DATADOME_PROXY_HOST,
+    datadomeProxyLogin: process.env.DATADOME_PROXY_LOGIN,
+    datadomeProxyPassword: process.env.DATADOME_PROXY_PASSWORD,
 
     // Auth
-    apiToken: process.env.API_TOKEN || process.env.SMART_SCRAPER || secrets.api_token,
+    apiToken: process.env.API_TOKEN || process.env.SMART_SCRAPER,
 
     // Logging
     logLevel: effectiveLogLevel,
     victoriaLogsOtlpEnabled: process.env.VICTORIALOGS_OTLP_ENABLED,
-    victoriaLogsOtlpEndpoint: process.env.VICTORIALOGS_OTLP_ENDPOINT || secrets.victorialogs_otlp_endpoint,
-    victoriaLogsOtlpHeaders: process.env.VICTORIALOGS_OTLP_HEADERS || secrets.victorialogs_otlp_headers,
+    victoriaLogsOtlpEndpoint: process.env.VICTORIALOGS_OTLP_ENDPOINT,
+    victoriaLogsOtlpHeaders: process.env.VICTORIALOGS_OTLP_HEADERS,
     victoriaLogsOtlpAuthHeaderName:
-      process.env.VICTORIALOGS_OTLP_AUTH_HEADER_NAME || secrets.victorialogs_otlp_auth_header_name,
+      process.env.VICTORIALOGS_OTLP_AUTH_HEADER_NAME,
     victoriaLogsOtlpAuthHeaderValue:
-      process.env.VICTORIALOGS_OTLP_AUTH_HEADER_VALUE || secrets.victorialogs_otlp_auth_header_value,
+      process.env.VICTORIALOGS_OTLP_AUTH_HEADER_VALUE,
     victoriaLogsOtlpStreamFields: process.env.VICTORIALOGS_OTLP_STREAM_FIELDS,
     victoriaLogsOtlpTimeoutMs: process.env.VICTORIALOGS_OTLP_TIMEOUT_MS,
     victoriaLogsOtlpBatchDelayMs: process.env.VICTORIALOGS_OTLP_BATCH_DELAY_MS,

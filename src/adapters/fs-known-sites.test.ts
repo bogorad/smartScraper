@@ -150,6 +150,43 @@ describe("FsKnownSitesAdapter", () => {
     });
   });
 
+  it("reloads configs when the sites file changes outside the adapter", async () => {
+    const sitesFile = path.join(
+      testState.dataDir,
+      "sites.jsonc",
+    );
+    await fs.mkdir(testState.dataDir, { recursive: true });
+    await fs.writeFile(
+      sitesFile,
+      JSON.stringify([siteConfig("first.example.com", "//main")]),
+    );
+
+    const { FsKnownSitesAdapter } =
+      await import("./fs-known-sites.js");
+    const adapter = new FsKnownSitesAdapter();
+
+    await expect(
+      adapter.getConfig("first.example.com"),
+    ).resolves.toMatchObject({
+      domainPattern: "first.example.com",
+    });
+
+    await fs.writeFile(
+      sitesFile,
+      JSON.stringify([siteConfig("second.example.com", "//article")]),
+    );
+
+    await expect(
+      adapter.getConfig("second.example.com"),
+    ).resolves.toMatchObject({
+      domainPattern: "second.example.com",
+      xpathMainContent: "//article",
+    });
+    await expect(
+      adapter.getConfig("first.example.com"),
+    ).resolves.toBeUndefined();
+  });
+
   it("persists strategy fields for method, captcha, and proxy", async () => {
     const { FsKnownSitesAdapter } =
       await import("./fs-known-sites.js");
@@ -186,7 +223,7 @@ describe("FsKnownSitesAdapter", () => {
     });
   });
 
-  it("loads legacy strategy fields without requiring new fields", async () => {
+  it("loads strategy fields without requiring every new field", async () => {
     const sitesFile = path.join(
       testState.dataDir,
       "sites.jsonc",
@@ -199,7 +236,7 @@ describe("FsKnownSitesAdapter", () => {
           domainPattern: "legacy.example.com",
           xpathMainContent: "//article",
           failureCountSinceLastSuccess: 0,
-          method: "puppeteer_stealth",
+          method: "chrome",
           captcha: "generic",
           needsProxy: "datadome",
         },

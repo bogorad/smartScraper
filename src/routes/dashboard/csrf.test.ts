@@ -346,11 +346,22 @@ describe("dashboard CSRF coverage", () => {
         body: new URLSearchParams({
           domainPattern: "example.com",
           xpathMainContent: "//main",
+          method: "chrome",
+          captcha: "datadome",
+          proxy: "datadome",
         }),
       },
     );
     expect(validSave.status).toBe(302);
     expect(mocks.saveConfig).toHaveBeenCalledTimes(1);
+    expect(mocks.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "chrome",
+        captcha: "datadome",
+        proxy: "datadome",
+        needsProxy: "datadome",
+      }),
+    );
 
     const validDelete = await app.request(
       "/dashboard/sites/example.com",
@@ -387,4 +398,112 @@ describe("dashboard CSRF coverage", () => {
       "https://example.com/story",
     );
   });
+
+  it("posts the new site form to the dedicated create route", async () => {
+    const sessionCookie = await createSessionCookie(app);
+    const { html } = await getPageCsrf(
+      app,
+      "/dashboard/sites/new",
+      sessionCookie,
+    );
+
+    expect(html).toContain('hx-post="/dashboard/sites/new"');
+  });
+
+  it("creates a new site through the dedicated route", async () => {
+    const sessionCookie = await createSessionCookie(app);
+    const { csrfCookie, csrfToken } = await getPageCsrf(
+      app,
+      "/dashboard/sites/new",
+      sessionCookie,
+    );
+
+    const res = await app.request("/dashboard/sites/new", {
+      method: "POST",
+      headers: {
+        Cookie: `${sessionCookie}; ${csrfCookie}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: new URLSearchParams({
+        domainPattern: "WWW.New-Site.example.",
+        xpathMainContent: "//main",
+        siteSpecificHeaders: "Accept-Language: en-US",
+        method: "curl",
+        captcha: "none",
+        proxy: "none",
+      }),
+    });
+
+    expect(res.status).toBe(302);
+    expect(mocks.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        domainPattern: "new-site.example",
+        xpathMainContent: "//main",
+        siteSpecificHeaders: {
+          "Accept-Language": "en-US",
+        },
+        method: "curl",
+        captcha: "none",
+        proxy: "none",
+      }),
+    );
+  });
+
+  it.each([
+    [
+      "bad domain",
+      { domainPattern: "*.example.com", xpathMainContent: "//main" },
+      "Domain must be a hostname",
+    ],
+    [
+      "bad XPath",
+      { domainPattern: "example.org", xpathMainContent: "main" },
+      "XPath main content must start",
+    ],
+    [
+      "bad headers",
+      {
+        domainPattern: "example.org",
+        xpathMainContent: "//main",
+        siteSpecificHeaders: "Accept-Language",
+      },
+      "Custom headers must use",
+    ],
+    [
+      "bad strategy",
+      {
+        domainPattern: "example.org",
+        xpathMainContent: "//main",
+        method: "browser",
+      },
+      "Invalid method strategy",
+    ],
+  ])(
+    "rejects invalid site save input: %s",
+    async (_name, values, expectedMessage) => {
+      const sessionCookie = await createSessionCookie(app);
+      const { csrfCookie, csrfToken } = await getPageCsrf(
+        app,
+        "/dashboard/sites/new",
+        sessionCookie,
+      );
+
+      const res = await app.request("/dashboard/sites/new", {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: new URLSearchParams(values),
+      });
+      const html = await res.text();
+
+      expect(res.status).toBe(400);
+      expect(html).toContain(expectedMessage);
+      expect(mocks.saveConfig).not.toHaveBeenCalled();
+    },
+  );
 });

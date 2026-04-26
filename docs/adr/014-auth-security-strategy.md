@@ -13,9 +13,9 @@ We faced challenges with:
 ## Decision
 
 ### 1. Secret Management
-We use `sops` with `secrets.yaml` to encrypt sensitive configuration (API keys).
+We use `sops` with `secrets.yaml` to encrypt local development secrets.
 - **Development**: A `just dev` recipe decrypts secrets on-the-fly and injects them as environment variables.
-- **Production**: Secrets should be provided via environment variables or a decrypted file available to the application.
+- **Production**: Secrets should be provided via environment variables from the deployment secret manager.
 
 ### 2. Authentication Flow
 - **API**: Stateless `Authorization: Bearer <token>` header check.
@@ -31,10 +31,12 @@ To support both local development (often HTTP) and production (HTTPS) without ma
     - Production deployments automatically enforce HTTPS security.
 
 ### 4. Configuration Loading
-Configuration is centralized in `src/config.ts`. It lazily loads:
-- Environment variables.
-- `secrets.yaml` (fallback/direct load if present).
+Configuration is centralized in `src/config.ts`. It loads:
+- Environment variables and `.env`.
 - Validation via Zod schema.
+
+The application runtime does not parse `secrets.yaml`; development wrappers
+decrypt that file before process startup and export environment variables.
 
 ## Status
 

@@ -16,8 +16,8 @@ import type {
   LlmPort,
   CaptchaPort,
   KnownSitesPort,
-  SimpleFetchPort,
 } from "../ports/index.js";
+import type { CurlFetchPort } from "../ports/curl-fetch.js";
 import {
   CAPTCHA_TYPES,
   ERROR_TYPES,
@@ -26,7 +26,6 @@ import {
 } from "../constants.js";
 
 const configState = vi.hoisted(() => ({
-  extensionPaths: [] as string[],
   proxyServer: "",
   datadomeProxyHost: "",
   datadomeProxyLogin: "",
@@ -44,7 +43,6 @@ vi.mock("../config.js", () => ({
   getDatadomeProxyHost: () => configState.datadomeProxyHost,
   getDatadomeProxyLogin: () => configState.datadomeProxyLogin,
   getDatadomeProxyPassword: () => configState.datadomeProxyPassword,
-  getExtensionPaths: () => configState.extensionPaths,
   getProxyServer: () => configState.proxyServer,
 }));
 
@@ -57,12 +55,11 @@ describe("CoreScraperEngine", () => {
   let mockLlm: LlmPort;
   let mockCaptcha: CaptchaPort;
   let mockKnownSites: KnownSitesPort;
-  let mockSimpleFetch: SimpleFetchPort;
+  let mockCurlFetch: CurlFetchPort;
   let engine: CoreScraperEngine;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    configState.extensionPaths = [];
     configState.proxyServer = "";
     configState.datadomeProxyHost = "";
     configState.datadomeProxyLogin = "";
@@ -99,9 +96,6 @@ describe("CoreScraperEngine", () => {
       getCookies: vi.fn().mockResolvedValue(""),
       setCookies: vi.fn().mockResolvedValue(undefined),
       reload: vi.fn().mockResolvedValue(undefined),
-      injectTurnstileToken: vi
-        .fn()
-        .mockResolvedValue(undefined),
     };
 
     mockLlm = {
@@ -134,14 +128,12 @@ describe("CoreScraperEngine", () => {
       getAllConfigs: vi.fn().mockResolvedValue([]),
     };
 
-    mockSimpleFetch = {
-      fetchHtml: vi
-        .fn()
-        .mockResolvedValue(
-          "<html><body><article><h1>Simple page</h1><p>" +
-            "Simple article content. ".repeat(20) +
-            "</p></article></body></html>",
-        ),
+    mockCurlFetch = {
+      fetchHtml: vi.fn().mockResolvedValue({
+        ok: false,
+        reason: "network_error",
+        message: "Network error",
+      }),
     };
 
     engine = new CoreScraperEngine(
@@ -159,7 +151,7 @@ describe("CoreScraperEngine", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(result.method).toBe(METHODS.PUPPETEER_STEALTH);
+      expect(result.method).toBe(METHODS.CHROME);
       expect(result.data).toBeDefined();
       expect(mockBrowser.loadPage).toHaveBeenCalledWith(
         "https://example.com/article",
@@ -204,7 +196,26 @@ describe("CoreScraperEngine", () => {
       );
     });
 
-    it("should use DataDome proxy instead of default proxy when site requires DataDome", async () => {
+    it("should honor site strategy that disables the default proxy", async () => {
+      configState.proxyServer = "socks5://default.example:1080";
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue({
+        domainPattern: "example.com",
+        xpathMainContent: "//article",
+        failureCountSinceLastSuccess: 0,
+        proxy: "none",
+      });
+
+      await engine.scrapeUrl("https://example.com/article");
+
+      expect(mockBrowser.loadPage).toHaveBeenCalledWith(
+        "https://example.com/article",
+        expect.objectContaining({
+          proxy: false,
+        }),
+      );
+    });
+
+    it("should not force DataDome solver proxy onto page loads when site requires DataDome", async () => {
       configState.proxyServer = "socks5://default.example:1080";
       configState.datadomeProxyHost = "datadome.example:2334";
       configState.datadomeProxyLogin = "datadome-login";
@@ -221,9 +232,7 @@ describe("CoreScraperEngine", () => {
       expect(mockBrowser.loadPage).toHaveBeenCalledWith(
         "https://example.com/article",
         expect.objectContaining({
-          proxy: expect.stringMatching(
-            /^http:\/\/datadome-login-session-[^:]+:datadome-password@datadome\.example:2334$/,
-          ),
+          proxy: "socks5://default.example:1080",
         }),
       );
     });
@@ -342,13 +351,61 @@ describe("CoreScraperEngine", () => {
       await engine.scrapeUrl("https://example.com/article");
 
       expect(mockLlm.suggestXPaths).toHaveBeenCalled();
-      expect(mockKnownSites.saveConfig).toHaveBeenCalled();
+      expect(mockKnownSites.saveConfig).toHaveBeenCalledWith({
+        domainPattern: "example.com",
+        xpathMainContent: "//article",
+        failureCountSinceLastSuccess: 0,
+        lastSuccessfulScrapeTimestamp: expect.any(String),
+        discoveredByLlm: true,
+        method: METHODS.CHROME,
+        captcha: CAPTCHA_TYPES.NONE,
+        proxy: "none",
+        needsProxy: "off",
+      });
+    });
+
+    it("should preserve unrelated site metadata when saving discovered strategy", async () => {
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue({
+        domainPattern: "example.com",
+        xpathMainContent: "//old-article",
+        failureCountSinceLastSuccess: 3,
+        siteSpecificHeaders: {
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        siteCleanupClasses: ["ad-slot"],
+        userAgent: "Saved Site UA",
+      });
+      mockBrowser.getPageHtml = vi
+        .fn()
+        .mockResolvedValue(
+          "<html><body><article>Content</article></body></html>",
+        );
+
+      await engine.scrapeUrl("https://example.com/article");
+
+      expect(mockKnownSites.saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          domainPattern: "example.com",
+          xpathMainContent: "//article",
+          failureCountSinceLastSuccess: 0,
+          discoveredByLlm: true,
+          method: METHODS.CHROME,
+          captcha: CAPTCHA_TYPES.NONE,
+          proxy: "none",
+          needsProxy: "off",
+          siteSpecificHeaders: {
+            "Accept-Language": "en-US,en;q=0.9",
+          },
+          siteCleanupClasses: ["ad-slot"],
+          userAgent: "Saved Site UA",
+        }),
+      );
     });
 
     it("should handle CAPTCHA detection and solving", async () => {
       mockBrowser.detectCaptcha = vi
         .fn()
-        .mockResolvedValue({ type: CAPTCHA_TYPES.GENERIC });
+        .mockResolvedValue({ type: CAPTCHA_TYPES.DATADOME });
       mockCaptcha.solveIfPresent = vi
         .fn()
         .mockResolvedValue({
@@ -405,7 +462,7 @@ describe("CoreScraperEngine", () => {
     it("should fail when CAPTCHA cannot be solved", async () => {
       mockBrowser.detectCaptcha = vi
         .fn()
-        .mockResolvedValue({ type: CAPTCHA_TYPES.GENERIC });
+        .mockResolvedValue({ type: CAPTCHA_TYPES.DATADOME });
       mockCaptcha.solveIfPresent = vi
         .fn()
         .mockResolvedValue({
@@ -516,7 +573,41 @@ describe("CoreScraperEngine", () => {
       );
 
       expect(result.success).toBe(false);
-      expect(result.errorType).toBe(ERROR_TYPES.LLM);
+      expect(result.errorType).toBe(ERROR_TYPES.EXTRACTION);
+    });
+
+    it("should fail when cached XPath is too short and discovery is disabled", async () => {
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue({
+        domainPattern: "example.com",
+        xpathMainContent: "//article",
+        failureCountSinceLastSuccess: 0,
+      });
+      mockBrowser.evaluateXPath = vi
+        .fn()
+        .mockResolvedValue(["Too short"]);
+
+      const result = await engine.scrapeUrl(
+        "https://example.com/article",
+        {
+          disableDiscovery: true,
+        },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(ERROR_TYPES.EXTRACTION);
+      expect(mockKnownSites.markSuccess).not.toHaveBeenCalled();
+      expect(
+        mockKnownSites.incrementFailure,
+      ).toHaveBeenCalledWith("example.com");
+      expect(
+        scrapeEvents.recordScrapeOutcome,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          result: expect.objectContaining({
+            errorType: ERROR_TYPES.EXTRACTION,
+          }),
+        }),
+      );
     });
 
     it("should fail when extraction returns empty result", async () => {
@@ -592,7 +683,7 @@ describe("CoreScraperEngine", () => {
         }),
         result: expect.objectContaining({
           success: true,
-          method: METHODS.PUPPETEER_STEALTH,
+          method: METHODS.CHROME,
           xpath: "//article",
         }),
         startTime: expect.any(Number),
@@ -663,150 +754,229 @@ describe("CoreScraperEngine", () => {
       );
     });
 
-    it("should use Obscura for eligible simple fetches with cached XPath", async () => {
-      engine = new CoreScraperEngine(
-        mockBrowser,
-        mockLlm,
-        mockCaptcha,
-        mockKnownSites,
-        mockSimpleFetch,
-      );
-      mockKnownSites.getConfig = vi.fn().mockResolvedValue({
-        domainPattern: "example.com",
-        xpathMainContent: "//article",
-        failureCountSinceLastSuccess: 0,
-        lastSuccessfulScrapeTimestamp:
-          new Date().toISOString(),
+    describe("curl/chrome fallback", () => {
+      const embeddedArticle =
+        "Curl extracted article content. ".repeat(10);
+      const embeddedArticleHtml = `<html><body><script type="application/ld+json">{"articleBody":${JSON.stringify(embeddedArticle)}}</script></body></html>`;
+      const staticArticle =
+        "Curl static article content. ".repeat(10);
+      const staticArticleHtml = `<html><body><article><h1>Title</h1><p>${staticArticle}</p></article></body></html>`;
+
+      beforeEach(() => {
+        engine = new CoreScraperEngine(
+          mockBrowser,
+          mockLlm,
+          mockCaptcha,
+          mockKnownSites,
+          mockCurlFetch,
+        );
       });
 
-      const result = await engine.scrapeUrl(
-        "https://example.com/article",
-      );
+      it("should return curl result when unknown-site curl succeeds", async () => {
+        mockCurlFetch.fetchHtml = vi.fn().mockResolvedValue({
+          ok: true,
+          html: embeddedArticleHtml,
+          statusCode: 200,
+        });
 
-      expect(result.success).toBe(true);
-      expect(result.method).toBe('obscura_simple_fetch');
-      expect(
-        mockSimpleFetch.fetchHtml,
-      ).toHaveBeenCalledWith(
-        "https://example.com/article",
-        {
-          timeoutMs: expect.any(Number),
-          userAgentString: undefined,
-        },
-      );
-      expect(mockBrowser.loadPage).not.toHaveBeenCalled();
-      expect(
-        mockKnownSites.markSuccess,
-      ).toHaveBeenCalledWith("example.com");
-    });
+        const result = await engine.scrapeUrl(
+          "https://example.com/article",
+        );
 
-    it("should use Obscura for eligible simple fetches that need discovery", async () => {
-      engine = new CoreScraperEngine(
-        mockBrowser,
-        mockLlm,
-        mockCaptcha,
-        mockKnownSites,
-        mockSimpleFetch,
-      );
-      mockKnownSites.getConfig = vi
-        .fn()
-        .mockResolvedValue(undefined);
-
-      const result = await engine.scrapeUrl(
-        "https://example.com/article",
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.method).toBe('obscura_simple_fetch');
-      expect(mockLlm.suggestXPaths).toHaveBeenCalled();
-      expect(
-        mockKnownSites.saveConfig,
-      ).toHaveBeenCalledWith({
-        domainPattern: "example.com",
-        xpathMainContent: "//article",
-        failureCountSinceLastSuccess: 0,
-        lastSuccessfulScrapeTimestamp: expect.any(String),
-        discoveredByLlm: true,
+        expect(result.success).toBe(true);
+        expect(result.method).toBe(METHODS.CURL);
+        expect(result.xpath).toBe("embedded_json");
+        expect(result.data).toBe(embeddedArticle);
+        expect(mockCurlFetch.fetchHtml).toHaveBeenCalledWith(
+          "https://example.com/article",
+          expect.objectContaining({
+            proxy: false,
+          }),
+        );
+        expect(mockBrowser.loadPage).not.toHaveBeenCalled();
+        expect(mockKnownSites.saveConfig).toHaveBeenCalledWith(
+          expect.objectContaining({
+            xpathMainContent: "embedded_json",
+            method: METHODS.CURL,
+            discoveredByLlm: false,
+          }),
+        );
       });
-      expect(mockBrowser.loadPage).not.toHaveBeenCalled();
-    });
 
-    it("should fall back to Puppeteer when explicit proxy details are present", async () => {
-      engine = new CoreScraperEngine(
-        mockBrowser,
-        mockLlm,
-        mockCaptcha,
-        mockKnownSites,
-        mockSimpleFetch,
-      );
+      it("should return curl result for unknown-site static article HTML", async () => {
+        mockCurlFetch.fetchHtml = vi.fn().mockResolvedValue({
+          ok: true,
+          html: staticArticleHtml,
+          statusCode: 200,
+        });
 
-      const result = await engine.scrapeUrl(
-        "https://example.com/article",
-        {
-          proxyDetails: {
-            server: "http://proxy.example:8080",
+        const result = await engine.scrapeUrl(
+          "https://example.com/article",
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe(METHODS.CURL);
+        expect(result.xpath).toBe("//article");
+        expect(result.data).toContain(
+          "Curl static article content.",
+        );
+        expect(mockBrowser.loadPage).not.toHaveBeenCalled();
+      });
+
+      it("should use known-site curl method without launching Chrome", async () => {
+        mockKnownSites.getConfig = vi.fn().mockResolvedValue({
+          domainPattern: "example.com",
+          xpathMainContent: "//article",
+          failureCountSinceLastSuccess: 0,
+          method: "curl",
+        });
+        mockCurlFetch.fetchHtml = vi.fn().mockResolvedValue({
+          ok: true,
+          html: staticArticleHtml,
+          statusCode: 200,
+        });
+
+        const result = await engine.scrapeUrl(
+          "https://example.com/article",
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe(METHODS.CURL);
+        expect(result.xpath).toBe("//article");
+        expect(mockBrowser.loadPage).not.toHaveBeenCalled();
+        expect(mockCurlFetch.fetchHtml).toHaveBeenCalled();
+      });
+
+      it("should fall back to chrome when known-site curl fails", async () => {
+        mockKnownSites.getConfig = vi.fn().mockResolvedValue({
+          domainPattern: "example.com",
+          xpathMainContent: "//article",
+          failureCountSinceLastSuccess: 0,
+          method: "curl",
+        });
+        mockCurlFetch.fetchHtml = vi.fn().mockResolvedValue({
+          ok: true,
+          html: "<html><body><article>Too short</article></body></html>",
+          statusCode: 200,
+        });
+        mockBrowser.evaluateXPath = vi
+          .fn()
+          .mockResolvedValue([embeddedArticle]);
+
+        const result = await engine.scrapeUrl(
+          "https://example.com/article",
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe(METHODS.CHROME);
+        expect(mockBrowser.loadPage).toHaveBeenCalled();
+        expect(result.details).toEqual({
+          curlFallback: {
+            attemptedMethod: METHODS.CURL,
+            finalMethod: METHODS.CHROME,
+            failure: {
+              reason: "unusable_content",
+              message:
+                "Curl response did not contain usable article content",
+              statusCode: 200,
+              htmlLength:
+                "<html><body><article>Too short</article></body></html>"
+                  .length,
+            },
           },
-        },
-      );
+        });
+      });
 
-      expect(result.success).toBe(true);
-      expect(result.method).toBe(METHODS.PUPPETEER_STEALTH);
-      expect(
-        mockSimpleFetch.fetchHtml,
-      ).not.toHaveBeenCalled();
-      expect(mockBrowser.loadPage).toHaveBeenCalledWith(
-        "https://example.com/article",
-        {
-          timeout: expect.any(Number),
-          proxy: "http://proxy.example:8080",
-          userAgentString: undefined,
-          headers: undefined,
-        },
-      );
-    });
+      it("should fall back to chrome when unknown-site curl fails", async () => {
+        mockCurlFetch.fetchHtml = vi.fn().mockResolvedValue({
+          ok: false,
+          reason: "http_status",
+          message: "HTTP 403 from origin",
+          statusCode: 403,
+        });
 
-    it("should fall back to Puppeteer when extensions are configured", async () => {
-      engine = new CoreScraperEngine(
-        mockBrowser,
-        mockLlm,
-        mockCaptcha,
-        mockKnownSites,
-        mockSimpleFetch,
-      );
-      configState.extensionPaths = ["/tmp/adblock"];
+        const result = await engine.scrapeUrl(
+          "https://example.com/article",
+        );
 
-      const result = await engine.scrapeUrl(
-        "https://example.com/article",
-      );
+        expect(result.success).toBe(true);
+        expect(result.method).toBe(METHODS.CHROME);
+        expect(mockBrowser.loadPage).toHaveBeenCalledWith(
+          "https://example.com/article",
+          expect.any(Object),
+        );
+        expect(result.details).toEqual({
+          curlFallback: {
+            attemptedMethod: METHODS.CURL,
+            finalMethod: METHODS.CHROME,
+            failure: {
+              reason: "http_status",
+              message: "HTTP 403 from origin",
+              statusCode: 403,
+            },
+          },
+        });
+      });
 
-      expect(result.success).toBe(true);
-      expect(result.method).toBe(METHODS.PUPPETEER_STEALTH);
-      expect(
-        mockSimpleFetch.fetchHtml,
-      ).not.toHaveBeenCalled();
-      expect(mockBrowser.loadPage).toHaveBeenCalled();
-    });
+      it("should preserve curl failure evidence when chrome also fails", async () => {
+        mockCurlFetch.fetchHtml = vi.fn().mockResolvedValue({
+          ok: false,
+          reason: "timeout",
+          message: "Curl request timed out",
+          exitCode: 28,
+          stderr: "operation timed out",
+        });
+        mockBrowser.loadPage = vi
+          .fn()
+          .mockRejectedValue(new Error("Chrome navigation failed"));
 
-    it("should fall back to Puppeteer when Obscura fetch fails", async () => {
-      engine = new CoreScraperEngine(
-        mockBrowser,
-        mockLlm,
-        mockCaptcha,
-        mockKnownSites,
-        mockSimpleFetch,
-      );
-      mockSimpleFetch.fetchHtml = vi
-        .fn()
-        .mockRejectedValue(new Error("obscura failed"));
+        const result = await engine.scrapeUrl(
+          "https://example.com/article",
+        );
 
-      const result = await engine.scrapeUrl(
-        "https://example.com/article",
-      );
+        expect(result.success).toBe(false);
+        expect(result.errorType).toBe(ERROR_TYPES.UNKNOWN);
+        expect(result.error).toBe("Chrome navigation failed");
+        expect(result.details).toEqual({
+          curlFallback: {
+            attemptedMethod: METHODS.CURL,
+            finalMethod: METHODS.CHROME,
+            failure: {
+              reason: "timeout",
+              message: "Curl request timed out",
+              stderr: "operation timed out",
+              exitCode: 28,
+            },
+          },
+        });
+      });
 
-      expect(result.success).toBe(true);
-      expect(result.method).toBe(METHODS.PUPPETEER_STEALTH);
-      expect(mockSimpleFetch.fetchHtml).toHaveBeenCalled();
-      expect(mockBrowser.loadPage).toHaveBeenCalled();
+      it("should use known-site chrome method directly without trying curl", async () => {
+        mockKnownSites.getConfig = vi.fn().mockResolvedValue({
+          domainPattern: "example.com",
+          xpathMainContent: "//article",
+          failureCountSinceLastSuccess: 0,
+          method: "chrome",
+        });
+        mockBrowser.evaluateXPath = vi
+          .fn()
+          .mockResolvedValue([embeddedArticle]);
+
+        const result = await engine.scrapeUrl(
+          "https://example.com/article",
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe(METHODS.CHROME);
+        expect(mockCurlFetch.fetchHtml).not.toHaveBeenCalled();
+        expect(mockBrowser.loadPage).toHaveBeenCalledWith(
+          "https://example.com/article",
+          expect.any(Object),
+        );
+        expect(
+          mockBrowser.evaluateXPath,
+        ).toHaveBeenCalledWith("page-123", "//article");
+      });
     });
   });
 
@@ -842,6 +1012,13 @@ describe("CoreScraperEngine", () => {
 
       expect(result.success).toBe(true);
       expect(result.xpath).toBe("embedded_json");
+      expect(mockKnownSites.saveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          xpathMainContent: "embedded_json",
+          method: METHODS.CHROME,
+          discoveredByLlm: false,
+        }),
+      );
     });
 
     it("should fail when embedded JSON content is too short", async () => {

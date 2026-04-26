@@ -19,12 +19,12 @@ DEFAULT_SOCKS5_PROXY=socks5://hostname:port
 HTTP_PROXY=http://username:password@hostname:port
 ```
 
-`default_socks5_proxy` may also be loaded from `secrets.yaml`, either as a
-flat key or as `api_keys.default_socks5_proxy`.
+In development, `scripts/with-secrets.sh` may export `default_socks5_proxy`
+from encrypted `secrets.yaml` as `DEFAULT_SOCKS5_PROXY`. App runtime reads only
+the environment.
 
 Precedence for the default scrape proxy is:
-`PROXY_SERVER` → `DEFAULT_SOCKS5_PROXY` / `default_socks5_proxy` →
-`HTTP_PROXY`.
+`PROXY_SERVER` → `DEFAULT_SOCKS5_PROXY` → `HTTP_PROXY`.
 
 ### Proxy URL Format
 

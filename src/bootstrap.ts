@@ -1,5 +1,6 @@
 import fs from "fs";
 
+import { CurlFetchAdapter } from "./adapters/curl-fetch.js";
 import { knownSitesAdapter } from "./adapters/fs-known-sites.js";
 import { OpenRouterLlmAdapter } from "./adapters/openrouter-llm.js";
 import { PuppeteerBrowserAdapter } from "./adapters/puppeteer-browser.js";
@@ -18,6 +19,7 @@ import { logger } from "./utils/logger.js";
 
 export interface RuntimeDependencies {
   browserAdapter: PuppeteerBrowserAdapter;
+  curlFetchAdapter: CurlFetchAdapter;
 }
 
 export interface BootstrapResult {
@@ -28,15 +30,26 @@ export interface BootstrapResult {
 
 export function createRuntimeDependencies(): RuntimeDependencies {
   const browserAdapter = new PuppeteerBrowserAdapter();
+  const llmAdapter = new OpenRouterLlmAdapter();
+  const captchaAdapter = new TwoCaptchaAdapter();
+  const curlFetchAdapter = new CurlFetchAdapter();
+  const initializeEngineWithCurl = initializeEngine as (
+    browserAdapter: PuppeteerBrowserAdapter,
+    llmAdapter: OpenRouterLlmAdapter,
+    captchaAdapter: TwoCaptchaAdapter,
+    knownSites: typeof knownSitesAdapter,
+    curlFetchAdapter: CurlFetchAdapter,
+  ) => ReturnType<typeof initializeEngine>;
 
-  initializeEngine(
+  initializeEngineWithCurl(
     browserAdapter,
-    new OpenRouterLlmAdapter(),
-    new TwoCaptchaAdapter(),
+    llmAdapter,
+    captchaAdapter,
     knownSitesAdapter,
+    curlFetchAdapter,
   );
 
-  return { browserAdapter };
+  return { browserAdapter, curlFetchAdapter };
 }
 
 export async function bootstrapApplication(): Promise<BootstrapResult> {

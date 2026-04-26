@@ -7,6 +7,31 @@ import { utcNow } from "../utils/date.js";
 import { logScrape } from "./log-storage.js";
 import { recordScrape } from "./stats-storage.js";
 
+interface CurlFallbackDetails {
+  attemptedMethod?: LogEntry["attemptedMethod"];
+  finalMethod?: LogEntry["finalMethod"];
+  failure?: {
+    reason?: string;
+    message?: string;
+  };
+}
+
+function getCurlFallbackDetails(
+  details: unknown,
+): CurlFallbackDetails | undefined {
+  if (!details || typeof details !== "object") {
+    return undefined;
+  }
+
+  const fallback = (details as { curlFallback?: unknown })
+    .curlFallback;
+  if (!fallback || typeof fallback !== "object") {
+    return undefined;
+  }
+
+  return fallback as CurlFallbackDetails;
+}
+
 export interface ScrapeOutcomeInput {
   context: ScrapeContext;
   result: ScrapeResult;
@@ -29,6 +54,9 @@ export async function recordScrapeOutcome({
   contentLength,
 }: ScrapeOutcomeInput): Promise<void> {
   const ms = Date.now() - startTime;
+  const curlFallback = getCurlFallbackDetails(
+    result.details,
+  );
 
   await recordScrape(
     context.normalizedDomain,
@@ -41,6 +69,20 @@ export async function recordScrapeOutcome({
     url: context.targetUrl,
     success: result.success,
     method: result.method,
+    attemptedMethod:
+      curlFallback?.attemptedMethod ?? context.methodAttempted,
+    finalMethod:
+      curlFallback?.finalMethod ?? result.method,
+    curlFailureReason: curlFallback?.failure?.reason,
+    chromeFailureReason:
+      context.methodAttempted === "chrome" &&
+      !result.success
+        ? result.error
+        : undefined,
+    captchaStrategy:
+      context.captchaStrategy ?? context.siteConfig?.captcha,
+    proxyStrategy:
+      context.proxyStrategy ?? context.siteConfig?.proxy,
     xpath: result.xpath,
     contentLength,
     errorType: result.errorType,

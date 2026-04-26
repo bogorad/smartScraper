@@ -56,17 +56,29 @@ just test-urls      # Test all URLs in testing/urls_for_testing.txt
 just test-urls-failed  # Rerun only URLs that failed in the previous URL test run
 ```
 
-- Reads URLs from `testing/urls_for_testing.txt`
+- Reads structured URL records from `testing/urls_for_testing.txt`
 - Requires a clean dev server on port `5555`
 - Reports PASS/FAIL per URL with summary
-- Writes failed URLs to `testing/failed_urls.txt`
+- Reports the scrape method for passing URLs; only `curl` and `chrome` are valid
+  method values
+- Writes failed URL records to `testing/failed_urls.txt` with classification,
+  URL, and failure reason
 - `just test-urls-failed` reads `testing/failed_urls.txt` and updates it with
   any URLs that still fail
+- Required smoke URL failures fail the command. Diagnostic URL failures are
+  recorded as classified artifacts without failing the required smoke gate.
 
 Before running URL-based E2E, kill every process currently listening on
 `:5555`, restart `just dev`, and verify `http://localhost:5555/health`.
 When an agent runs this protocol, `just dev` must run in tmux so the server logs
 remain observable during the test run.
+
+URL E2E runs must verify that every response, runtime log, and test artifact
+reports only the supported methods: `curl` or `chrome`.
+When a URL fails after `curl` and `chrome` attempts, the failure artifact must
+preserve the explicit error. CAPTCHA failures should name the detected
+unsupported family (`recaptcha`, `turnstile`, or `hcaptcha`) instead of falling
+through to a generic XPath failure.
 
 ### Secret Handling
 
@@ -85,10 +97,14 @@ do not decrypt `secrets.yaml` themselves.
 ### Test URL Management
 
 Test URLs are stored in `testing/urls_for_testing.txt`:
-- One URL per line
+- One structured record per line:
+  - `required|https://example.com/article`
+  - `diagnostic|external-paywall|https://example.com/protected`
 - Lines starting with `#` are comments
 - Empty lines are ignored
-- URLs should cover diverse sites (paywalled, anti-bot, standard)
+- Required URLs should cover stable smoke coverage.
+- Diagnostic URLs should cover paywalled, anti-bot, proxy-dependent, or other
+  expected external failure classes without making the smoke gate ambiguous.
 
 ## Consequences
 
