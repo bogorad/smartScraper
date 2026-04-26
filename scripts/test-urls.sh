@@ -7,6 +7,42 @@
 PROXY="${SMART_SCRAPER_PROXY:-socks5://r5s.bruc:1080}"
 SERVER="${SMART_SCRAPER_SERVER:-http://localhost:5555}"
 TIMEOUT="${SMART_SCRAPER_TIMEOUT:-120}"
+DEFAULT_URLS_FILE="testing/urls_for_testing.txt"
+FAILED_URLS_FILE="${SMART_SCRAPER_FAILED_URLS_FILE:-testing/failed_urls.txt}"
+
+usage() {
+    cat <<EOF
+Usage: $0 [--failed]
+
+Options:
+  --failed    Rerun only URLs recorded as failed by the previous run.
+
+Environment:
+  SMART_SCRAPER_SERVER            Server URL (default: http://localhost:5555)
+  SMART_SCRAPER_PROXY             curl proxy URL (default: socks5://r5s.bruc:1080)
+  SMART_SCRAPER_TIMEOUT           Per-URL timeout in seconds (default: 120)
+  SMART_SCRAPER_FAILED_URLS_FILE  Failed URL artifact (default: testing/failed_urls.txt)
+EOF
+}
+
+RUN_FAILED_ONLY=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --failed|--failed-only)
+            RUN_FAILED_ONLY=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown argument: $1"
+            usage
+            exit 2
+            ;;
+    esac
+done
 
 # Decrypt secrets once and reuse
 SECRETS=$(sops decrypt secrets.yaml --output-type=json 2>/dev/null)
@@ -22,7 +58,11 @@ fi
 
 eval "$(echo "$SECRETS" | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
 
-URLS_FILE="testing/urls_for_testing.txt"
+if [[ "$RUN_FAILED_ONLY" == "true" ]]; then
+    URLS_FILE="$FAILED_URLS_FILE"
+else
+    URLS_FILE="$DEFAULT_URLS_FILE"
+fi
 
 # Check server health
 if ! curl -sf "$SERVER/health" > /dev/null 2>&1; then
@@ -33,6 +73,9 @@ fi
 
 if [[ ! -f "$URLS_FILE" ]]; then
     echo "Error: URLs file not found: $URLS_FILE"
+    if [[ "$RUN_FAILED_ONLY" == "true" ]]; then
+        echo "Run a full URL test first to create $FAILED_URLS_FILE"
+    fi
     exit 1
 fi
 
@@ -42,12 +85,17 @@ if [[ ${#URLS[@]} -eq 0 ]]; then
     exit 0
 fi
 
-echo "Testing ${#URLS[@]} URLs (proxy: $PROXY, timeout: ${TIMEOUT}s)..."
+if [[ "$RUN_FAILED_ONLY" == "true" ]]; then
+    echo "Rerunning ${#URLS[@]} failed URLs from $FAILED_URLS_FILE (proxy: $PROXY, timeout: ${TIMEOUT}s)..."
+else
+    echo "Testing ${#URLS[@]} URLs (proxy: $PROXY, timeout: ${TIMEOUT}s)..."
+fi
 echo "================================================"
 
 PASSED=0
 FAILED=0
 declare -a FAILURES=()
+declare -a FAILED_URLS=()
 
 for url in "${URLS[@]}"; do
     printf "Testing: %s ... " "$url"
@@ -85,11 +133,20 @@ for url in "${URLS[@]}"; do
         echo "FAIL ($ERROR)"
         FAILED=$((FAILED + 1))
         FAILURES+=("$url: $ERROR")
+        FAILED_URLS+=("$url")
     fi
 done
 
 echo "================================================"
 echo "Passed: $PASSED, Failed: $FAILED"
+
+mkdir -p "$(dirname "$FAILED_URLS_FILE")"
+if [[ $FAILED -gt 0 ]]; then
+    printf "%s\n" "${FAILED_URLS[@]}" > "$FAILED_URLS_FILE"
+    echo "Wrote failed URLs to $FAILED_URLS_FILE"
+else
+    : > "$FAILED_URLS_FILE"
+fi
 
 if [[ $FAILED -gt 0 ]]; then
     echo ""

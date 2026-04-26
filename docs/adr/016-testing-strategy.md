@@ -53,11 +53,15 @@ Quick validation against real URLs:
 
 ```bash
 just test-urls      # Test all URLs in testing/urls_for_testing.txt
+just test-urls-failed  # Rerun only URLs that failed in the previous URL test run
 ```
 
 - Reads URLs from `testing/urls_for_testing.txt`
 - Requires server running (`just dev`)
 - Reports PASS/FAIL per URL with summary
+- Writes failed URLs to `testing/failed_urls.txt`
+- `just test-urls-failed` reads `testing/failed_urls.txt` and updates it with
+  any URLs that still fail
 
 ### Secret Handling
 

@@ -24,6 +24,7 @@ temp_test.crx
 test-orchestrator/test-orchestrator
 test-orchestrator/logs/
 .test-cache.json
+testing/failed_urls.txt
 .beads/.bv.lock
 
 # Beads / Dolt files (added by bd init)
