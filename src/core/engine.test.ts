@@ -30,6 +30,10 @@ const configState = vi.hoisted(() => ({
   proxyServer: "",
 }));
 
+const scrapeEvents = vi.hoisted(() => ({
+  recordScrapeOutcome: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../config.js", () => ({
   getDataDir: () => "./data",
   getLogLevel: () => "NONE",
@@ -41,12 +45,8 @@ vi.mock("../config.js", () => ({
   getProxyServer: () => configState.proxyServer,
 }));
 
-vi.mock("../services/stats-storage.js", () => ({
-  recordScrape: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock("../services/log-storage.js", () => ({
-  logScrape: vi.fn().mockResolvedValue(undefined),
+vi.mock("../services/scrape-events.js", () => ({
+  recordScrapeOutcome: scrapeEvents.recordScrapeOutcome,
 }));
 
 describe("CoreScraperEngine", () => {
@@ -503,6 +503,29 @@ describe("CoreScraperEngine", () => {
       expect(
         mockKnownSites.markSuccess,
       ).toHaveBeenCalledWith("example.com");
+    });
+
+    it("should record outcomes through the scrape event service", async () => {
+      await engine.scrapeUrl("https://example.com/article");
+
+      expect(
+        scrapeEvents.recordScrapeOutcome,
+      ).toHaveBeenCalledOnce();
+      expect(
+        scrapeEvents.recordScrapeOutcome,
+      ).toHaveBeenCalledWith({
+        context: expect.objectContaining({
+          targetUrl: "https://example.com/article",
+          normalizedDomain: "example.com",
+        }),
+        result: expect.objectContaining({
+          success: true,
+          method: METHODS.PUPPETEER_STEALTH,
+          xpath: "//article",
+        }),
+        startTime: expect.any(Number),
+        contentLength: expect.any(Number),
+      });
     });
 
     it("should process scrapes sequentially", async () => {

@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULTS } from './constants.js';
 
 const envKeys = [
@@ -6,6 +9,12 @@ const envKeys = [
   'NODE_ENV',
   'CONCURRENCY',
   'DATA_DIR',
+  'API_TOKEN',
+  'SMART_SCRAPER',
+  'OPENROUTER_API_KEY',
+  'OPENROUTER',
+  'TWOCAPTCHA_API_KEY',
+  'TWOCAPTCHA',
   'LLM_MODEL',
   'LLM_TEMPERATURE',
   'LLM_HTTP_REFERER',
@@ -17,6 +26,9 @@ const envKeys = [
   'CAPTCHA_POLLING_INTERVAL',
   'FLARESOLVERR_URL',
   'FLARESOLVERR_TIMEOUT',
+  'DATADOME_PROXY_HOST',
+  'DATADOME_PROXY_LOGIN',
+  'DATADOME_PROXY_PASSWORD',
   'LOG_LEVEL',
   'VICTORIALOGS_OTLP_ENABLED',
   'VICTORIALOGS_OTLP_ENDPOINT',
@@ -34,12 +46,22 @@ const envKeys = [
 ];
 
 describe('config VictoriaLogs OTLP settings', () => {
+  const originalCwd = process.cwd();
+  let tempDir: string;
+
   beforeEach(() => {
     vi.resetModules();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-scraper-config-'));
+    process.chdir(tempDir);
     for (const key of envKeys) {
       delete process.env[key];
     }
     process.env.NODE_ENV = 'production';
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it('uses centralized runtime defaults when env values are unset', async () => {

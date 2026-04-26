@@ -14,7 +14,6 @@ import type {
   ScrapeOptions,
   ScrapeResult,
   ScrapeContext,
-  LogEntry,
   ElementDetails,
 } from "../domain/models.js";
 import {
@@ -39,8 +38,7 @@ import {
   toMarkdown,
 } from "../utils/html-cleaner.js";
 import { scoreElement } from "./scoring.js";
-import { recordScrape } from "../services/stats-storage.js";
-import { logScrape } from "../services/log-storage.js";
+import { recordScrapeOutcome } from "../services/scrape-events.js";
 import { logger } from "../utils/logger.js";
 import { buildSessionProxyUrl } from "../utils/proxy.js";
 import {
@@ -713,27 +711,12 @@ export class CoreScraperEngine {
     startTime: number,
     contentLength?: number,
   ): Promise<void> {
-    const ms = Date.now() - startTime;
-
-    await recordScrape(
-      context.normalizedDomain,
-      result.success,
-    );
-
-    const entry: LogEntry = {
-      ts: utcNow(),
-      domain: context.normalizedDomain,
-      url: context.targetUrl,
-      success: result.success,
-      method: result.method,
-      xpath: result.xpath,
+    await recordScrapeOutcome({
+      context,
+      result,
+      startTime,
       contentLength,
-      errorType: result.errorType,
-      error: result.error,
-      ms,
-    };
-
-    await logScrape(entry);
+    });
   }
 
   private async trySimpleFetchScrape(
