@@ -21,6 +21,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        packageJson = builtins.fromJSON (builtins.readFile ./package.json);
 
         nodejs = pkgs.nodejs_24;
         chromium = pkgs.chromium;
@@ -28,7 +29,7 @@
         # Build the application
         smart-scraper = pkgs.buildNpmPackage {
           pname = "smart-scraper";
-          version = "0.1.0";
+          version = packageJson.version;
 
           src = ./.;
 

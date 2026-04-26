@@ -1,7 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULTS } from './constants.js';
 
 const envKeys = [
+  'PORT',
   'NODE_ENV',
+  'CONCURRENCY',
+  'DATA_DIR',
+  'LLM_MODEL',
+  'LLM_TEMPERATURE',
+  'LLM_HTTP_REFERER',
+  'LLM_X_TITLE',
+  'EXECUTABLE_PATH',
+  'EXTENSION_PATHS',
+  'PROXY_SERVER',
+  'CAPTCHA_DEFAULT_TIMEOUT',
+  'CAPTCHA_POLLING_INTERVAL',
+  'FLARESOLVERR_URL',
+  'FLARESOLVERR_TIMEOUT',
+  'LOG_LEVEL',
   'VICTORIALOGS_OTLP_ENABLED',
   'VICTORIALOGS_OTLP_ENDPOINT',
   'VICTORIALOGS_OTLP_HEADERS',
@@ -11,7 +27,10 @@ const envKeys = [
   'VICTORIALOGS_OTLP_TIMEOUT_MS',
   'VICTORIALOGS_OTLP_BATCH_DELAY_MS',
   'VICTORIALOGS_OTLP_MAX_QUEUE_SIZE',
-  'VICTORIALOGS_OTLP_MAX_EXPORT_BATCH_SIZE'
+  'VICTORIALOGS_OTLP_MAX_EXPORT_BATCH_SIZE',
+  'SAVE_HTML_ON_SUCCESS_NAV',
+  'DOM_STRUCTURE_MAX_TEXT_LENGTH',
+  'DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE'
 ];
 
 describe('config VictoriaLogs OTLP settings', () => {
@@ -21,6 +40,25 @@ describe('config VictoriaLogs OTLP settings', () => {
       delete process.env[key];
     }
     process.env.NODE_ENV = 'production';
+  });
+
+  it('uses centralized runtime defaults when env values are unset', async () => {
+    const config = await import('./config.js');
+
+    config.initConfig();
+
+    expect(config.getPort()).toBe(DEFAULTS.PORT);
+    expect(config.getConcurrency()).toBe(DEFAULTS.CONCURRENCY);
+    expect(config.getDataDir()).toBe(DEFAULTS.DATA_DIR);
+    expect(config.getLlmModel()).toBe(DEFAULTS.LLM_MODEL);
+    expect(config.getLlmTemperature()).toBe(DEFAULTS.LLM_TEMPERATURE);
+    expect(config.getExecutablePath()).toBe(DEFAULTS.EXECUTABLE_PATH);
+    expect(config.getCaptchaDefaultTimeout()).toBe(DEFAULTS.CAPTCHA_TIMEOUT);
+    expect(config.getCaptchaPollingInterval()).toBe(DEFAULTS.CAPTCHA_POLLING_INTERVAL);
+    expect(config.getFlaresolverrTimeout()).toBe(DEFAULTS.FLARESOLVERR_TIMEOUT);
+    expect(config.getLogLevel()).toBe(DEFAULTS.LOG_LEVEL);
+    expect(config.getDomStructureMaxTextLength()).toBe(DEFAULTS.DOM_STRUCTURE_MAX_TEXT_LENGTH);
+    expect(config.getDomStructureMinTextSizeToAnnotate()).toBe(DEFAULTS.DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE);
   });
 
   it('keeps VictoriaLogs OTLP disabled by default', async () => {

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import YAML from 'yaml';
+import { DEFAULTS } from './constants.js';
 import { logger } from './utils/logger.js';
 
 // Load .env file first if it exists
@@ -19,36 +20,40 @@ const booleanFromEnv = z.preprocess((val) => val === 'true' || val === '1' || va
 
 const ConfigSchema = z.object({
   // Server configuration
-  port: z.coerce.number().min(1).max(65535).default(5555),
-  nodeEnv: z.enum(['development', 'production']).default('production'),
+  port: z.coerce.number().min(1).max(65535).default(DEFAULTS.PORT),
+  nodeEnv: z.enum(['development', 'production']).default(DEFAULTS.NODE_ENV),
 
   // Scraping concurrency
-  concurrency: z.coerce.number().min(1).max(20).default(1),
+  concurrency: z.coerce
+    .number()
+    .min(DEFAULTS.CONCURRENCY_MIN)
+    .max(DEFAULTS.CONCURRENCY_MAX)
+    .default(DEFAULTS.CONCURRENCY),
 
   // Data storage
-  dataDir: z.string().default('./data'),
+  dataDir: z.string().default(DEFAULTS.DATA_DIR),
   logDir: z.string().optional(),
 
   // LLM Configuration (OpenRouter)
   openrouterApiKey: z.string().default(''),
-  llmModel: z.string().default('meta-llama/llama-4-maverick:free'),
-  llmTemperature: z.coerce.number().min(0).max(2).default(0),
-  llmHttpReferer: z.string().default('https://github.com/bogorad/smartScraper'),
-  llmXTitle: z.string().default('SmartScraper'),
+  llmModel: z.string().default(DEFAULTS.LLM_MODEL),
+  llmTemperature: z.coerce.number().min(0).max(2).default(DEFAULTS.LLM_TEMPERATURE),
+  llmHttpReferer: z.string().default(DEFAULTS.LLM_HTTP_REFERER),
+  llmXTitle: z.string().default(DEFAULTS.LLM_X_TITLE),
 
   // Browser (Puppeteer) configuration
-  executablePath: z.string().default('/usr/lib/chromium/chromium'),
-  extensionPaths: z.string().default(''),
-  proxyServer: z.string().default(''),
+  executablePath: z.string().default(DEFAULTS.EXECUTABLE_PATH),
+  extensionPaths: z.string().default(DEFAULTS.EXTENSION_PATHS),
+  proxyServer: z.string().default(DEFAULTS.PROXY_SERVER),
 
   // CAPTCHA solver configuration
   twocaptchaApiKey: z.string().default(''),
-  captchaDefaultTimeout: z.coerce.number().default(120),
-  captchaPollingInterval: z.coerce.number().default(5000),
+  captchaDefaultTimeout: z.coerce.number().default(DEFAULTS.CAPTCHA_TIMEOUT),
+  captchaPollingInterval: z.coerce.number().default(DEFAULTS.CAPTCHA_POLLING_INTERVAL),
 
   // FlareSolverr configuration
-  flaresolverrUrl: z.string().default(''),
-  flaresolverrTimeout: z.coerce.number().default(60000),
+  flaresolverrUrl: z.string().default(DEFAULTS.FLARESOLVERR_URL),
+  flaresolverrTimeout: z.coerce.number().default(DEFAULTS.FLARESOLVERR_TIMEOUT),
 
   // DataDome proxy configuration (separate components)
   datadomeProxyHost: z.string().default(''),
@@ -59,24 +64,24 @@ const ConfigSchema = z.object({
   apiToken: z.string().default(''),
 
   // Logging & Debug
-  logLevel: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR', 'NONE']).default('INFO'),
-  victoriaLogsOtlpEnabled: booleanFromEnv.default(false),
-  victoriaLogsOtlpEndpoint: z.string().default(''),
-  victoriaLogsOtlpHeaders: z.string().default(''),
-  victoriaLogsOtlpAuthHeaderName: z.string().default(''),
-  victoriaLogsOtlpAuthHeaderValue: z.string().default(''),
-  victoriaLogsOtlpStreamFields: z.string().default(''),
-  victoriaLogsOtlpTimeoutMs: z.coerce.number().min(1).default(10000),
-  victoriaLogsOtlpBatchDelayMs: z.coerce.number().min(1).default(5000),
-  victoriaLogsOtlpMaxQueueSize: z.coerce.number().min(1).default(2048),
-  victoriaLogsOtlpMaxExportBatchSize: z.coerce.number().min(1).default(512),
+  logLevel: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR', 'NONE']).default(DEFAULTS.LOG_LEVEL),
+  victoriaLogsOtlpEnabled: booleanFromEnv.default(DEFAULTS.VICTORIALOGS_OTLP_ENABLED),
+  victoriaLogsOtlpEndpoint: z.string().default(DEFAULTS.VICTORIALOGS_OTLP_ENDPOINT),
+  victoriaLogsOtlpHeaders: z.string().default(DEFAULTS.VICTORIALOGS_OTLP_HEADERS),
+  victoriaLogsOtlpAuthHeaderName: z.string().default(DEFAULTS.VICTORIALOGS_OTLP_AUTH_HEADER_NAME),
+  victoriaLogsOtlpAuthHeaderValue: z.string().default(DEFAULTS.VICTORIALOGS_OTLP_AUTH_HEADER_VALUE),
+  victoriaLogsOtlpStreamFields: z.string().default(DEFAULTS.VICTORIALOGS_OTLP_STREAM_FIELDS),
+  victoriaLogsOtlpTimeoutMs: z.coerce.number().min(1).default(DEFAULTS.VICTORIALOGS_OTLP_TIMEOUT_MS),
+  victoriaLogsOtlpBatchDelayMs: z.coerce.number().min(1).default(DEFAULTS.VICTORIALOGS_OTLP_BATCH_DELAY_MS),
+  victoriaLogsOtlpMaxQueueSize: z.coerce.number().min(1).default(DEFAULTS.VICTORIALOGS_OTLP_MAX_QUEUE_SIZE),
+  victoriaLogsOtlpMaxExportBatchSize: z.coerce.number().min(1).default(DEFAULTS.VICTORIALOGS_OTLP_MAX_EXPORT_BATCH_SIZE),
   saveHtmlOnSuccessNav: z
     .preprocess((val) => val === 'true' || val === '1' || val === true, z.boolean())
-    .default(false),
+    .default(DEFAULTS.SAVE_HTML_ON_SUCCESS_NAV),
 
   // DOM structure extraction
-  domStructureMaxTextLength: z.coerce.number().default(15),
-  domStructureMinTextSizeToAnnotate: z.coerce.number().default(100)
+  domStructureMaxTextLength: z.coerce.number().default(DEFAULTS.DOM_STRUCTURE_MAX_TEXT_LENGTH),
+  domStructureMinTextSizeToAnnotate: z.coerce.number().default(DEFAULTS.DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE)
 });
 
 type Config = z.infer<typeof ConfigSchema>;
@@ -209,10 +214,10 @@ function parseConfig(): Config {
   const rawConcurrency = envVars.concurrency;
   if (rawConcurrency !== undefined) {
     const numVal = Number(rawConcurrency);
-    if (!isNaN(numVal) && (numVal < 1 || numVal > 20)) {
-      logger.warn('CONCURRENCY is outside valid range (1-20)', {
+    if (!isNaN(numVal) && (numVal < DEFAULTS.CONCURRENCY_MIN || numVal > DEFAULTS.CONCURRENCY_MAX)) {
+      logger.warn(`CONCURRENCY is outside valid range (${DEFAULTS.CONCURRENCY_MIN}-${DEFAULTS.CONCURRENCY_MAX})`, {
         concurrency: numVal,
-        clampedTo: Math.max(1, Math.min(20, numVal))
+        clampedTo: Math.max(DEFAULTS.CONCURRENCY_MIN, Math.min(DEFAULTS.CONCURRENCY_MAX, numVal))
       }, 'CONFIG');
     }
   }

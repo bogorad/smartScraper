@@ -124,7 +124,8 @@ SmartScraper uses a **centralized configuration system** with Zod validation. Al
 
 3. **Default values** (lowest priority)
    - Sensible defaults for non-critical config
-   - See `.env.example` for all defaults
+   - Runtime defaults are defined in `src/constants.ts` and consumed by `src/config.ts`
+   - `.env.example` mirrors those defaults for operators
 
 ### Setting Up Configuration
 

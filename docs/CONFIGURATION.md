@@ -18,8 +18,9 @@ The `src/config.ts` module:
 1. Loads `.env` file automatically via dotenv
 2. Attempts to load `secrets.yaml` for sensitive data
 3. Maps environment variable names (supporting legacy names)
-4. Validates all config against Zod schema at startup
-5. Provides typed getter functions for accessing config throughout the app
+4. Applies runtime defaults from `src/constants.ts`
+5. Validates all config against Zod schema at startup
+6. Provides typed getter functions for accessing config throughout the app
 
 ### Direct process.env Usage - REMOVED
 
@@ -89,7 +90,7 @@ sops secrets.yaml
 
 ### 4. Default Values (Lowest Priority)
 
-Sensible defaults for non-critical configuration. See `src/constants.ts` and `.env.example` for defaults.
+Sensible defaults for non-critical configuration are defined in `src/constants.ts`, consumed by `src/config.ts`, and mirrored in `.env.example` for operators.
 
 ## Configuration Reference
 

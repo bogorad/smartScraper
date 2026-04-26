@@ -1,7 +1,10 @@
-# SmartScraper v0.1.90
+# SmartScraper. Version source: package.json.
 
 default:
     @just --list
+
+version:
+    @node -p "require('./package.json').version"
 
 # Development
 dev:
