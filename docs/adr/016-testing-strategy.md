@@ -57,11 +57,16 @@ just test-urls-failed  # Rerun only URLs that failed in the previous URL test ru
 ```
 
 - Reads URLs from `testing/urls_for_testing.txt`
-- Requires server running (`just dev`)
+- Requires a clean dev server on port `5555`
 - Reports PASS/FAIL per URL with summary
 - Writes failed URLs to `testing/failed_urls.txt`
 - `just test-urls-failed` reads `testing/failed_urls.txt` and updates it with
   any URLs that still fail
+
+Before running URL-based E2E, kill every process currently listening on
+`:5555`, restart `just dev`, and verify `http://localhost:5555/health`.
+When an agent runs this protocol, `just dev` must run in tmux so the server logs
+remain observable during the test run.
 
 ### Secret Handling
 

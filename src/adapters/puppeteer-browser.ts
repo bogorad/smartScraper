@@ -17,6 +17,7 @@ import {
   getProxyServer
 } from '../config.js';
 import { logger } from '../utils/logger.js';
+import { buildChromiumProxyServer, redactProxyUrl } from '../utils/proxy.js';
 
 interface PageSession {
   page: Page;
@@ -61,14 +62,14 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     if (proxyServer) {
       logger.debug('Browser launching with proxy', {
         url,
-        proxyRedacted: proxyServer.replace(/:([^:@]+)@/, ':***@'),
+        proxyRedacted: redactProxyUrl(proxyServer),
         explicit: !!options?.proxy
       }, 'BROWSER');
       
       // Extract auth credentials if present (http://user:pass@host:port)
       try {
         const proxyUrl = new URL(proxyServer);
-        if (proxyUrl.username && proxyUrl.password) {
+        if ((proxyUrl.protocol === 'http:' || proxyUrl.protocol === 'https:') && proxyUrl.username && proxyUrl.password) {
           proxyAuth = {
             username: proxyUrl.username,
             password: proxyUrl.password
@@ -260,15 +261,12 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     // Priority: explicit proxy > global PROXY_SERVER
     const proxyServer = explicitProxy || getProxyServer();
     if (proxyServer) {
-      // Extract host:port only (no credentials in --proxy-server flag)
-      try {
-        const proxyUrl = new URL(proxyServer);
-        const proxyHostPort = `${proxyUrl.hostname}:${proxyUrl.port || '80'}`;
-        args.push(`--proxy-server=${proxyHostPort}`);
-        logger.debug('Added proxy-server arg', { proxyHostPort }, 'BROWSER');
-      } catch (e) {
-        logger.warn('Failed to parse proxy URL', { proxyServer, error: String(e) }, 'BROWSER');
+      const chromiumProxyServer = buildChromiumProxyServer(proxyServer);
+      if (!chromiumProxyServer) {
+        throw new Error('Invalid proxy configuration: proxy must be protocol://host:port with http, https, socks4, or socks5 protocol');
       }
+      args.push(`--proxy-server=${chromiumProxyServer}`);
+      logger.debug('Added proxy-server arg', { proxyServer: redactProxyUrl(chromiumProxyServer) }, 'BROWSER');
     }
 
     return args;

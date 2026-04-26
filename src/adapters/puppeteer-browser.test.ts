@@ -134,6 +134,30 @@ describe('PuppeteerBrowserAdapter', () => {
     expect(mocks.page.on).toHaveBeenCalledWith('console', expect.any(Function));
   });
 
+  it('preserves the SOCKS5 scheme in the Chromium proxy argument', async () => {
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    await adapter.loadPage('https://example.com/article', {
+      proxy: 'socks5://r5s.bruc:10801'
+    });
+
+    expect(mocks.launch).toHaveBeenCalledWith(expect.objectContaining({
+      args: expect.arrayContaining(['--proxy-server=socks5://r5s.bruc:10801'])
+    }));
+  });
+
+  it('rejects malformed proxy URLs before launching Chromium', async () => {
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    await expect(adapter.loadPage('https://example.com/article', {
+      proxy: 'socks5://r5s.bruc'
+    })).rejects.toThrow('Invalid proxy configuration');
+
+    expect(mocks.launch).not.toHaveBeenCalled();
+  });
+
   it('uses configured non-extension post-navigation wait', async () => {
     mocks.config.browserNonExtensionPostNavWaitMs = 4500;
 

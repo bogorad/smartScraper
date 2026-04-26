@@ -9,6 +9,10 @@ export interface ParsedProxy {
   protocol: 'http' | 'https' | 'socks4' | 'socks5';
 }
 
+export function redactProxyUrl(url: string): string {
+  return url.replace(/\/\/([^:@/]+):([^@/]+)@/, '//***:***@');
+}
+
 /**
  * Parse a proxy URL into its components
  * @param url - Proxy URL in format: protocol://[user:pass@]host:port
@@ -20,14 +24,19 @@ export function parseProxyUrl(url: string): ParsedProxy | null {
     const protocol = parsed.protocol.replace(':', '') as ParsedProxy['protocol'];
     
     if (!['http', 'https', 'socks4', 'socks5'].includes(protocol)) {
-      logger.warn('Invalid proxy protocol', { protocol, url: url.replace(/:([^:@]+)@/, ':***@') }, 'PROXY');
+      logger.warn('Invalid proxy protocol', { protocol, url: redactProxyUrl(url) }, 'PROXY');
+      return null;
+    }
+
+    if (!parsed.hostname || !parsed.port) {
+      logger.warn('Invalid proxy URL missing host or port', { url: redactProxyUrl(url) }, 'PROXY');
       return null;
     }
     
     const result: ParsedProxy = {
       protocol,
       host: parsed.hostname,
-      port: parseInt(parsed.port, 10) || 8080,
+      port: parseInt(parsed.port, 10),
       username: parsed.username || undefined,
       password: parsed.password || undefined
     };
@@ -44,6 +53,16 @@ export function parseProxyUrl(url: string): ParsedProxy | null {
     logger.error('Failed to parse proxy URL', { error: error instanceof Error ? error.message : String(error) }, 'PROXY');
     return null;
   }
+}
+
+export function buildChromiumProxyServer(proxyUrl: string): string | null {
+  const parsed = parseProxyUrl(proxyUrl);
+  if (!parsed) {
+    return null;
+  }
+
+  const hostPort = `${parsed.host}:${parsed.port}`;
+  return `${parsed.protocol}://${hostPort}`;
 }
 
 /**
@@ -85,7 +104,7 @@ export function buildSessionProxyUrl(
     baseLogin,
     host,
     // Redact password
-    proxyUrlRedacted: proxyUrl.replace(/:([^:@]+)@/, ':***@')
+    proxyUrlRedacted: redactProxyUrl(proxyUrl)
   }, 'PROXY');
   
   return proxyUrl;

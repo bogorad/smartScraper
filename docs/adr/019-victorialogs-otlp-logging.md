@@ -33,6 +33,11 @@ timestamps ending in `Z`.
 SmartScraper sends VictoriaLogs logs as OTLP protobuf over
 HTTP.
 
+VictoriaLogs OTLP logging is enabled by default. Deployments
+that do not provide `VICTORIALOGS_OTLP_ENDPOINT` keep local
+logging and emit a visible local warning instead of silently
+disabling the remote path.
+
 Implementation rules:
 
 - Use the OTLP HTTP path `/insert/opentelemetry/v1/logs`.

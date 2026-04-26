@@ -14,7 +14,7 @@ SmartScraper must support HTTP proxies for bypassing restrictions and improving 
 ```dotenv
 PROXY_SERVER=http://username:password@hostname:port
 # Default normal-scrape SOCKS5 proxy:
-DEFAULT_SOCKS5_PROXY=socks5://username:password@hostname:port
+DEFAULT_SOCKS5_PROXY=socks5://hostname:port
 # Fallback (also supported):
 HTTP_PROXY=http://username:password@hostname:port
 ```
@@ -30,32 +30,37 @@ Precedence for the default scrape proxy is:
 
 ```
 http://username:password@hostname:port
+socks5://hostname:port
 ```
 
 Components:
 - `username`: Proxy authentication username
 - `password`: Proxy authentication password
 - `hostname`: Proxy server hostname
-- `port`: Proxy server port (default: 80 HTTP, 443 HTTPS)
+- `port`: Proxy server port. Proxy URLs must include an explicit port.
 
 ### Puppeteer Proxy Configuration
 
 ```typescript
 const parsedUrl = new URL(proxyDetails.server);
-const proxyHostPort = `${parsedUrl.hostname}:${parsedUrl.port || '80'}`;
+const proxyServer = `${parsedUrl.protocol}//${parsedUrl.hostname}:${parsedUrl.port}`;
 
 const browser = await puppeteer.launch({
-  args: [`--proxy-server=${proxyHostPort}`]
+  args: [`--proxy-server=${proxyServer}`]
 });
 
-// Authentication
-if (parsedUrl.username || parsedUrl.password) {
+// HTTP/HTTPS proxy authentication
+if ((parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') && parsedUrl.username && parsedUrl.password) {
   await page.authenticate({
     username: decodeURIComponent(parsedUrl.username),
     password: decodeURIComponent(parsedUrl.password)
   });
 }
 ```
+
+Chromium must receive a scheme for SOCKS proxies. `socks5://hostname:port` is
+passed through to `--proxy-server`; reducing it to `hostname:port` makes
+Chromium treat the proxy as HTTP and fails normal page loads.
 
 ### HTTP (Axios) Proxy Configuration
 

@@ -94,12 +94,12 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getDomStructureMinTextSizeToAnnotate()).toBe(DEFAULTS.DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE);
   });
 
-  it('keeps VictoriaLogs OTLP disabled by default', async () => {
+  it('keeps VictoriaLogs OTLP enabled by default', async () => {
     const config = await import('./config.js');
 
     config.initConfig();
 
-    expect(config.isVictoriaLogsOtlpEnabled()).toBe(false);
+    expect(config.isVictoriaLogsOtlpEnabled()).toBe(true);
     expect(config.getVictoriaLogsOtlpEndpoint()).toBe('');
     expect(config.getVictoriaLogsOtlpHeaders()).toEqual({});
   });

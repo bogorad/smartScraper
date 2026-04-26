@@ -199,7 +199,7 @@ Debug features (enabled when `LOG_LEVEL=DEBUG`):
 
 | Variable | Type | Default | Secret | Description |
 |----------|------|---------|--------|-------------|
-| `VICTORIALOGS_OTLP_ENABLED` | boolean | false | No | Enable OTLP log export |
+| `VICTORIALOGS_OTLP_ENABLED` | boolean | true | No | Enable OTLP log export |
 | `VICTORIALOGS_OTLP_ENDPOINT` | string | '' | Yes | OTLP/HTTP logs endpoint |
 | `VICTORIALOGS_OTLP_HEADERS` | string | '' | Yes | Extra headers as JSON or comma-separated entries |
 | `VICTORIALOGS_OTLP_AUTH_HEADER_NAME` | string | '' | Yes | Optional auth header name |
