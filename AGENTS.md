@@ -13,7 +13,7 @@
 
 Before attempting ANYTHING check the .justfile, it might contain guidance.
 Before acting, checkout/create beads issue, consult beads for all actions.
-Use beads along with TODO.
+Use beads, instead of nativ todos. Read /home/chuck/.dotfiles/opencode/BEADS.md
 
 ## Root Setup Commands
 
@@ -135,34 +135,9 @@ Before submitting a PR:
 
 ```bash
 git status              # Check changes
-bd sync                 # Sync beads
 git add <files>
 git commit -m "..."
 git push
 ```
 
 ---
-
-## Beads Workflow
-
-Issue tracking via [beads_viewer](https://github.com/Dicklesworthstone/beads_viewer). Issues stored in `.beads/`.
-
-### Commands
-
-```bash
-bd ready              # Show ready issues
-bd list --status=open # All open issues
-bd show <id>          # Issue details
-bd create --title="..." --type=task --priority=2 --description="..."
-bd update <id> --status=in_progress
-bd close <id> --reason="..."
-bd sync               # Commit beads changes
-```
-
-### Workflow
-
-1. `bd ready` → find work
-2. `bd update <id> --status=in_progress` + `bd sync --flush-only`
-3. Implement
-4. `bd close <id>` + `bd sync --flush-only`
-5. `bd sync` at session end
