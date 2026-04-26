@@ -6,10 +6,27 @@ import { logger } from '../../utils/logger.js';
 
 export const loginRouter = new Hono();
 
+function getSafeDashboardRedirect(redirect: string | undefined): string {
+  if (!redirect || redirect.startsWith('//')) {
+    return '/dashboard';
+  }
+
+  if (!redirect.startsWith('/dashboard')) {
+    return '/dashboard';
+  }
+
+  const nextCharacter = redirect.charAt('/dashboard'.length);
+  if (nextCharacter && nextCharacter !== '/' && nextCharacter !== '?' && nextCharacter !== '#') {
+    return '/dashboard';
+  }
+
+  return redirect;
+}
+
 loginRouter.get('/', (c) => {
   const theme = getCookie(c, 'theme') || 'light';
   const error = c.req.query('error');
-  const redirect = c.req.query('redirect') || '/dashboard';
+  const redirect = getSafeDashboardRedirect(c.req.query('redirect'));
 
   return c.html(
     <LoginLayout theme={theme}>
@@ -51,7 +68,7 @@ loginRouter.get('/', (c) => {
 loginRouter.post('/', async (c) => {
   const body = await c.req.parseBody();
   const token = body.token as string;
-  const redirect = c.req.query('redirect') || '/dashboard';
+  const redirect = getSafeDashboardRedirect(c.req.query('redirect'));
 
   logger.info('[AUTH] Login attempt received');
   const isValid = validateToken(token);
