@@ -172,18 +172,21 @@ sitesRouter.get('/', zValidator('query', querySchema), async (c) => {
               hx-include="closest form"
               hx-trigger="keyup changed delay:300ms, search"
               style="flex: 1"
-              onchange="this.form.page.value = 1"
             />
             <input type="hidden" name="sort" value={sort} />
-            <input type="hidden" name="page" value={page} />
+            <input type="hidden" name="page" value="1" />
             <div class="limit-selector">
               <label>Show:</label>
               <select
                 name="limit"
                 value={limit}
                 class="mb-0"
-                              style="width: auto"
-                              onchange="this.form.page.value = 1"
+                hx-get="/dashboard/sites"
+                hx-target="#sites-container"
+                hx-push-url="true"
+                hx-include="closest form"
+                hx-trigger="change"
+                style="width: auto"
               >
                 <option value="10">10</option>
                 <option value="50">50</option>

@@ -141,6 +141,22 @@ describe('dashboard CSRF coverage', () => {
     expect(html).toContain(csrfToken);
   });
 
+  it.each([
+    ['/dashboard', 'Dashboard - SmartScraper'],
+    ['/dashboard/sites', 'Sites - SmartScraper'],
+    ['/dashboard/sites/new', 'New Site - SmartScraper'],
+    ['/dashboard/sites/example.com', 'example.com - SmartScraper'],
+    ['/dashboard/stats', 'Stats - SmartScraper']
+  ])('renders no inline scripts or event handlers for %s', async (path, title) => {
+    const sessionCookie = await createSessionCookie(app);
+    const { res, html } = await getPageCsrf(app, path, sessionCookie);
+
+    expect(res.status).toBe(200);
+    expect(html).toContain(title);
+    expect(html).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i);
+    expect(html).not.toMatch(/\son[a-z]+\s*=/i);
+  });
+
   it('protects dashboard theme POST with CSRF', async () => {
     const sessionCookie = await createSessionCookie(app);
     const { csrfCookie, csrfToken } = await getPageCsrf(app, '/dashboard', sessionCookie);
