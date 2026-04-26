@@ -107,6 +107,7 @@ const SECRET_KEYS = [
   { yamlKey: 'datadome_proxy_host', configKey: 'datadome_proxy_host' },
   { yamlKey: 'datadome_proxy_login', configKey: 'datadome_proxy_login' },
   { yamlKey: 'datadome_proxy_password', configKey: 'datadome_proxy_password' },
+  { yamlKey: 'default_socks5_proxy', configKey: 'default_socks5_proxy' },
   { yamlKey: 'victorialogs_otlp_endpoint', configKey: 'victorialogs_otlp_endpoint' },
   { yamlKey: 'victorialogs_otlp_headers', configKey: 'victorialogs_otlp_headers' },
   { yamlKey: 'victorialogs_otlp_auth_header_name', configKey: 'victorialogs_otlp_auth_header_name' },
@@ -171,8 +172,12 @@ function mapEnvVars(): Record<string, string | undefined> {
     // Browser - support legacy PUPPETEER_EXECUTABLE_PATH and EXECUTABLE_PATH
     executablePath: process.env.EXECUTABLE_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
     extensionPaths: process.env.EXTENSION_PATHS,
-    // Support both HTTP_PROXY and PROXY_SERVER
-    proxyServer: process.env.PROXY_SERVER || process.env.HTTP_PROXY,
+    // Support explicit proxy env, the default_socks5_proxy secret, and legacy HTTP_PROXY.
+    proxyServer:
+      process.env.PROXY_SERVER ||
+      process.env.DEFAULT_SOCKS5_PROXY ||
+      secrets.default_socks5_proxy ||
+      process.env.HTTP_PROXY,
     browserDumpio: process.env.BROWSER_DUMPIO,
     browserConsoleCapture: process.env.BROWSER_CONSOLE_CAPTURE,
     browserExtensionInitWaitMs: process.env.BROWSER_EXTENSION_INIT_WAIT_MS,

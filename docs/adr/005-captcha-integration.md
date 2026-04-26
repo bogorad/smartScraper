@@ -60,7 +60,12 @@ Query:
     "type": "DataDomeSliderTask",
     "websiteURL": "main page URL",
     "captchaUrl": "DataDome iframe URL",
-    "userAgent": "UA used for page load"
+    "userAgent": "UA used for page load",
+    "proxyType": "http",
+    "proxyAddress": "proxy host",
+    "proxyPort": 2334,
+    "proxyLogin": "proxy user",
+    "proxyPassword": "proxy password"
   }
 }
 ```
@@ -82,6 +87,18 @@ Query:
 DataDome URL parameter `t=bv` indicates IP is banned. On detection:
 - Skip CAPTCHA solve attempt
 - Recommend proxy rotation
+
+### DataDome Proxy Requirements
+
+DataDome solving requires a DataDome-compatible proxy from
+`DATADOME_PROXY_HOST`, `DATADOME_PROXY_LOGIN`, and
+`DATADOME_PROXY_PASSWORD`. The normal default proxy
+(`DEFAULT_SOCKS5_PROXY` or `default_socks5_proxy`) is for regular page loads
+and is not passed to 2Captcha DataDome tasks.
+
+If 2Captcha reports a proxy error such as `ERROR_BAD_PROXY`, the adapter returns
+a DataDome solver proxy configuration failure instead of a generic CAPTCHA
+failure.
 
 ### Optimal Flow
 

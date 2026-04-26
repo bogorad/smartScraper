@@ -14,6 +14,7 @@ vi.mock('../config.js', () => ({
 describe('TwoCaptchaAdapter', () => {
   let adapter: TwoCaptchaAdapter;
   const mockAxios = vi.mocked(axios);
+  const datadomeProxyDetails = { server: 'http://proxy.example.com:8080' };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -65,7 +66,8 @@ describe('TwoCaptchaAdapter', () => {
       await adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
-        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+        proxyDetails: datadomeProxyDetails
       });
 
       expect(mockAxios.post).toHaveBeenCalledWith(
@@ -183,6 +185,18 @@ describe('TwoCaptchaAdapter', () => {
   });
 
   describe('solveDataDome', () => {
+    it('should fail clearly when DataDome proxy details are missing', async () => {
+      const result = await adapter.solveIfPresent({
+        pageId: 'page-123',
+        pageUrl: 'https://example.com',
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+      });
+
+      expect(result.solved).toBe(false);
+      expect(result.reason).toContain('DataDome solver proxy configuration error');
+      expect(mockAxios.post).not.toHaveBeenCalled();
+    });
+
     it('should successfully solve DataDome CAPTCHA', async () => {
       mockAxios.post = vi.fn()
         .mockResolvedValueOnce({ data: { taskId: 'task-123' } })
@@ -191,7 +205,8 @@ describe('TwoCaptchaAdapter', () => {
       const result = await adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
-        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+        proxyDetails: datadomeProxyDetails
       });
 
       expect(result.solved).toBe(true);
@@ -207,7 +222,7 @@ describe('TwoCaptchaAdapter', () => {
         pageId: 'page-123',
         pageUrl: 'https://example.com',
         captchaTypeHint: CAPTCHA_TYPES.DATADOME,
-        proxyDetails: { server: 'http://proxy.example.com:8080' }
+        proxyDetails: datadomeProxyDetails
       });
 
       expect(mockAxios.post).toHaveBeenCalledWith(
@@ -230,11 +245,34 @@ describe('TwoCaptchaAdapter', () => {
       const result = await adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
-        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+        proxyDetails: datadomeProxyDetails
       });
 
       expect(result.solved).toBe(false);
       expect(result.reason).toContain('Invalid client key');
+    });
+
+    it('should report 2Captcha bad proxy as a DataDome proxy configuration error', async () => {
+      mockAxios.post = vi.fn().mockResolvedValueOnce({
+        data: {
+          errorId: 130,
+          errorCode: 'ERROR_BAD_PROXY',
+          errorDescription: 'Incorrect proxy parameters or can not establish connection through the proxy.'
+        }
+      });
+
+      const result = await adapter.solveIfPresent({
+        pageId: 'page-123',
+        pageUrl: 'https://example.com',
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+        proxyDetails: datadomeProxyDetails
+      });
+
+      expect(result.solved).toBe(false);
+      expect(result.reason).toBe(
+        'DataDome solver proxy configuration error (ERROR_BAD_PROXY): Incorrect proxy parameters or can not establish connection through the proxy.'
+      );
     });
 
     it('should poll until task is ready', async () => {
@@ -247,7 +285,8 @@ describe('TwoCaptchaAdapter', () => {
       const result = await adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
-        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+        proxyDetails: datadomeProxyDetails
       });
 
       expect(result.solved).toBe(true);
@@ -262,7 +301,8 @@ describe('TwoCaptchaAdapter', () => {
       const result = await adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
-        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+        proxyDetails: datadomeProxyDetails
       });
 
       expect(result.solved).toBe(false);
@@ -277,7 +317,8 @@ describe('TwoCaptchaAdapter', () => {
       const result = await adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
-        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+        proxyDetails: datadomeProxyDetails
       });
 
       expect(result.solved).toBe(false);
@@ -294,7 +335,8 @@ describe('TwoCaptchaAdapter', () => {
       const promise = adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
-        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+        proxyDetails: datadomeProxyDetails
       });
 
       await vi.advanceTimersByTimeAsync(130000);
@@ -315,7 +357,8 @@ describe('TwoCaptchaAdapter', () => {
       const result = await adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
-        captchaTypeHint: CAPTCHA_TYPES.DATADOME
+        captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+        proxyDetails: datadomeProxyDetails
       });
 
       expect(result.solved).toBe(false);

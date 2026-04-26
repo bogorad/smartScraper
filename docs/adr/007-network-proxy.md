@@ -13,11 +13,18 @@ SmartScraper must support HTTP proxies for bypassing restrictions and improving 
 
 ```dotenv
 PROXY_SERVER=http://username:password@hostname:port
+# Default normal-scrape SOCKS5 proxy:
+DEFAULT_SOCKS5_PROXY=socks5://username:password@hostname:port
 # Fallback (also supported):
 HTTP_PROXY=http://username:password@hostname:port
 ```
 
-Note: `PROXY_SERVER` takes precedence over `HTTP_PROXY` if both are set.
+`default_socks5_proxy` may also be loaded from `secrets.yaml`, either as a
+flat key or as `api_keys.default_socks5_proxy`.
+
+Precedence for the default scrape proxy is:
+`PROXY_SERVER` → `DEFAULT_SOCKS5_PROXY` / `default_socks5_proxy` →
+`HTTP_PROXY`.
 
 ### Proxy URL Format
 
@@ -59,7 +66,19 @@ Proxy configured in axios request options with parsed credentials.
 Proxies apply to:
 - Target site HTTP requests
 - Puppeteer browser connections
-- 2Captcha DataDome tasks (passed in task payload)
+- 2Captcha DataDome tasks when DataDome-specific proxy credentials are present
+
+Per-request proxy details override the default scrape proxy. Sites configured
+with `needsProxy: "datadome"` use generated DataDome proxy sessions for browser
+page loads and 2Captcha DataDome tasks.
+
+Runtime DataDome CAPTCHA detection on a normal site uses DataDome proxy
+credentials for the 2Captcha task. It does not send the default SOCKS5 proxy to
+the DataDome solver path.
+
+2Captcha proxy failures such as `ERROR_BAD_PROXY` are reported as DataDome
+solver proxy configuration errors so the runtime failure is visible in scrape
+results and logs.
 
 ### User-Agent Handling
 

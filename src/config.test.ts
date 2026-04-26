@@ -22,6 +22,7 @@ const envKeys = [
   'EXECUTABLE_PATH',
   'EXTENSION_PATHS',
   'PROXY_SERVER',
+  'DEFAULT_SOCKS5_PROXY',
   'HTTP_PROXY',
   'BROWSER_DUMPIO',
   'BROWSER_CONSOLE_CAPTURE',
@@ -133,6 +134,21 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getVictoriaLogsOtlpMaxExportBatchSize()).toBe(8);
   });
 
+  it('uses DEFAULT_SOCKS5_PROXY as the default proxy unless PROXY_SERVER is set', async () => {
+    process.env.DEFAULT_SOCKS5_PROXY = 'socks5://default.example:1080';
+    process.env.HTTP_PROXY = 'http://legacy.example:8080';
+
+    let config = await import('./config.js');
+    config.initConfig();
+    expect(config.getProxyServer()).toBe('socks5://default.example:1080');
+
+    vi.resetModules();
+    process.env.PROXY_SERVER = 'http://explicit.example:8080';
+    config = await import('./config.js');
+    config.initConfig();
+    expect(config.getProxyServer()).toBe('http://explicit.example:8080');
+  });
+
   it('parses VictoriaLogs headers from JSON', async () => {
     process.env.VICTORIALOGS_OTLP_HEADERS = '{"VL-Ignore-Fields":"debug","X-Scope":"prod"}';
 
@@ -184,6 +200,7 @@ describe('config VictoriaLogs OTLP settings', () => {
         'datadome_proxy_host: datadome.example:8000',
         'datadome_proxy_login: datadome-login',
         'datadome_proxy_password: datadome-password',
+        'default_socks5_proxy: socks5://default.example:1080',
         'victorialogs_otlp_endpoint: http://victorialogs:9428/insert/opentelemetry/v1/logs',
         'victorialogs_otlp_auth_header_name: Authorization',
         'victorialogs_otlp_auth_header_value: Bearer vl-token'
@@ -200,6 +217,7 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getDatadomeProxyHost()).toBe('datadome.example:8000');
     expect(config.getDatadomeProxyLogin()).toBe('datadome-login');
     expect(config.getDatadomeProxyPassword()).toBe('datadome-password');
+    expect(config.getProxyServer()).toBe('socks5://default.example:1080');
     expect(config.getVictoriaLogsOtlpEndpoint()).toBe('http://victorialogs:9428/insert/opentelemetry/v1/logs');
     expect(config.getVictoriaLogsOtlpHeaders()).toEqual({
       Authorization: 'Bearer vl-token'
@@ -217,6 +235,7 @@ describe('config VictoriaLogs OTLP settings', () => {
         '  datadome_proxy_host: nested-datadome.example:8000',
         '  datadome_proxy_login: nested-datadome-login',
         '  datadome_proxy_password: nested-datadome-password',
+        '  default_socks5_proxy: socks5://nested-default.example:1080',
         '  victorialogs_otlp_endpoint: http://nested-victorialogs:9428/insert/opentelemetry/v1/logs',
         '  victorialogs_otlp_headers: X-Scope=nested',
         '  victorialogs_otlp_auth_header_name: Authorization',
@@ -234,6 +253,7 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getDatadomeProxyHost()).toBe('nested-datadome.example:8000');
     expect(config.getDatadomeProxyLogin()).toBe('nested-datadome-login');
     expect(config.getDatadomeProxyPassword()).toBe('nested-datadome-password');
+    expect(config.getProxyServer()).toBe('socks5://nested-default.example:1080');
     expect(config.getVictoriaLogsOtlpEndpoint()).toBe('http://nested-victorialogs:9428/insert/opentelemetry/v1/logs');
     expect(config.getVictoriaLogsOtlpHeaders()).toEqual({
       'X-Scope': 'nested',

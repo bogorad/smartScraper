@@ -110,23 +110,27 @@ CLASS CoreScraperEngine:
             context.siteConfig = await this.knownSitesPort.getConfig(domain)
             LOG debug "Site config lookup", { found: !!siteConfig, needsProxy: siteConfig?.needsProxy }
             
-            # 2. BUILD PROXY URL (if DataDome proxy needed)
-            proxyUrl = null
+            # 2. BUILD PAGE LOAD PROXY
+            # DataDome site proxy overrides request/default proxy.
+            datadomeProxyUrl = null
             IF context.siteConfig?.needsProxy == 'datadome':
                 host = getDatadomeProxyHost()
                 login = getDatadomeProxyLogin()
                 password = getDatadomeProxyPassword()
                 
                 IF host AND login AND password:
-                    proxyUrl = buildSessionProxyUrl(host, login, password, 2)  # 2 min sticky
-                    LOG proxySession(scrapeId, proxyUrl, sessionId, 2)
+                    datadomeProxyUrl = buildSessionProxyUrl(host, login, password, 2)  # 2 min sticky
+                    LOG proxySession(scrapeId, datadomeProxyUrl, sessionId, 2)
                 ELSE:
                     LOG warn "needsProxy=datadome but credentials not configured"
-            
+
+            defaultProxy = getProxyServer() OR null
+            pageLoadProxy = datadomeProxyUrl OR context.proxyDetails?.server OR defaultProxy
+
             # 3. LOAD PAGE (fresh browser per scrape)
             { pageId } = await this.browserPort.loadPage(url, {
                 timeout: options?.timeoutMs OR 120000,
-                proxy: proxyUrl
+                proxy: pageLoadProxy
             })
             
             # 4. DETECT CAPTCHA
@@ -143,7 +147,9 @@ CLASS CoreScraperEngine:
                     pageUrl: url,
                     captchaUrl: captchaDetection.captchaUrl,
                     captchaTypeHint: captchaDetection.type,
-                    proxyDetails: proxyUrl ? { server: proxyUrl } : context.proxyDetails,
+                    proxyDetails: captchaDetection.type == 'datadome'
+                        ? getDatadomeCaptchaProxyDetails(scrapeId, domain, datadomeProxyUrl)
+                        : (pageLoadProxy ? { server: pageLoadProxy } : null),
                     userAgentString: context.userAgentString
                 })
                 LOG captchaSolved(scrapeId, url, solveResult.solved, now() - captchaStart)

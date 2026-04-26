@@ -28,6 +28,9 @@ import {
 const configState = vi.hoisted(() => ({
   extensionPaths: [] as string[],
   proxyServer: "",
+  datadomeProxyHost: "",
+  datadomeProxyLogin: "",
+  datadomeProxyPassword: "",
 }));
 
 const scrapeEvents = vi.hoisted(() => ({
@@ -38,9 +41,9 @@ vi.mock("../config.js", () => ({
   getDataDir: () => "./data",
   getLogLevel: () => "NONE",
   getConcurrency: () => 1,
-  getDatadomeProxyHost: () => "",
-  getDatadomeProxyLogin: () => "",
-  getDatadomeProxyPassword: () => "",
+  getDatadomeProxyHost: () => configState.datadomeProxyHost,
+  getDatadomeProxyLogin: () => configState.datadomeProxyLogin,
+  getDatadomeProxyPassword: () => configState.datadomeProxyPassword,
   getExtensionPaths: () => configState.extensionPaths,
   getProxyServer: () => configState.proxyServer,
 }));
@@ -61,6 +64,9 @@ describe("CoreScraperEngine", () => {
     vi.clearAllMocks();
     configState.extensionPaths = [];
     configState.proxyServer = "";
+    configState.datadomeProxyHost = "";
+    configState.datadomeProxyLogin = "";
+    configState.datadomeProxyPassword = "";
 
     mockBrowser = {
       close: vi.fn().mockResolvedValue(undefined),
@@ -78,7 +84,7 @@ describe("CoreScraperEngine", () => {
         ),
       detectCaptcha: vi
         .fn()
-        .mockResolvedValue(CAPTCHA_TYPES.NONE),
+        .mockResolvedValue({ type: CAPTCHA_TYPES.NONE }),
       getElementDetails: vi.fn().mockResolvedValue({
         xpath: "//article",
         textLength: 500,
@@ -179,6 +185,46 @@ describe("CoreScraperEngine", () => {
           userAgentString: undefined,
           headers: undefined,
         },
+      );
+    });
+
+    it("should use configured default proxy for normal browser page loads", async () => {
+      configState.proxyServer = "socks5://default.example:1080";
+
+      await engine.scrapeUrl("https://example.com/article");
+
+      expect(mockBrowser.loadPage).toHaveBeenCalledWith(
+        "https://example.com/article",
+        {
+          timeout: expect.any(Number),
+          proxy: "socks5://default.example:1080",
+          userAgentString: undefined,
+          headers: undefined,
+        },
+      );
+    });
+
+    it("should use DataDome proxy instead of default proxy when site requires DataDome", async () => {
+      configState.proxyServer = "socks5://default.example:1080";
+      configState.datadomeProxyHost = "datadome.example:2334";
+      configState.datadomeProxyLogin = "datadome-login";
+      configState.datadomeProxyPassword = "datadome-password";
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue({
+        domainPattern: "example.com",
+        xpathMainContent: "//article",
+        failureCountSinceLastSuccess: 0,
+        needsProxy: "datadome",
+      });
+
+      await engine.scrapeUrl("https://example.com/article");
+
+      expect(mockBrowser.loadPage).toHaveBeenCalledWith(
+        "https://example.com/article",
+        expect.objectContaining({
+          proxy: expect.stringMatching(
+            /^http:\/\/datadome-login-session-[^:]+:datadome-password@datadome\.example:2334$/,
+          ),
+        }),
       );
     });
 
@@ -302,7 +348,7 @@ describe("CoreScraperEngine", () => {
     it("should handle CAPTCHA detection and solving", async () => {
       mockBrowser.detectCaptcha = vi
         .fn()
-        .mockResolvedValue(CAPTCHA_TYPES.GENERIC);
+        .mockResolvedValue({ type: CAPTCHA_TYPES.GENERIC });
       mockCaptcha.solveIfPresent = vi
         .fn()
         .mockResolvedValue({
@@ -326,10 +372,40 @@ describe("CoreScraperEngine", () => {
       expect(result.success).toBe(true);
     });
 
+    it("should use DataDome proxy for runtime DataDome CAPTCHA solving", async () => {
+      configState.proxyServer = "socks5://default.example:1080";
+      configState.datadomeProxyHost = "datadome.example:2334";
+      configState.datadomeProxyLogin = "datadome-login";
+      configState.datadomeProxyPassword = "datadome-password";
+      mockBrowser.detectCaptcha = vi.fn().mockResolvedValue({
+        type: CAPTCHA_TYPES.DATADOME,
+        captchaUrl: "https://geo.captcha-delivery.com/captcha/",
+      });
+
+      await engine.scrapeUrl("https://example.com/article");
+
+      expect(mockBrowser.loadPage).toHaveBeenCalledWith(
+        "https://example.com/article",
+        expect.objectContaining({
+          proxy: "socks5://default.example:1080",
+        }),
+      );
+      expect(mockCaptcha.solveIfPresent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          captchaTypeHint: CAPTCHA_TYPES.DATADOME,
+          proxyDetails: {
+            server: expect.stringMatching(
+              /^http:\/\/datadome-login-session-[^:]+:datadome-password@datadome\.example:2334$/,
+            ),
+          },
+        }),
+      );
+    });
+
     it("should fail when CAPTCHA cannot be solved", async () => {
       mockBrowser.detectCaptcha = vi
         .fn()
-        .mockResolvedValue(CAPTCHA_TYPES.GENERIC);
+        .mockResolvedValue({ type: CAPTCHA_TYPES.GENERIC });
       mockCaptcha.solveIfPresent = vi
         .fn()
         .mockResolvedValue({

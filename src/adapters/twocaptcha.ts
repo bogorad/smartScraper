@@ -89,8 +89,21 @@ export class TwoCaptchaAdapter implements CaptchaPort {
   }
 
   private async solveDataDome(input: CaptchaSolveInput): Promise<CaptchaSolveResult> {
+    if (!input.proxyDetails?.server) {
+      return {
+        solved: false,
+        reason: 'DataDome solver proxy configuration error: DATADOME_PROXY_* credentials are required for DataDome CAPTCHA solving'
+      };
+    }
+
     try {
-      const proxyFields = input.proxyDetails ? this.buildProxyFields(input.proxyDetails.server) : {};
+      const proxyFields = this.buildProxyFields(input.proxyDetails.server);
+      if (!proxyFields) {
+        return {
+          solved: false,
+          reason: 'DataDome solver proxy configuration error: failed to parse DataDome proxy URL'
+        };
+      }
       
       const taskPayload = {
         clientKey: this.apiKey,
@@ -118,7 +131,10 @@ export class TwoCaptchaAdapter implements CaptchaPort {
 
       const taskId = createResponse.data?.taskId;
       if (!taskId) {
-        return { solved: false, reason: createResponse.data?.errorDescription || 'Failed to create task' };
+        return {
+          solved: false,
+          reason: this.formatFatalError(createResponse.data, 'Failed to create DataDome task')
+        };
       }
 
       const startTime = Date.now();
@@ -150,18 +166,10 @@ export class TwoCaptchaAdapter implements CaptchaPort {
           const errorCode = resultResponse.data?.errorCode;
           const errorDesc = resultResponse.data?.errorDescription;
 
-          // Map known fatal error codes
-          const fatalErrors: Record<string, string> = {
-            'ERROR_CAPTCHA_UNSOLVABLE': 'CAPTCHA could not be solved',
-            'ERROR_WRONG_CAPTCHA_ID': 'Invalid CAPTCHA ID',
-            'ERROR_BAD_TOKEN_OR_PAGEURL': 'Invalid token or page URL',
-            'ERROR_EMPTY_ACTION': 'Empty action parameter',
-            'ERROR_PROXY_CONNECTION_FAILED': 'Proxy connection failed',
-            'ERROR_PROXY_NOT_AUTHORIZED': 'Proxy authentication failed'
+          return {
+            solved: false,
+            reason: this.formatFatalError({ errorCode, errorDescription: errorDesc }, 'Unknown DataDome solver error')
           };
-
-          const reason = fatalErrors[errorCode] || errorDesc || errorCode || 'Unknown error';
-          return { solved: false, reason };
         }
       }
 
@@ -250,9 +258,32 @@ export class TwoCaptchaAdapter implements CaptchaPort {
     }
   }
 
-  private buildProxyFields(proxyUrl: string): Record<string, string | number> {
+  private formatFatalError(data: any, fallback: string): string {
+    const errorCode = data?.errorCode;
+    const errorDesc = data?.errorDescription;
+    const fatalErrors: Record<string, string> = {
+      ERROR_BAD_PROXY: 'DataDome solver proxy configuration error',
+      ERROR_PROXY_CONNECTION_FAILED: 'DataDome solver proxy connection failed',
+      ERROR_PROXY_NOT_AUTHORIZED: 'DataDome solver proxy authentication failed',
+      ERROR_CAPTCHA_UNSOLVABLE: 'CAPTCHA could not be solved',
+      ERROR_WRONG_CAPTCHA_ID: 'Invalid CAPTCHA ID',
+      ERROR_BAD_TOKEN_OR_PAGEURL: 'Invalid token or page URL',
+      ERROR_EMPTY_ACTION: 'Empty action parameter'
+    };
+
+    const prefix = fatalErrors[errorCode] || fallback;
+    if (errorCode && errorDesc) {
+      return `${prefix} (${errorCode}): ${errorDesc}`;
+    }
+    if (errorCode) {
+      return prefix;
+    }
+    return errorDesc || fallback;
+  }
+
+  private buildProxyFields(proxyUrl: string): Record<string, string | number> | null {
     const parsed = parseProxyUrl(proxyUrl);
-    if (!parsed) return {};
+    if (!parsed) return null;
     
     return {
       proxyType: parsed.protocol,

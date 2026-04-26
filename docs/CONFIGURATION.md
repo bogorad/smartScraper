@@ -81,18 +81,19 @@ api_keys:
   smart_scraper: "your_api_token"
   openrouter: "your_openrouter_key"
   twocaptcha: "your_2captcha_key"
+  default_socks5_proxy: "socks5://user:pass@host:port"
   datadome_proxy_host: "host:port"
   datadome_proxy_login: "proxy_login"
   datadome_proxy_password: "proxy_password"
-  victorialogs_otlp_endpoint: "http://victorialogs:9428/insert/opentelemetry/v1/logs"
-  victorialogs_otlp_headers: "X-Scope=prod"
-  victorialogs_otlp_auth_header_name: "Authorization"
-  victorialogs_otlp_auth_header_value: "Bearer token"
+victorialogs_otlp_endpoint: "http://victorialogs:9428/insert/opentelemetry/v1/logs"
+victorialogs_otlp_headers: "X-Scope=prod"
+victorialogs_otlp_auth_header_name: "Authorization"
+victorialogs_otlp_auth_header_value: "Bearer token"
 ```
 
 Flat `secrets.yaml` keys are also supported for these same secret names:
-`smart_scraper`, `openrouter`, `twocaptcha`, `datadome_proxy_host`,
-`datadome_proxy_login`, `datadome_proxy_password`,
+`smart_scraper`, `openrouter`, `twocaptcha`, `default_socks5_proxy`,
+`datadome_proxy_host`, `datadome_proxy_login`, `datadome_proxy_password`,
 `victorialogs_otlp_endpoint`, `victorialogs_otlp_headers`,
 `victorialogs_otlp_auth_header_name`, and
 `victorialogs_otlp_auth_header_value`.
@@ -135,10 +136,16 @@ Sensible defaults for non-critical configuration are defined in `src/constants.t
 | `EXECUTABLE_PATH` | string | /usr/lib/chromium/chromium | Chrome/Chromium executable path |
 | `EXTENSION_PATHS` | string | '' | Comma-separated browser extension paths |
 | `PROXY_SERVER` | string | '' | HTTP proxy URL for scraping |
+| `DEFAULT_SOCKS5_PROXY` | string | '' | Default SOCKS5 proxy URL for normal scraping when `PROXY_SERVER` is not set |
 
 **Legacy Names Supported:**
 - `PUPPETEER_EXECUTABLE_PATH` → `EXECUTABLE_PATH`
 - `HTTP_PROXY` → `PROXY_SERVER`
+
+Proxy precedence is:
+`PROXY_SERVER` → `DEFAULT_SOCKS5_PROXY` / `default_socks5_proxy` →
+`HTTP_PROXY`. Per-request proxy details and DataDome site proxy settings still
+override the default proxy for their own scrape.
 
 ### CAPTCHA Configuration
 
@@ -162,6 +169,11 @@ Sensible defaults for non-critical configuration are defined in `src/constants.t
 
 These values can be loaded from environment variables, flat `secrets.yaml`
 keys, or nested `api_keys.*` keys.
+
+DataDome CAPTCHA solving uses the `DATADOME_PROXY_*` proxy credentials. It does
+not use `DEFAULT_SOCKS5_PROXY`, because 2Captcha DataDome tasks require a
+DataDome-compatible proxy. If the 2Captcha API reports `ERROR_BAD_PROXY`, the
+scrape result reports it as a DataDome solver proxy configuration error.
 
 ### Authentication
 

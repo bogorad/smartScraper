@@ -100,10 +100,13 @@ CLASS TwoCaptchaAdapter IMPLEMENTS CaptchaPort:
 
     PRIVATE FUNCTION solveDataDome(input: CaptchaSolveInput) -> CaptchaSolveResult:
         TRY:
+            IF NOT input.proxyDetails?.server:
+                RETURN { solved: false, reason: 'DataDome solver proxy configuration error: DATADOME_PROXY_* credentials are required for DataDome CAPTCHA solving' }
+
             # Build proxy fields from proxy URL
-            proxyFields = {}
-            IF input.proxyDetails:
-                proxyFields = this.buildProxyFields(input.proxyDetails.server)
+            proxyFields = this.buildProxyFields(input.proxyDetails.server)
+            IF NOT proxyFields:
+                RETURN { solved: false, reason: 'DataDome solver proxy configuration error: failed to parse DataDome proxy URL' }
             
             # 1. Create task
             taskPayload = {
@@ -127,7 +130,7 @@ CLASS TwoCaptchaAdapter IMPLEMENTS CaptchaPort:
             
             taskId = createResponse.data?.taskId
             IF NOT taskId:
-                RETURN { solved: false, reason: createResponse.data?.errorDescription OR 'Failed to create task' }
+                RETURN { solved: false, reason: formatFatalError(createResponse.data, 'Failed to create DataDome task') }
             
             # 2. Poll for result
             startTime = now()
@@ -160,15 +163,16 @@ CLASS TwoCaptchaAdapter IMPLEMENTS CaptchaPort:
                     
                     # Map known fatal error codes
                     fatalErrors = {
+                        'ERROR_BAD_PROXY': 'DataDome solver proxy configuration error',
                         'ERROR_CAPTCHA_UNSOLVABLE': 'CAPTCHA could not be solved',
                         'ERROR_WRONG_CAPTCHA_ID': 'Invalid CAPTCHA ID',
                         'ERROR_BAD_TOKEN_OR_PAGEURL': 'Invalid token or page URL',
                         'ERROR_EMPTY_ACTION': 'Empty action parameter',
-                        'ERROR_PROXY_CONNECTION_FAILED': 'Proxy connection failed',
-                        'ERROR_PROXY_NOT_AUTHORIZED': 'Proxy authentication failed'
+                        'ERROR_PROXY_CONNECTION_FAILED': 'DataDome solver proxy connection failed',
+                        'ERROR_PROXY_NOT_AUTHORIZED': 'DataDome solver proxy authentication failed'
                     }
-                    
-                    reason = fatalErrors[errorCode] OR errorDesc OR errorCode OR 'Unknown error'
+
+                    reason = formatFatalError({ errorCode, errorDescription: errorDesc }, 'Unknown DataDome solver error')
                     RETURN { solved: false, reason }
             
             RETURN { solved: false, reason: 'Timeout waiting for solution' }
@@ -184,7 +188,7 @@ CLASS TwoCaptchaAdapter IMPLEMENTS CaptchaPort:
     PRIVATE FUNCTION buildProxyFields(proxyUrl: string) -> Map<string, any>:
         parsed = parseProxyUrl(proxyUrl)
         IF NOT parsed:
-            RETURN {}
+            RETURN null
         
         RETURN {
             proxyType: parsed.protocol,

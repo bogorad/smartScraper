@@ -269,44 +269,21 @@ export class CoreScraperEngine {
           ? headers
           : undefined;
 
-      // Check if site needs DataDome residential proxy
-      let proxyUrl: string | undefined;
-      if (
+      const datadomePageProxy =
         context.siteConfig?.needsProxy ===
         PROXY_MODES.DATADOME
-      ) {
-        const host = getDatadomeProxyHost();
-        const login = getDatadomeProxyLogin();
-        const password = getDatadomeProxyPassword();
+          ? this.buildDatadomeProxyUrl(
+              scrapeId,
+              domain,
+              "site requires DataDome proxy",
+            )
+          : undefined;
 
-        if (!host || !login || !password) {
-          logger.warn(
-            "needsProxy=datadome but DATADOME_PROXY_* credentials not configured",
-            { domain },
-            "ENGINE",
-          );
-        } else {
-          // Generate unique session URL for this scrape (2 min sticky IP)
-          proxyUrl = buildSessionProxyUrl(
-            host,
-            login,
-            password,
-            DEFAULTS.PROXY_SESSION_MINUTES,
-          );
-          const sessionId =
-            proxyUrl.match(/session-([^-]+)/)?.[1] ||
-            "unknown";
-          logger.proxySession(
-            scrapeId,
-            proxyUrl,
-            sessionId,
-            DEFAULTS.PROXY_SESSION_MINUTES,
-          );
-        }
-      }
-
+      const defaultProxy = getProxyServer() || undefined;
       const pageLoadProxy =
-        proxyUrl ?? context.proxyDetails?.server;
+        datadomePageProxy ??
+        context.proxyDetails?.server ??
+        defaultProxy;
 
       const simpleFetchResult =
         await this.trySimpleFetchScrape(
@@ -359,9 +336,16 @@ export class CoreScraperEngine {
             captchaUrl: captchaDetection.captchaUrl,
             captchaTypeHint: captchaDetection.type,
             siteKey: captchaDetection.siteKey,
-            proxyDetails: proxyUrl
-              ? { server: proxyUrl }
-              : context.proxyDetails,
+            proxyDetails:
+              captchaDetection.type === CAPTCHA_TYPES.DATADOME
+                ? this.getDatadomeCaptchaProxyDetails(
+                    scrapeId,
+                    domain,
+                    datadomePageProxy,
+                  )
+                : pageLoadProxy
+                  ? { server: pageLoadProxy }
+                  : undefined,
             userAgentString: context.userAgentString,
           });
         const captchaDuration = Date.now() - captchaStart;
@@ -861,6 +845,57 @@ export class CoreScraperEngine {
       );
       return null;
     }
+  }
+
+  private buildDatadomeProxyUrl(
+    scrapeId: string,
+    domain: string,
+    reason: string,
+  ): string | undefined {
+    const host = getDatadomeProxyHost();
+    const login = getDatadomeProxyLogin();
+    const password = getDatadomeProxyPassword();
+
+    if (!host || !login || !password) {
+      logger.warn(
+        "DataDome proxy required but DATADOME_PROXY_* credentials are not configured",
+        { domain, reason },
+        "ENGINE",
+      );
+      return undefined;
+    }
+
+    const proxyUrl = buildSessionProxyUrl(
+      host,
+      login,
+      password,
+      DEFAULTS.PROXY_SESSION_MINUTES,
+    );
+    const sessionId =
+      proxyUrl.match(/session-([^-]+)/)?.[1] || "unknown";
+    logger.proxySession(
+      scrapeId,
+      proxyUrl,
+      sessionId,
+      DEFAULTS.PROXY_SESSION_MINUTES,
+    );
+    return proxyUrl;
+  }
+
+  private getDatadomeCaptchaProxyDetails(
+    scrapeId: string,
+    domain: string,
+    pageProxy: string | undefined,
+  ): { server: string } | undefined {
+    const proxy =
+      pageProxy ??
+      this.buildDatadomeProxyUrl(
+        scrapeId,
+        domain,
+        "DataDome CAPTCHA detected",
+      );
+
+    return proxy ? { server: proxy } : undefined;
   }
 
   private isSimpleFetchEligible(
