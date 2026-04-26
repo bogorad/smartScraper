@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { dashboardAuthMiddleware } from '../../middleware/auth.js';
+import { rateLimitMiddleware } from '../../middleware/rate-limit.js';
+import { csrfMiddleware, getCsrfToken } from '../../middleware/csrf.js';
 import { Layout } from '../../components/layout.js';
 import { StatsCard } from '../../components/stats-card.js';
 import { loadStats, getTopDomains, resetStats } from '../../services/stats-storage.js';
@@ -9,6 +11,8 @@ import { formatDuration } from '../../utils/date.js';
 
 export const statsRouter = new Hono();
 
+statsRouter.use('/*', rateLimitMiddleware({ maxRequests: 60, windowMs: 60000 }));
+statsRouter.use('/*', csrfMiddleware);
 statsRouter.use('/*', dashboardAuthMiddleware);
 
 statsRouter.post('/reset', async (c) => {
@@ -19,6 +23,7 @@ statsRouter.post('/reset', async (c) => {
 
 statsRouter.get('/', async (c) => {
   const theme = getCookie(c, 'theme') || 'light';
+  const csrfToken = getCsrfToken(c);
   const stats = await loadStats();
   const topDomains = await getTopDomains(10);
   const todayLogs = await readTodayLogs();
@@ -34,7 +39,7 @@ statsRouter.get('/', async (c) => {
     : '0';
 
   return c.html(
-    <Layout title="Stats - SmartScraper" activePath="/dashboard/stats" theme={theme}>
+    <Layout title="Stats - SmartScraper" activePath="/dashboard/stats" theme={theme} csrfToken={csrfToken}>
       <div class="flex justify-between items-center mb-4">
         <h1 class="mb-0">Statistics</h1>
         <button

@@ -41,6 +41,10 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
   theme = "light",
   csrfToken,
 }) => {
+  const csrfHeaders = csrfToken
+    ? JSON.stringify({ "X-CSRF-Token": csrfToken })
+    : undefined;
+
   return (
     <html lang="en" data-theme={theme}>
       <head>
@@ -80,15 +84,8 @@ export const Layout: FC<PropsWithChildren<LayoutProps>> = ({
         `}</style>
         <script src="/htmx.min.js"></script>
         <script src="/sse.js"></script>
-        {csrfToken && (
-          <script>{`
-            document.addEventListener('htmx:configRequest', function(evt) {
-              evt.detail.headers['X-CSRF-Token'] = '${csrfToken}';
-            });
-          `}</script>
-        )}
       </head>
-      <body>
+      <body {...(csrfHeaders ? { "hx-headers": csrfHeaders } : {})}>
         <nav class="nav">
           <div class="nav-inner">
             <a href="/dashboard" class="nav-brand">

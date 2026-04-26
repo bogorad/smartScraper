@@ -31,6 +31,7 @@ sitesRouter.use('/*', dashboardAuthMiddleware);
 
 sitesRouter.get('/', zValidator('query', querySchema), async (c) => {
   const theme = getCookie(c, 'theme') || 'light';
+  const csrfToken = getCsrfToken(c);
   logger.debug(`[SITES] Page render theme: ${theme}`);
   const query = c.req.valid('query');
   const q = query.q.toLowerCase();
@@ -151,7 +152,7 @@ sitesRouter.get('/', zValidator('query', querySchema), async (c) => {
   }
 
   return c.html(
-    <Layout title="Sites - SmartScraper" activePath="/dashboard/sites" theme={theme}>
+    <Layout title="Sites - SmartScraper" activePath="/dashboard/sites" theme={theme} csrfToken={csrfToken}>
       <div class="flex justify-between items-center mb-4">
         <h1 class="mb-0">Site Configurations</h1>
         <a href="/dashboard/sites/new" class="btn btn-primary">Add Site</a>
@@ -245,6 +246,7 @@ sitesRouter.get('/', zValidator('query', querySchema), async (c) => {
 
 sitesRouter.get('/new', (c) => {
   const theme = getCookie(c, 'theme') || 'light';
+  const csrfToken = getCsrfToken(c);
   const emptySite: SiteConfig = {
     domainPattern: '',
     xpathMainContent: '',
@@ -252,7 +254,7 @@ sitesRouter.get('/new', (c) => {
   };
 
   return c.html(
-    <Layout title="New Site - SmartScraper" activePath="/dashboard/sites" theme={theme}>
+    <Layout title="New Site - SmartScraper" activePath="/dashboard/sites" theme={theme} csrfToken={csrfToken}>
       <h1>Add New Site</h1>
       <SiteForm site={emptySite} isNew={true} />
     </Layout>
@@ -261,12 +263,13 @@ sitesRouter.get('/new', (c) => {
 
 sitesRouter.get('/:domain', async (c) => {
   const theme = getCookie(c, 'theme') || 'light';
+  const csrfToken = getCsrfToken(c);
   const domain = decodeURIComponent(c.req.param('domain'));
   const site = await knownSitesAdapter.getConfig(domain);
 
   if (!site) {
     return c.html(
-      <Layout title="Not Found - SmartScraper" activePath="/dashboard/sites" theme={theme}>
+      <Layout title="Not Found - SmartScraper" activePath="/dashboard/sites" theme={theme} csrfToken={csrfToken}>
         <div class="alert alert-error">Site configuration not found: {domain}</div>
         <a href="/dashboard/sites" class="btn btn-secondary">Back to Sites</a>
       </Layout>
@@ -274,7 +277,7 @@ sitesRouter.get('/:domain', async (c) => {
   }
 
   return c.html(
-    <Layout title={`${domain} - SmartScraper`} activePath="/dashboard/sites" theme={theme}>
+    <Layout title={`${domain} - SmartScraper`} activePath="/dashboard/sites" theme={theme} csrfToken={csrfToken}>
       <h1>Edit Site</h1>
       <SiteForm site={site} />
       <TestForm domain={domain} />
