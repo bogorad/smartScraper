@@ -1,6 +1,7 @@
 # Logging System
 # ================
 # Structured logging with file output
+# Also exports runtime logs to VictoriaLogs via OTLP protobuf when enabled.
 
 # ============================================================================
 # LOG LEVELS
@@ -41,6 +42,9 @@ STRUCT LogEntry:
 # Global state
 logFileStream: WriteStream | null = null
 debugEnabled: boolean = false
+otelLoggerProvider: LoggerProvider | null = null
+otelLogger: OtelLogger | null = null
+otlpInitialized: boolean = false
 
 FUNCTION initLogFile() -> void:
     IF logFileStream:
@@ -100,6 +104,64 @@ PRIVATE FUNCTION writeToFile(entry: LogEntry) -> void:
         CATCH error:
             console.error("[LOGGER] Write error:", error)
 
+PRIVATE FUNCTION initOtlpLogger() -> void:
+    IF otlpInitialized:
+        RETURN
+    otlpInitialized = true
+
+    IF NOT isVictoriaLogsOtlpEnabled():
+        RETURN
+
+    endpoint = getVictoriaLogsOtlpEndpoint()
+    IF endpoint == '':
+        console.warn("[LOGGER] VICTORIALOGS_OTLP_ENABLED is true but endpoint is empty")
+        RETURN
+
+    # VictoriaLogs requires OTLP protobuf on /insert/opentelemetry/v1/logs.
+    # Do not use OTLP JSON for this endpoint.
+    exporter = ProtobufOTLPLogExporter({
+        url: endpoint,
+        headers: getVictoriaLogsOtlpHeaders(),
+        timeoutMillis: getVictoriaLogsOtlpTimeoutMs(),
+        contentType: 'application/x-protobuf'
+    })
+
+    # OpenTelemetry exporter failures go through diagnostics by default.
+    # Route diagnostics back to local logger so delivery failures are visible.
+    installOtlpDiagnosticLogger()
+
+    otelLoggerProvider = LoggerProvider({
+        resource: {
+            service.name: 'smart-scraper',
+            service.version: VERSION,
+            deployment.environment.name: getNodeEnv()
+        },
+        processor: BatchLogRecordProcessor(exporter)
+    })
+    otelLogger = otelLoggerProvider.getLogger('smart-scraper', VERSION)
+
+PRIVATE FUNCTION writeToOtlp(entry: LogEntry) -> void:
+    initOtlpLogger()
+    IF NOT otelLogger:
+        RETURN
+
+    otelLogger.emit({
+        timestamp: entry.timestamp,  # UTC ISO 8601
+        observedTimestamp: new Date(),  # UTC
+        severityText: entry.level,
+        body: entry.message,
+        attributes: {
+            level: entry.level,
+            module: entry.module,
+            scrapeId: entry.scrapeId,
+            url: entry.url,
+            domain: entry.domain,
+            duration: entry.duration,
+            error: entry.error,
+            data: redactSecrets(entry.data)
+        }
+    })
+
 PRIVATE FUNCTION log(level: LogLevel, module: string?, message: string, data?: any) -> void:
     IF NOT shouldLog(level):
         RETURN
@@ -129,6 +191,9 @@ PRIVATE FUNCTION log(level: LogLevel, module: string?, message: string, data?: a
     
     # File output (JSONL)
     writeToFile(entry)
+
+    # Remote output (VictoriaLogs OTLP protobuf)
+    writeToOtlp(entry)
 
 
 # ============================================================================

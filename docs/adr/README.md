@@ -24,6 +24,7 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 | [016](016-testing-strategy.md) | Testing Strategy | Accepted |
 | [017](017-timeout-constants.md) | Timeout Constants Are Sacred | Accepted |
 | [018](018-puppeteer-websocket-server.md) | Minimal Puppeteer WebSocket Server | Proposed |
+| [019](019-victorialogs-otlp-logging.md) | VictoriaLogs OTLP Logging | Accepted |
 
 ## Overview
 
@@ -58,6 +59,7 @@ This directory contains Architecture Decision Records (ADRs) for SmartScraper. A
 
 ### Infrastructure
 - **[ADR-018](018-puppeteer-websocket-server.md)** - Minimal Puppeteer WebSocket server to replace browserless for rsshub
+- **[ADR-019](019-victorialogs-otlp-logging.md)** - VictoriaLogs OTLP protobuf logging, UTC query windows, and MCP marker verification
 
 ## ADR Format
 
