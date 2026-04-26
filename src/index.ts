@@ -1,148 +1,42 @@
-import { serve } from '@hono/node-server';
-import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
-import { logger as honoLogger } from 'hono/logger';
-import fs from 'fs';
+import { createApp } from "./app.js";
+import { bootstrapApplication } from "./bootstrap.js";
+import {
+  startServer,
+  registerProcessHandlers,
+} from "./server.js";
+import { logger } from "./utils/logger.js";
+import type { RuntimeDependencies } from "./bootstrap.js";
 
-import { initConfig, getPort, getDataDir, getExecutablePath, getExtensionPaths } from './config.js';
-import { logger } from './utils/logger.js';
-import { scrapeRouter } from './routes/api/scrape.js';
-import { loginRouter } from './routes/dashboard/login.js';
-import { dashboardRouter } from './routes/dashboard/index.js';
-import { sitesRouter } from './routes/dashboard/sites.js';
-import { statsRouter } from './routes/dashboard/stats.js';
-import { cleanupOldLogs } from './services/log-storage.js';
-import { initializeEngine, getDefaultEngine } from './core/engine.js';
-import { PuppeteerBrowserAdapter } from './adapters/puppeteer-browser.js';
-import { OpenRouterLlmAdapter } from './adapters/openrouter-llm.js';
-import { TwoCaptchaAdapter } from './adapters/twocaptcha.js';
-import { knownSitesAdapter } from './adapters/fs-known-sites.js';
-import { VERSION } from './constants.js';
+export {
+  scrapeUrl,
+  getDefaultEngine,
+} from "./core/engine.js";
+export {
+  METHODS,
+  OUTPUT_TYPES,
+  VERSION,
+} from "./constants.js";
 
-export { scrapeUrl, getDefaultEngine } from './core/engine.js';
-export { METHODS, OUTPUT_TYPES, VERSION } from './constants.js';
+let runtimeDependencies: RuntimeDependencies | null = null;
+let cleanupInterval: NodeJS.Timeout | undefined;
 
-let browserAdapter: PuppeteerBrowserAdapter | null = null;
-
-process.on('uncaughtException', (error) => {
-  // Use console directly - logger may depend on uninitialized config
-  console.error('[FATAL] Uncaught Exception:', error);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  // Check for benign Puppeteer extension cleanup error (see ADR-001, issue smartScraper-b9a)
-  // This occurs when browser.close() is called while extensions are still loading
-  // due to a race condition in Puppeteer's extension installation.
-  const reasonStr = reason instanceof Error 
-    ? `${reason.name}: ${reason.message}` 
-    : String(reason);
-  const isBenignExtensionError =
-    reasonStr.includes('TargetCloseError') && reasonStr.includes('Extensions.loadUnpacked');
-
-  if (isBenignExtensionError) {
-    // Use console directly - logger may depend on uninitialized config
-    console.warn('[PUPPETEER] Ignoring benign extension cleanup error during browser close');
-    return;
-  }
-
-  // Use console directly - logger may depend on uninitialized config
-  console.error('[FATAL] Unhandled Rejection:', reason);
-  process.exit(1);
-});
-
-async function shutdown(signal: string) {
-  logger.info(`[SHUTDOWN] Received ${signal}, closing browsers...`);
-  if (browserAdapter) {
-    try {
-      await browserAdapter.close();
-      logger.info('[SHUTDOWN] All browsers closed');
-    } catch (error) {
-      logger.error('[SHUTDOWN] Error closing browsers:', error);
-    }
-  }
-  await logger.shutdown();
-  process.exit(0);
-}
-
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
-
-const app = new Hono();
-
-app.use('*', honoLogger());
-
-app.use('/htmx.min.js', serveStatic({ path: './src/htmx.min.js' }));
-app.use('/sse.js', serveStatic({ path: './src/sse.js' }));
-
-app.get('/health', (c) => {
-  return c.json({ status: 'alive', version: VERSION, timestamp: Date.now() });
-});
-
-app.get('/api/version', (c) => {
-  return c.json({ version: VERSION });
-});
-
-app.route('/api/scrape', scrapeRouter);
-
-app.route('/login', loginRouter);
-app.route('/dashboard', dashboardRouter);
-app.route('/dashboard/sites', sitesRouter);
-app.route('/dashboard/stats', statsRouter);
-
-app.get('/', (c) => c.redirect('/dashboard'));
+registerProcessHandlers(() => ({
+  browserAdapter:
+    runtimeDependencies?.browserAdapter ?? null,
+  cleanupInterval,
+}));
 
 async function main() {
-  // Initialize and validate all configuration at startup
-  initConfig();
-  
-  const PORT = getPort();
-  const DATA_DIR = getDataDir();
-  
-  // Debug config propagation
-  logger.info(`[CONFIG] Environment: ${initConfig().nodeEnv}, Log Level: ${initConfig().logLevel}`);
-  logger.info(`[APP] SmartScraper v${VERSION} starting...`);
+  const app = createApp();
+  const bootstrap = await bootstrapApplication();
+  runtimeDependencies = bootstrap.dependencies;
+  cleanupInterval = bootstrap.cleanupInterval;
 
-  await fs.promises.mkdir(`${DATA_DIR}/logs`, { recursive: true });
-
-  const execPath = getExecutablePath();
-  try {
-    await fs.promises.access(execPath);
-    logger.info(`[CHROMIUM] Found at: ${execPath}`);
-  } catch {
-    logger.warn(`[WARNING] Chromium executable not found at: ${execPath}`);
-  }
-
-  const extensionPaths = getExtensionPaths();
-  if (extensionPaths.length > 0) {
-    logger.info(`[CHROMIUM] Extensions: ${extensionPaths.join(', ')}`);
-  }
-
-  browserAdapter = new PuppeteerBrowserAdapter();
-
-  initializeEngine(
-    browserAdapter,
-    new OpenRouterLlmAdapter(),
-    new TwoCaptchaAdapter(),
-    knownSitesAdapter
-  );
-
-  await cleanupOldLogs();
-  setInterval(cleanupOldLogs, 24 * 60 * 60 * 1000);
-
-  logger.info(`[SERVER] Starting on port ${PORT}`);
-
-  serve({
-    fetch: app.fetch,
-    port: PORT,
-    hostname: '0.0.0.0'
-  }, (info) => {
-    logger.info(`[SERVER] Running at http://0.0.0.0:${info.port}`);
-  });
+  startServer(app, bootstrap.port);
 }
 
 main().catch(async (error) => {
-  logger.error('[FATAL] Startup failed:', error);
+  logger.error("[FATAL] Startup failed:", error);
   await logger.shutdown();
   process.exit(1);
 });
