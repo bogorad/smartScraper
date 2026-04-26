@@ -166,9 +166,11 @@ export class CoreScraperEngine {
         }
       }
 
+      const pageLoadProxy = proxyUrl ?? context.proxyDetails?.server;
+
       const { pageId: pid } = await this.browserPort.loadPage(url, {
         timeout: options?.timeoutMs || DEFAULTS.TIMEOUT_MS,
-        proxy: proxyUrl
+        proxy: pageLoadProxy
       });
       pageId = pid;
 

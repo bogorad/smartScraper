@@ -86,6 +86,17 @@ describe('CoreScraperEngine', () => {
       expect(mockBrowser.loadPage).toHaveBeenCalledWith('https://example.com/article', expect.any(Object));
     });
 
+    it('should forward explicit proxy details to browser page loads', async () => {
+      await engine.scrapeUrl('https://example.com/article', {
+        proxyDetails: { server: 'http://proxy.example:8080' }
+      });
+
+      expect(mockBrowser.loadPage).toHaveBeenCalledWith('https://example.com/article', {
+        timeout: expect.any(Number),
+        proxy: 'http://proxy.example:8080'
+      });
+    });
+
     it('should reject invalid URLs', async () => {
       const result = await engine.scrapeUrl('not-a-url');
 
