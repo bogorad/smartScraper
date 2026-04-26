@@ -206,15 +206,18 @@
           };
 
           config = lib.mkIf cfg.enable {
-            sops.secrets = lib.genAttrs [
-              "api_keys/smart_scraper"
-              "api_keys/openrouter"
-              "api_keys/twocaptcha"
-            ] (_: {
-              sopsFile = cfg.sopsSecretsFile;
-              owner = cfg.user;
-              group = cfg.group;
-            });
+            sops.secrets =
+              lib.genAttrs
+                [
+                  "api_keys/smart_scraper"
+                  "api_keys/openrouter"
+                  "api_keys/twocaptcha"
+                ]
+                (_: {
+                  sopsFile = cfg.sopsSecretsFile;
+                  owner = cfg.user;
+                  group = cfg.group;
+                });
 
             users.users.${cfg.user} = {
               isSystemUser = true;
