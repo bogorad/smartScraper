@@ -4,10 +4,33 @@ import PQueue from "p-queue";
 import { parse, stringify } from "comment-json";
 import { randomUUID } from "crypto";
 import type { KnownSitesPort } from "../ports/known-sites.js";
-import type { SiteConfig } from "../domain/models.js";
+import type {
+  SiteConfig,
+  SiteConfigCaptcha,
+  SiteConfigMethod,
+  SiteConfigProxy,
+} from "../domain/models.js";
 import { utcNow } from "../utils/date.js";
 import { getDataDir } from "../config.js";
 import { logger } from "../utils/logger.js";
+
+const SITE_CONFIG_METHODS = new Set<SiteConfigMethod>([
+  "curl",
+  "chrome",
+]);
+const SITE_CONFIG_CAPTCHAS = new Set<SiteConfigCaptcha>([
+  "none",
+  "datadome",
+  "recaptcha",
+  "turnstile",
+  "hcaptcha",
+  "unsupported",
+]);
+const SITE_CONFIG_PROXIES = new Set<SiteConfigProxy>([
+  "none",
+  "default",
+  "datadome",
+]);
 
 function getSitesFile(): string {
   return path.join(getDataDir(), "sites.jsonc");
@@ -23,6 +46,81 @@ function normalizeKnownSiteDomain(domain: string): string {
 
 function domainMatchesConfig(domain: string, configDomain: string): boolean {
   return domain === configDomain || domain.endsWith(`.${configDomain}`);
+}
+
+function normalizeSiteConfigMethod(
+  method: unknown,
+): SiteConfigMethod | undefined {
+  if (method === undefined) return undefined;
+  if (method === "puppeteer_stealth") return "chrome";
+  if (method === "obscura_simple_fetch") return "curl";
+  if (
+    typeof method === "string" &&
+    SITE_CONFIG_METHODS.has(method as SiteConfigMethod)
+  ) {
+    return method as SiteConfigMethod;
+  }
+  throw new Error(`invalid site method: ${String(method)}`);
+}
+
+function normalizeSiteConfigCaptcha(
+  captcha: unknown,
+): SiteConfigCaptcha | undefined {
+  if (captcha === undefined) return undefined;
+  if (captcha === "generic" || captcha === "cloudflare") {
+    return "unsupported";
+  }
+  if (
+    typeof captcha === "string" &&
+    SITE_CONFIG_CAPTCHAS.has(captcha as SiteConfigCaptcha)
+  ) {
+    return captcha as SiteConfigCaptcha;
+  }
+  throw new Error(`invalid site captcha: ${String(captcha)}`);
+}
+
+function normalizeSiteConfigProxy(
+  proxy: unknown,
+  needsProxy: unknown,
+): SiteConfigProxy | undefined {
+  const proxyValue =
+    proxy === undefined && needsProxy === "off"
+      ? "none"
+      : proxy === undefined && needsProxy === "datadome"
+        ? "datadome"
+        : proxy;
+  if (proxyValue === undefined) return undefined;
+  if (
+    typeof proxyValue === "string" &&
+    SITE_CONFIG_PROXIES.has(proxyValue as SiteConfigProxy)
+  ) {
+    return proxyValue as SiteConfigProxy;
+  }
+  throw new Error(`invalid site proxy: ${String(proxyValue)}`);
+}
+
+function normalizeSiteConfig(config: SiteConfig): SiteConfig {
+  const raw = config as SiteConfig & {
+    method?: unknown;
+    captcha?: unknown;
+    proxy?: unknown;
+    needsProxy?: unknown;
+  };
+  const normalized: SiteConfig = {
+    ...config,
+  };
+  const method = normalizeSiteConfigMethod(raw.method);
+  const captcha = normalizeSiteConfigCaptcha(raw.captcha);
+  const proxy = normalizeSiteConfigProxy(raw.proxy, raw.needsProxy);
+
+  if (method) normalized.method = method;
+  if (captcha) normalized.captcha = captcha;
+  if (proxy) {
+    normalized.proxy = proxy;
+    normalized.needsProxy = proxy === "datadome" ? "datadome" : "off";
+  }
+
+  return normalized;
 }
 
 function findMatchingConfig(
@@ -87,7 +185,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
       if (!Array.isArray(parsed)) {
         throw new Error("sites file must contain an array");
       }
-      this.cache = parsed as SiteConfig[];
+      this.cache = (parsed as SiteConfig[]).map(normalizeSiteConfig);
     } catch (error) {
       await quarantineCorruptSitesFile(
         getSitesFile(),
@@ -126,7 +224,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
       const normalizedConfig = {
-        ...config,
+        ...normalizeSiteConfig(config),
         domainPattern: normalizeKnownSiteDomain(
           config.domainPattern,
         ),

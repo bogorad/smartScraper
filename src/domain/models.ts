@@ -1,5 +1,15 @@
 import type { MethodValue, OutputTypeValue, ErrorTypeValue, CaptchaTypeValue, ProxyModeValue } from '../constants.js';
 
+export type SiteConfigMethod = 'curl' | 'chrome';
+export type SiteConfigCaptcha =
+  | 'none'
+  | 'datadome'
+  | 'recaptcha'
+  | 'turnstile'
+  | 'hcaptcha'
+  | 'unsupported';
+export type SiteConfigProxy = 'none' | 'default' | 'datadome';
+
 export interface SiteConfig {
   domainPattern: string;
   xpathMainContent: string;
@@ -9,6 +19,9 @@ export interface SiteConfig {
   siteSpecificHeaders?: Record<string, string>;
   siteCleanupClasses?: string[];
   userAgent?: string;
+  method?: SiteConfigMethod;
+  captcha?: SiteConfigCaptcha;
+  proxy?: SiteConfigProxy;
   needsProxy?: ProxyModeValue;
 }
 

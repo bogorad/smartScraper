@@ -150,6 +150,76 @@ describe("FsKnownSitesAdapter", () => {
     });
   });
 
+  it("persists strategy fields for method, captcha, and proxy", async () => {
+    const { FsKnownSitesAdapter } =
+      await import("./fs-known-sites.js");
+    const adapter = new FsKnownSitesAdapter();
+
+    await adapter.saveConfig({
+      ...siteConfig("example.com", "//article"),
+      method: "chrome",
+      captcha: "datadome",
+      proxy: "datadome",
+    });
+
+    await expect(
+      adapter.getConfig("example.com"),
+    ).resolves.toMatchObject({
+      domainPattern: "example.com",
+      method: "chrome",
+      captcha: "datadome",
+      proxy: "datadome",
+      needsProxy: "datadome",
+    });
+
+    const sites = parse(
+      await fs.readFile(
+        path.join(testState.dataDir, "sites.jsonc"),
+        "utf-8",
+      ),
+    ) as unknown as SiteConfig[];
+    expect(sites[0]).toMatchObject({
+      method: "chrome",
+      captcha: "datadome",
+      proxy: "datadome",
+      needsProxy: "datadome",
+    });
+  });
+
+  it("loads legacy strategy fields without requiring new fields", async () => {
+    const sitesFile = path.join(
+      testState.dataDir,
+      "sites.jsonc",
+    );
+    await fs.mkdir(testState.dataDir, { recursive: true });
+    await fs.writeFile(
+      sitesFile,
+      JSON.stringify([
+        {
+          domainPattern: "legacy.example.com",
+          xpathMainContent: "//article",
+          failureCountSinceLastSuccess: 0,
+          method: "puppeteer_stealth",
+          captcha: "generic",
+          needsProxy: "datadome",
+        },
+      ]),
+    );
+
+    const { FsKnownSitesAdapter } =
+      await import("./fs-known-sites.js");
+    const adapter = new FsKnownSitesAdapter();
+
+    await expect(
+      adapter.getConfig("legacy.example.com"),
+    ).resolves.toMatchObject({
+      method: "chrome",
+      captcha: "unsupported",
+      proxy: "datadome",
+      needsProxy: "datadome",
+    });
+  });
+
   it("uses root domain configs for subdomains", async () => {
     const { FsKnownSitesAdapter } =
       await import("./fs-known-sites.js");
