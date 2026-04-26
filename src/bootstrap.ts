@@ -1,7 +1,6 @@
 import fs from "fs";
 
 import { knownSitesAdapter } from "./adapters/fs-known-sites.js";
-import { ObscuraSimpleFetchAdapter } from "./adapters/obscura-simple-fetch.js";
 import { OpenRouterLlmAdapter } from "./adapters/openrouter-llm.js";
 import { PuppeteerBrowserAdapter } from "./adapters/puppeteer-browser.js";
 import { TwoCaptchaAdapter } from "./adapters/twocaptcha.js";
@@ -35,7 +34,6 @@ export function createRuntimeDependencies(): RuntimeDependencies {
     new OpenRouterLlmAdapter(),
     new TwoCaptchaAdapter(),
     knownSitesAdapter,
-    new ObscuraSimpleFetchAdapter(),
   );
 
   return { browserAdapter };

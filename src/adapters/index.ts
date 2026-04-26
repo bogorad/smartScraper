@@ -1,5 +1,4 @@
 export { PuppeteerBrowserAdapter } from "./puppeteer-browser.js";
-export { ObscuraSimpleFetchAdapter } from "./obscura-simple-fetch.js";
 export { OpenRouterLlmAdapter } from "./openrouter-llm.js";
 export { TwoCaptchaAdapter } from "./twocaptcha.js";
 export {
