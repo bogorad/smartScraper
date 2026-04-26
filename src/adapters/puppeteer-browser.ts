@@ -4,8 +4,18 @@ import os from 'os';
 import path from 'path';
 import type { BrowserPort } from '../ports/browser.js';
 import type { ElementDetails, LoadPageOptions } from '../domain/models.js';
-import { CAPTCHA_TYPES, DEFAULTS, type CaptchaTypeValue } from '../constants.js';
-import { getExecutablePath, getExtensionPaths, getProxyServer } from '../config.js';
+import { CAPTCHA_TYPES, DEFAULTS } from '../constants.js';
+import {
+  getBrowserConsoleCapture,
+  getBrowserDumpio,
+  getBrowserExtensionContentMaxWaitMs,
+  getBrowserExtensionContentMinLength,
+  getBrowserExtensionInitWaitMs,
+  getBrowserNonExtensionPostNavWaitMs,
+  getExecutablePath,
+  getExtensionPaths,
+  getProxyServer
+} from '../config.js';
 import { logger } from '../utils/logger.js';
 
 interface PageSession {
@@ -81,7 +91,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
         headless: true,
         userDataDir,
         args: this.buildLaunchArgs(options?.proxy),
-        dumpio: true,
+        dumpio: getBrowserDumpio(),
         timeout: options?.timeout || DEFAULTS.TIMEOUT_MS
       });
 
@@ -93,13 +103,15 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
         logger.debug('Proxy authentication set', { username: proxyAuth.username }, 'BROWSER');
       }
       
-      page.on('console', msg => {
-        const text = msg.text();
-        // Ignore 404 errors from the page being scraped
-        if (!text.includes('404') && !text.includes('Failed to load resource')) {
-          logger.debug(`[BROWSER] ${text}`);
-        }
-      });
+      if (getBrowserConsoleCapture()) {
+        page.on('console', msg => {
+          const text = msg.text();
+          // Ignore 404 errors from the page being scraped
+          if (!text.includes('404') && !text.includes('Failed to load resource')) {
+            logger.debug(`[BROWSER] ${text}`);
+          }
+        });
+      }
       await page.setUserAgent(options?.userAgentString || DEFAULTS.USER_AGENT);
       if (options?.headers && Object.keys(options.headers).length > 0) {
         await page.setExtraHTTPHeaders(options.headers);
@@ -107,7 +119,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       await page.setViewport({ width: DEFAULTS.VIEWPORT_WIDTH, height: DEFAULTS.VIEWPORT_HEIGHT });
 
       if (hasExtensions) {
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, getBrowserExtensionInitWaitMs()));
         
         // Verify extensions loaded by checking browser targets
         const targets = await browser.targets();
@@ -133,8 +145,8 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       // Wait for extension content injection (e.g., bypass-paywalls fetching from archive.is)
       // Poll with exponential backoff for substantial content appearing
       if (hasExtensions) {
-        const maxWaitMs = 15000;
-        const minContentLength = 1000;
+        const maxWaitMs = getBrowserExtensionContentMaxWaitMs();
+        const minContentLength = getBrowserExtensionContentMinLength();
         let waited = 0;
         let interval = 200; // Start at 200ms, grow exponentially
         const maxInterval = 2000;
@@ -177,7 +189,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
         }
       } else {
         // Original wait time for non-extension pages
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, getBrowserNonExtensionPostNavWaitMs()));
       }
 
       const pageId = `page-${++this.pageCounter}`;

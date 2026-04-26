@@ -20,8 +20,17 @@ const mocks = vi.hoisted(() => {
     close: vi.fn().mockResolvedValue(undefined)
   };
   const launch = vi.fn().mockResolvedValue(browser);
+  const config = {
+    browserConsoleCapture: false,
+    browserDumpio: false,
+    browserExtensionContentMaxWaitMs: 15000,
+    browserExtensionContentMinLength: 1000,
+    browserExtensionInitWaitMs: 2000,
+    browserNonExtensionPostNavWaitMs: 3000,
+    extensionPaths: [] as string[]
+  };
 
-  return { browser, launch, page };
+  return { browser, config, launch, page };
 });
 
 vi.mock('puppeteer-core', () => ({
@@ -31,8 +40,14 @@ vi.mock('puppeteer-core', () => ({
 }));
 
 vi.mock('../config.js', () => ({
+  getBrowserConsoleCapture: () => mocks.config.browserConsoleCapture,
+  getBrowserDumpio: () => mocks.config.browserDumpio,
+  getBrowserExtensionContentMaxWaitMs: () => mocks.config.browserExtensionContentMaxWaitMs,
+  getBrowserExtensionContentMinLength: () => mocks.config.browserExtensionContentMinLength,
+  getBrowserExtensionInitWaitMs: () => mocks.config.browserExtensionInitWaitMs,
+  getBrowserNonExtensionPostNavWaitMs: () => mocks.config.browserNonExtensionPostNavWaitMs,
   getExecutablePath: () => '/usr/bin/chromium',
-  getExtensionPaths: () => [],
+  getExtensionPaths: () => mocks.config.extensionPaths,
   getProxyServer: () => undefined
 }));
 
@@ -49,6 +64,14 @@ describe('PuppeteerBrowserAdapter', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.config.browserConsoleCapture = false;
+    mocks.config.browserDumpio = false;
+    mocks.config.browserExtensionContentMaxWaitMs = 15000;
+    mocks.config.browserExtensionContentMinLength = 1000;
+    mocks.config.browserExtensionInitWaitMs = 2000;
+    mocks.config.browserNonExtensionPostNavWaitMs = 3000;
+    mocks.config.extensionPaths = [];
+    mocks.page.evaluate.mockResolvedValue(undefined);
     setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
       callback: (...args: unknown[]) => void,
       _timeout?: number,
@@ -86,5 +109,57 @@ describe('PuppeteerBrowserAdapter', () => {
     expect(mocks.page.setExtraHTTPHeaders.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.page.goto.mock.invocationCallOrder[0]
     );
+  });
+
+  it('keeps noisy browser output disabled by default', async () => {
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    await adapter.loadPage('https://example.com/article');
+
+    expect(mocks.launch).toHaveBeenCalledWith(expect.objectContaining({ dumpio: false }));
+    expect(mocks.page.on).not.toHaveBeenCalledWith('console', expect.any(Function));
+  });
+
+  it('enables dumpio and page console capture when configured', async () => {
+    mocks.config.browserConsoleCapture = true;
+    mocks.config.browserDumpio = true;
+
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    await adapter.loadPage('https://example.com/article');
+
+    expect(mocks.launch).toHaveBeenCalledWith(expect.objectContaining({ dumpio: true }));
+    expect(mocks.page.on).toHaveBeenCalledWith('console', expect.any(Function));
+  });
+
+  it('uses configured non-extension post-navigation wait', async () => {
+    mocks.config.browserNonExtensionPostNavWaitMs = 4500;
+
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    await adapter.loadPage('https://example.com/article');
+
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 4500);
+  });
+
+  it('uses configured extension initialization and content waits', async () => {
+    mocks.config.extensionPaths = ['/tmp/ext'];
+    mocks.config.browserExtensionInitWaitMs = 2500;
+    mocks.config.browserExtensionContentMaxWaitMs = 16000;
+    mocks.config.browserExtensionContentMinLength = 1200;
+    mocks.page.evaluate
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(1300);
+
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    await adapter.loadPage('https://example.com/article');
+
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2500);
+    expect(setTimeoutSpy).not.toHaveBeenCalledWith(expect.any(Function), 3000);
   });
 });

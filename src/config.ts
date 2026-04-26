@@ -45,6 +45,24 @@ const ConfigSchema = z.object({
   executablePath: z.string().default(DEFAULTS.EXECUTABLE_PATH),
   extensionPaths: z.string().default(DEFAULTS.EXTENSION_PATHS),
   proxyServer: z.string().default(DEFAULTS.PROXY_SERVER),
+  browserDumpio: booleanFromEnv.default(DEFAULTS.BROWSER_DUMPIO),
+  browserConsoleCapture: booleanFromEnv.default(DEFAULTS.BROWSER_CONSOLE_CAPTURE),
+  browserExtensionInitWaitMs: z.coerce
+    .number()
+    .min(DEFAULTS.BROWSER_EXTENSION_INIT_WAIT_MS)
+    .default(DEFAULTS.BROWSER_EXTENSION_INIT_WAIT_MS),
+  browserExtensionContentMaxWaitMs: z.coerce
+    .number()
+    .min(DEFAULTS.BROWSER_EXTENSION_CONTENT_MAX_WAIT_MS)
+    .default(DEFAULTS.BROWSER_EXTENSION_CONTENT_MAX_WAIT_MS),
+  browserExtensionContentMinLength: z.coerce
+    .number()
+    .min(DEFAULTS.BROWSER_EXTENSION_CONTENT_MIN_LENGTH)
+    .default(DEFAULTS.BROWSER_EXTENSION_CONTENT_MIN_LENGTH),
+  browserNonExtensionPostNavWaitMs: z.coerce
+    .number()
+    .min(DEFAULTS.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS)
+    .default(DEFAULTS.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS),
 
   // CAPTCHA solver configuration
   twocaptchaApiKey: z.string().default(''),
@@ -166,6 +184,12 @@ function mapEnvVars(): Record<string, string | undefined> {
     extensionPaths: process.env.EXTENSION_PATHS,
     // Support both HTTP_PROXY and PROXY_SERVER
     proxyServer: process.env.PROXY_SERVER || process.env.HTTP_PROXY,
+    browserDumpio: process.env.BROWSER_DUMPIO,
+    browserConsoleCapture: process.env.BROWSER_CONSOLE_CAPTURE,
+    browserExtensionInitWaitMs: process.env.BROWSER_EXTENSION_INIT_WAIT_MS,
+    browserExtensionContentMaxWaitMs: process.env.BROWSER_EXTENSION_CONTENT_MAX_WAIT_MS,
+    browserExtensionContentMinLength: process.env.BROWSER_EXTENSION_CONTENT_MIN_LENGTH,
+    browserNonExtensionPostNavWaitMs: process.env.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS,
 
     // CAPTCHA
     twocaptchaApiKey: process.env.TWOCAPTCHA_API_KEY || process.env.TWOCAPTCHA || secrets.twocaptcha_api_key,
@@ -309,6 +333,30 @@ export function getExtensionPaths(): string[] {
 
 export function getProxyServer(): string {
   return getConfig().proxyServer;
+}
+
+export function getBrowserDumpio(): boolean {
+  return getConfig().browserDumpio;
+}
+
+export function getBrowserConsoleCapture(): boolean {
+  return getConfig().browserConsoleCapture;
+}
+
+export function getBrowserExtensionInitWaitMs(): number {
+  return getConfig().browserExtensionInitWaitMs;
+}
+
+export function getBrowserExtensionContentMaxWaitMs(): number {
+  return getConfig().browserExtensionContentMaxWaitMs;
+}
+
+export function getBrowserExtensionContentMinLength(): number {
+  return getConfig().browserExtensionContentMinLength;
+}
+
+export function getBrowserNonExtensionPostNavWaitMs(): number {
+  return getConfig().browserNonExtensionPostNavWaitMs;
 }
 
 export function getLlmModel(): string {

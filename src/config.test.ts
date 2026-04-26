@@ -22,6 +22,12 @@ const envKeys = [
   'EXECUTABLE_PATH',
   'EXTENSION_PATHS',
   'PROXY_SERVER',
+  'BROWSER_DUMPIO',
+  'BROWSER_CONSOLE_CAPTURE',
+  'BROWSER_EXTENSION_INIT_WAIT_MS',
+  'BROWSER_EXTENSION_CONTENT_MAX_WAIT_MS',
+  'BROWSER_EXTENSION_CONTENT_MIN_LENGTH',
+  'BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS',
   'CAPTCHA_DEFAULT_TIMEOUT',
   'CAPTCHA_POLLING_INTERVAL',
   'FLARESOLVERR_URL',
@@ -75,6 +81,12 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getLlmModel()).toBe(DEFAULTS.LLM_MODEL);
     expect(config.getLlmTemperature()).toBe(DEFAULTS.LLM_TEMPERATURE);
     expect(config.getExecutablePath()).toBe(DEFAULTS.EXECUTABLE_PATH);
+    expect(config.getBrowserDumpio()).toBe(DEFAULTS.BROWSER_DUMPIO);
+    expect(config.getBrowserConsoleCapture()).toBe(DEFAULTS.BROWSER_CONSOLE_CAPTURE);
+    expect(config.getBrowserExtensionInitWaitMs()).toBe(DEFAULTS.BROWSER_EXTENSION_INIT_WAIT_MS);
+    expect(config.getBrowserExtensionContentMaxWaitMs()).toBe(DEFAULTS.BROWSER_EXTENSION_CONTENT_MAX_WAIT_MS);
+    expect(config.getBrowserExtensionContentMinLength()).toBe(DEFAULTS.BROWSER_EXTENSION_CONTENT_MIN_LENGTH);
+    expect(config.getBrowserNonExtensionPostNavWaitMs()).toBe(DEFAULTS.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS);
     expect(config.getCaptchaDefaultTimeout()).toBe(DEFAULTS.CAPTCHA_TIMEOUT);
     expect(config.getCaptchaPollingInterval()).toBe(DEFAULTS.CAPTCHA_POLLING_INTERVAL);
     expect(config.getFlaresolverrTimeout()).toBe(DEFAULTS.FLARESOLVERR_TIMEOUT);
@@ -134,5 +146,33 @@ describe('config VictoriaLogs OTLP settings', () => {
       'VL-Ignore-Fields': 'debug',
       'X-Scope': 'prod'
     });
+  });
+
+  it('parses browser output and wait settings from env', async () => {
+    process.env.BROWSER_DUMPIO = '1';
+    process.env.BROWSER_CONSOLE_CAPTURE = 'true';
+    process.env.BROWSER_EXTENSION_INIT_WAIT_MS = '2500';
+    process.env.BROWSER_EXTENSION_CONTENT_MAX_WAIT_MS = '16000';
+    process.env.BROWSER_EXTENSION_CONTENT_MIN_LENGTH = '1200';
+    process.env.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS = '3500';
+
+    const config = await import('./config.js');
+
+    config.initConfig();
+
+    expect(config.getBrowserDumpio()).toBe(true);
+    expect(config.getBrowserConsoleCapture()).toBe(true);
+    expect(config.getBrowserExtensionInitWaitMs()).toBe(2500);
+    expect(config.getBrowserExtensionContentMaxWaitMs()).toBe(16000);
+    expect(config.getBrowserExtensionContentMinLength()).toBe(1200);
+    expect(config.getBrowserNonExtensionPostNavWaitMs()).toBe(3500);
+  });
+
+  it('rejects browser waits below ADR-017 safeguards', async () => {
+    process.env.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS = '2999';
+
+    const config = await import('./config.js');
+
+    expect(() => config.initConfig()).toThrow(/browserNonExtensionPostNavWaitMs/);
   });
 });
