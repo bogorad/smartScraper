@@ -65,13 +65,15 @@ just test-urls-failed  # Rerun only URLs that failed in the previous URL test ru
 
 ### Secret Handling
 
-All justfile recipes use the standard pattern:
+Justfile recipes that need secrets run through the standard wrapper:
 
 ```bash
-eval "$(sops decrypt secrets.yaml --output-type=json | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
+scripts/with-secrets.sh -- <command> [args...]
 ```
 
-This exports secrets as uppercase env vars (e.g., `$SMART_SCRAPER`).
+This exports secrets as uppercase env vars (e.g., `$SMART_SCRAPER`) before
+executing the command. The command scripts read environment variables only; they
+do not decrypt `secrets.yaml` themselves.
 
 **CRITICAL**: Secrets are exported into the shell environment for that recipe only - never logged, never committed.
 

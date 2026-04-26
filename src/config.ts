@@ -114,6 +114,10 @@ const SECRET_KEYS = [
   { yamlKey: 'victorialogs_otlp_auth_header_value', configKey: 'victorialogs_otlp_auth_header_value' }
 ] as const;
 
+function isEncryptedSopsValue(value: unknown): boolean {
+  return typeof value === 'string' && value.startsWith('ENC[');
+}
+
 // Load secrets from YAML if available
 function loadSecretsFromYaml(): Record<string, string> {
   const secretsPath = 'secrets.yaml';
@@ -130,7 +134,7 @@ function loadSecretsFromYaml(): Record<string, string> {
 
     for (const { yamlKey, configKey } of SECRET_KEYS) {
       const value = data?.[yamlKey] ?? nestedApiKeys?.[yamlKey];
-      if (value !== undefined && value !== null) {
+      if (value !== undefined && value !== null && !isEncryptedSopsValue(value)) {
         apiKeys[configKey] = String(value);
       }
     }

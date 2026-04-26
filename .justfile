@@ -8,7 +8,7 @@ version:
 
 # Development
 dev:
-    scripts/dev.sh
+    scripts/with-secrets.sh -- scripts/dev.sh
 
 build:
     npm run build
@@ -61,11 +61,11 @@ test-full:
 
 # Run e2e tests against URLs from testing/urls_for_testing.txt
 test-urls:
-    scripts/test-urls.sh
+    scripts/with-secrets.sh -- scripts/test-urls.sh
 
 # Rerun only URLs that failed during the previous URL-based E2E run
 test-urls-failed:
-    scripts/test-urls.sh --failed
+    scripts/with-secrets.sh -- scripts/test-urls.sh --failed
 
 # Run concurrent scrape test (2 URLs in parallel)
 test-concurrent:

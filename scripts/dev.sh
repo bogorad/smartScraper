@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
 #
-# Start development server with secrets loaded
+# Start development server. Secrets must already be present in the environment.
 #
 
-if ! sops decrypt secrets.yaml --output-type=json > /dev/null 2>&1; then
-    echo "Error: Failed to decrypt secrets.yaml"
-    exit 1
-fi
-
-eval "$(sops decrypt secrets.yaml --output-type=json | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
-
-LOG_LEVEL=DEBUG NODE_ENV=development npm run dev
+LOG_LEVEL="${LOG_LEVEL:-DEBUG}" NODE_ENV="${NODE_ENV:-development}" npm run dev

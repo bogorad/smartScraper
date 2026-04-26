@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# Run e2e tests against URLs from testing/urls_for_testing.txt
+# Run e2e tests against URLs from testing/urls_for_testing.txt.
+# Required secrets must already be present in the environment.
 #
 
 # Configuration: override with environment variables
-PROXY="${SMART_SCRAPER_PROXY:-socks5://r5s.bruc:1080}"
+PROXY="${SMART_SCRAPER_PROXY-}"
 SERVER="${SMART_SCRAPER_SERVER:-http://localhost:5555}"
 TIMEOUT="${SMART_SCRAPER_TIMEOUT:-120}"
 DEFAULT_URLS_FILE="testing/urls_for_testing.txt"
@@ -19,7 +20,7 @@ Options:
 
 Environment:
   SMART_SCRAPER_SERVER            Server URL (default: http://localhost:5555)
-  SMART_SCRAPER_PROXY             curl proxy URL (default: socks5://r5s.bruc:1080)
+  SMART_SCRAPER_PROXY             optional curl proxy URL for the API request
   SMART_SCRAPER_TIMEOUT           Per-URL timeout in seconds (default: 120)
   SMART_SCRAPER_FAILED_URLS_FILE  Failed URL artifact (default: testing/failed_urls.txt)
 EOF
@@ -44,19 +45,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Decrypt secrets once and reuse
-SECRETS=$(sops decrypt secrets.yaml --output-type=json 2>/dev/null)
-if [[ $? -ne 0 ]]; then
-    echo "Error: Failed to decrypt secrets.yaml"
+if [[ -z "${SMART_SCRAPER:-}" ]]; then
+    echo "Error: SMART_SCRAPER env var is required"
+    echo "Run with: scripts/with-secrets.sh -- scripts/test-urls.sh"
     exit 1
 fi
-
-if [[ -z "$SECRETS" || "$SECRETS" == "{}" ]]; then
-    echo "Error: secrets.yaml decrypted but is empty"
-    exit 1
-fi
-
-eval "$(echo "$SECRETS" | jq -r 'to_entries | .[] | "export " + (.key | ascii_upcase) + "=" + (.value | @sh)')"
 
 if [[ "$RUN_FAILED_ONLY" == "true" ]]; then
     URLS_FILE="$FAILED_URLS_FILE"
@@ -86,9 +79,9 @@ if [[ ${#URLS[@]} -eq 0 ]]; then
 fi
 
 if [[ "$RUN_FAILED_ONLY" == "true" ]]; then
-    echo "Rerunning ${#URLS[@]} failed URLs from $FAILED_URLS_FILE (proxy: $PROXY, timeout: ${TIMEOUT}s)..."
+    echo "Rerunning ${#URLS[@]} failed URLs from $FAILED_URLS_FILE (curl proxy: ${PROXY:-none}, timeout: ${TIMEOUT}s)..."
 else
-    echo "Testing ${#URLS[@]} URLs (proxy: $PROXY, timeout: ${TIMEOUT}s)..."
+    echo "Testing ${#URLS[@]} URLs (curl proxy: ${PROXY:-none}, timeout: ${TIMEOUT}s)..."
 fi
 echo "================================================"
 
@@ -96,11 +89,16 @@ PASSED=0
 FAILED=0
 declare -a FAILURES=()
 declare -a FAILED_URLS=()
+declare -a CURL_PROXY_ARGS=()
+
+if [[ -n "$PROXY" ]]; then
+    CURL_PROXY_ARGS=(--proxy "$PROXY")
+fi
 
 for url in "${URLS[@]}"; do
     printf "Testing: %s ... " "$url"
     
-    RESPONSE=$(curl -sf --proxy "$PROXY" -X POST "$SERVER/api/scrape" \
+    RESPONSE=$(curl -sf "${CURL_PROXY_ARGS[@]}" -X POST "$SERVER/api/scrape" \
         -H "Authorization: Bearer $SMART_SCRAPER" \
         -H "Content-Type: application/json" \
         -d "{\"url\": \"$url\", \"outputType\": \"metadata_only\"}" \

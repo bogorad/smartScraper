@@ -149,6 +149,23 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getProxyServer()).toBe('http://explicit.example:8080');
   });
 
+  it('does not load raw SOPS encrypted values from secrets.yaml', async () => {
+    fs.writeFileSync(
+      'secrets.yaml',
+      [
+        'default_socks5_proxy: ENC[AES256_GCM,data:ciphertext,iv:iv,tag:tag,type:str]',
+        'datadome_proxy_host: ENC[AES256_GCM,data:ciphertext,iv:iv,tag:tag,type:str]'
+      ].join('\n')
+    );
+
+    const config = await import('./config.js');
+
+    config.initConfig();
+
+    expect(config.getProxyServer()).toBe('');
+    expect(config.getDatadomeProxyHost()).toBe('');
+  });
+
   it('parses VictoriaLogs headers from JSON', async () => {
     process.env.VICTORIALOGS_OTLP_HEADERS = '{"VL-Ignore-Fields":"debug","X-Scope":"prod"}';
 
