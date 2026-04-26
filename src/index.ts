@@ -61,6 +61,7 @@ async function shutdown(signal: string) {
       logger.error('[SHUTDOWN] Error closing browsers:', error);
     }
   }
+  await logger.shutdown();
   process.exit(0);
 }
 
@@ -140,7 +141,8 @@ async function main() {
   });
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   logger.error('[FATAL] Startup failed:', error);
+  await logger.shutdown();
   process.exit(1);
 });
