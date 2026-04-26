@@ -260,6 +260,7 @@ func (w *Worker) URL() string {
 // Env returns environment variables for test processes to use this worker.
 func (w *Worker) Env() []string {
 	env := []string{
+		"SMARTSCRAPER_TEST_ORCHESTRATOR=1",
 		fmt.Sprintf("TEST_BASE_URL=http://127.0.0.1:%d", w.Port),
 		fmt.Sprintf("API_TOKEN=test-token-%d", w.ID),
 	}
