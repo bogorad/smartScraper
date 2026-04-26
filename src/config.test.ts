@@ -31,8 +31,6 @@ const envKeys = [
   'BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS',
   'CAPTCHA_DEFAULT_TIMEOUT',
   'CAPTCHA_POLLING_INTERVAL',
-  'FLARESOLVERR_URL',
-  'FLARESOLVERR_TIMEOUT',
   'DATADOME_PROXY_HOST',
   'DATADOME_PROXY_LOGIN',
   'DATADOME_PROXY_PASSWORD',
@@ -90,7 +88,6 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getBrowserNonExtensionPostNavWaitMs()).toBe(DEFAULTS.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS);
     expect(config.getCaptchaDefaultTimeout()).toBe(DEFAULTS.CAPTCHA_TIMEOUT);
     expect(config.getCaptchaPollingInterval()).toBe(DEFAULTS.CAPTCHA_POLLING_INTERVAL);
-    expect(config.getFlaresolverrTimeout()).toBe(DEFAULTS.FLARESOLVERR_TIMEOUT);
     expect(config.getLogLevel()).toBe(DEFAULTS.LOG_LEVEL);
     expect(config.getDomStructureMaxTextLength()).toBe(DEFAULTS.DOM_STRUCTURE_MAX_TEXT_LENGTH);
     expect(config.getDomStructureMinTextSizeToAnnotate()).toBe(DEFAULTS.DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE);

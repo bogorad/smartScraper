@@ -10,12 +10,10 @@ export interface SiteConfig {
   siteCleanupClasses?: string[];
   userAgent?: string;
   needsProxy?: ProxyModeValue;
-  needsFlaresolverr?: boolean;
 }
 
 export interface ScrapeOptions {
   outputType?: OutputTypeValue;
-  methodHint?: MethodValue;
   proxyDetails?: { server: string };
   userAgentString?: string;
   requestHeaders?: Record<string, string>;

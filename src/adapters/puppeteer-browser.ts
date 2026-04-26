@@ -28,8 +28,6 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
   private sessions = new Map<string, PageSession>();
   private pageCounter = 0;
 
-  async open(): Promise<void> {}
-
   async close(): Promise<void> {
     for (const [pageId] of this.sessions) {
       await this.closePage(pageId);

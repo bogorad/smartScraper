@@ -63,7 +63,6 @@ describe("CoreScraperEngine", () => {
     configState.proxyServer = "";
 
     mockBrowser = {
-      open: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
       closePage: vi.fn().mockResolvedValue(undefined),
       loadPage: vi
@@ -899,7 +898,6 @@ describe("CoreScraperEngine", () => {
 
     it("should throw error when getting default engine before initialization", () => {
       expect(() => {
-        const MockEngine = vi.fn();
         vi.doMock("./engine.js", () => ({
           getDefaultEngine: () => {
             throw new Error(

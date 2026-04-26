@@ -5,7 +5,6 @@ import type {
 } from "../ports/llm.js";
 import type { LlmXPathSuggestion } from "../domain/models.js";
 import { parseXPathResponse } from "../utils/xpath-parser.js";
-import { DEFAULTS } from "../constants.js";
 import {
   getOpenrouterApiKey,
   getLlmModel,

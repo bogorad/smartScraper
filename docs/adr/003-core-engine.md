@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2025-12-05
-- Updated: 2026-02-05
+- Updated: 2026-04-26
 
 ## Context
 
@@ -26,9 +26,13 @@ A single orchestrator class (`src/core/engine.ts`) that:
 │                   CoreScraperEngine                      │
 ├─────────────────────────────────────────────────────────┤
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
-│  │ Browser  │  │   LLM    │  │ CAPTCHA  │  │ Known   │ │
-│  │   Port   │  │   Port   │  │   Port   │  │ Sites   │ │
+│  │ Browser  │  │ Simple   │  │   LLM    │  │ CAPTCHA │ │
+│  │   Port   │  │ Fetch    │  │   Port   │  │   Port  │ │
 │  └──────────┘  └──────────┘  └──────────┘  └─────────┘ │
+│  ┌──────────┐                                           │
+│  │ Known    │                                           │
+│  │ Sites    │                                           │
+│  └──────────┘                                           │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -36,13 +40,14 @@ A single orchestrator class (`src/core/engine.ts`) that:
 
 1. **Validation** - URL validation, early exit on invalid input
 2. **Config Lookup** - Check KnownSitesPort for existing domain config
-3. **Fetch** - Launch browser, load page via BrowserPort
-4. **CAPTCHA Check** - Detect and optionally solve CAPTCHAs
-5. **Discovery** - If no XPath known, use LLM to suggest candidates
-6. **Scoring** - Rank XPath candidates via ContentScoringEngine
-7. **Extraction** - Extract content using best XPath
-8. **Cleanup** - Close browser, delete temp profile
-9. **Persistence** - Save successful config to KnownSitesPort
+3. **Simple Fetch** - For eligible stored XPath requests, try the Obscura-backed SimpleFetchPort without browser extensions or proxies
+4. **Browser Fetch** - Launch browser, load page via BrowserPort when simple fetch is unavailable or fails
+5. **CAPTCHA Check** - Detect and optionally solve CAPTCHAs
+6. **Discovery** - If no XPath known, use LLM to suggest candidates
+7. **Scoring** - Rank XPath candidates via ContentScoringEngine
+8. **Extraction** - Extract content using best XPath or embedded article data
+9. **Cleanup** - Close browser, delete temp profile
+10. **Persistence** - Save successful config to KnownSitesPort and record scrape outcome events
 
 ### Port Dependencies
 
@@ -54,7 +59,8 @@ class CoreScraperEngine {
     private browserPort: BrowserPort,
     private llmPort: LlmPort,
     private captchaPort: CaptchaPort,
-    private knownSitesPort: KnownSitesPort
+    private knownSitesPort: KnownSitesPort,
+    private simpleFetchPort?: SimpleFetchPort
   ) {}
 }
 ```

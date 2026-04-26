@@ -57,9 +57,9 @@ For detailed architectural decisions, please refer to the [ADR Directory](docs/a
     cd smart-scraper
     ```
 
-2.  **Install dependencies:**
+2.  **Install dependencies through the Nix dev shell:**
     ```bash
-    npm install
+    nix develop --command just install
     ```
 
 3.  **Configure the application:**
@@ -69,12 +69,13 @@ For detailed architectural decisions, please refer to the [ADR Directory](docs/a
 
 **Development:**
 ```bash
-npm run dev
+nix develop --command just dev
 ```
 
 **Production:**
 ```bash
-npm start
+nix develop --command just build
+nix develop --command just start
 ```
 
 The server typically starts on port `5555`.
@@ -94,6 +95,16 @@ curl -X POST http://localhost:5555/api/scrape \
 ```
 
 See [ADR-002](docs/adr/002-public-api.md) for the full API contract.
+
+## Development Commands
+
+Use the Justfile as the command source of truth:
+
+```bash
+nix develop --command just check
+nix develop --command just test
+nix develop --command just build
+```
 
 ## Configuration & Secrets
 

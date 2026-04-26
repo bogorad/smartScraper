@@ -53,7 +53,7 @@ KnownSitesPort.getConfig("nypost.com")
 ### Step 4: Browser Session Setup
 
 ```
-BrowserPort.open()
+BrowserPort.loadPage("https://nypost.com/2025/12/05/some-article-slug/")
 ├── Create temp profile: /tmp/puppeteer-profile-uuid-xxx
 ├── Load plugins from ./plugins/
 │   ├── ad-blocker.js

@@ -5,10 +5,8 @@ const pkg = require('../package.json');
 export const VERSION = pkg.version;
 
 export const METHODS = {
-  CURL: 'curl',
   PUPPETEER_STEALTH: 'puppeteer_stealth',
-  PUPPETEER_CAPTCHA: 'puppeteer_captcha',
-  FLARESOLVERR: 'flaresolverr'
+  OBSCURA_SIMPLE_FETCH: 'obscura_simple_fetch'
 } as const;
 
 export type MethodValue = (typeof METHODS)[keyof typeof METHODS];
@@ -82,8 +80,6 @@ export const DEFAULTS = {
   LLM_X_TITLE: 'SmartScraper',
   CAPTCHA_TIMEOUT: 120,
   CAPTCHA_POLLING_INTERVAL: 5000,
-  FLARESOLVERR_URL: '',
-  FLARESOLVERR_TIMEOUT: 60000,
   LOG_LEVEL: 'INFO',
   SAVE_HTML_ON_SUCCESS_NAV: false,
   VICTORIALOGS_OTLP_ENABLED: false,

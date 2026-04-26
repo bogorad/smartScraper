@@ -1,8 +1,6 @@
 const REMOVE_TAGS = ['script', 'style', 'noscript', 'svg', 'iframe'];
 const REMOVE_CLASSES = ['ad', 'advertisement', 'social-share', 'related-posts', 'sidebar', 'menu', 'nav', 'comment'];
 const MAX_TEXT_LENGTH = 50;
-const MAX_SIBLINGS = 2;
-const MAX_DEPTH = 10;
 const MAX_DOM_LENGTH = 8000;
 const MAX_HTML_SIZE = 1024 * 1024; // 1MB limit to prevent ReDoS
 

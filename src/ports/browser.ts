@@ -8,7 +8,6 @@ export interface CaptchaDetectionResult {
 }
 
 export interface BrowserPort {
-  open(): Promise<void>;
   close(): Promise<void>;
   closePage(pageId: string): Promise<void>;
   loadPage(url: string, options?: LoadPageOptions): Promise<{ pageId: string }>;

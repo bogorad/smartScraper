@@ -100,9 +100,8 @@ SCRAPE_FLOW:
 
 CONSTANTS:
     METHODS:
-        CURL = 'curl'
         PUPPETEER_STEALTH = 'puppeteer_stealth'
-        PUPPETEER_CAPTCHA = 'puppeteer_captcha'
+        OBSCURA_SIMPLE_FETCH = 'obscura_simple_fetch'
     
     OUTPUT_TYPES:
         CONTENT_ONLY = 'content_only'     # Plain text

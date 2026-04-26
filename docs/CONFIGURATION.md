@@ -59,7 +59,7 @@ Set configuration via shell environment or `.env` file:
 export PORT=5555
 export OPENROUTER_API_KEY=sk-...
 export TWOCAPTCHA_API_KEY=xxx
-npm start
+nix develop --command just start
 ```
 
 ### 2. .env File
@@ -69,7 +69,7 @@ Automatically loaded on startup (if it exists):
 ```bash
 cp .env.example .env
 # Edit .env with your values
-npm run dev
+nix develop --command just dev
 ```
 
 ### 3. secrets.yaml File
@@ -224,7 +224,7 @@ OPENROUTER_API_KEY=sk-or-v1-xxx
 TWOCAPTCHA_API_KEY=xxx
 
 # 3. Run
-npm run dev
+nix develop --command just dev
 ```
 
 ### Docker Production
@@ -371,9 +371,9 @@ The config module automatically detects legacy names and uses them as fallback, 
 
 3. **Verify it works:**
    ```bash
-   npm run typecheck
-   npm run build
-   npm start
+   nix develop --command just check
+   nix develop --command just build
+   nix develop --command just start
    ```
 
 ## Troubleshooting Configuration Issues
@@ -435,6 +435,6 @@ smart-scraper/
 
 For configuration issues:
 1. Check `.env.example` for correct variable names
-2. Run `npm run typecheck` to validate TypeScript
+2. Run `nix develop --command just check` to validate TypeScript
 3. Check application logs for validation errors
 4. Verify secrets are properly loaded from `.env` or `secrets.yaml`

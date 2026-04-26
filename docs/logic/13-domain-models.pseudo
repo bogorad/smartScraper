@@ -24,7 +24,6 @@ STRUCT SiteConfig:
 
 STRUCT ScrapeOptions:
     outputType: OutputTypeValue?    # 'content_only' | 'markdown' | etc.
-    methodHint: MethodValue?        # Unused currently
     proxyDetails: {server: string}? # Explicit proxy override
     userAgentString: string?        # Override default UA
     timeoutMs: int?                 # Navigation timeout (default 120000)
@@ -35,7 +34,7 @@ STRUCT ScrapeOptions:
 
 STRUCT ScrapeResult:
     success: boolean
-    method: MethodValue?            # 'puppeteer_stealth'
+    method: MethodValue?            # 'puppeteer_stealth' | 'obscura_simple_fetch'
     xpath: string?                  # XPath used for extraction
     data: string | object?          # Extracted content (format depends on outputType)
     rawHtmlSnapshotPath: string?    # Path to debug HTML file

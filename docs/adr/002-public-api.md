@@ -33,23 +33,26 @@ async function scrapeUrl(
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `outputType` | `OutputTypeValue` | `CONTENT_ONLY` | Output format |
-| `methodHint` | `MethodValue` | - | Suggested method (may be ignored) |
 | `proxyDetails` | `{ server: string }` | - | Override global proxy |
 | `userAgentString` | `string` | - | Override default UA |
 | `timeoutMs` | `number` | - | Soft timeout hint |
 | `debugContextId` | `string` | - | Correlate logs/artifacts |
+| `xpathOverride` | `string` | - | Skip discovery and use this XPath |
+| `debug` | `boolean` | `false` | Enable debug artifacts |
+| `disableDiscovery` | `boolean` | `false` | Skip LLM rediscovery after XPath failure |
 
 ### Constants
 
 ```typescript
 const METHODS = {
-  CURL: 'curl',
   PUPPETEER_STEALTH: 'puppeteer_stealth',
-  PUPPETEER_CAPTCHA: 'puppeteer_captcha'
+  OBSCURA_SIMPLE_FETCH: 'obscura_simple_fetch'
 } as const;
 
 const OUTPUT_TYPES = {
   CONTENT_ONLY: 'content_only',
+  MARKDOWN: 'markdown',
+  CLEANED_HTML: 'cleaned_html',
   FULL_HTML: 'full_html',
   METADATA_ONLY: 'metadata_only'
 } as const;

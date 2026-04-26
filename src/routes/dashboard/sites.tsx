@@ -465,7 +465,6 @@ sitesRouter.delete("/:domain", async (c) => {
 });
 
 sitesRouter.post("/:domain/test", async (c) => {
-  const domain = decodeURIComponent(c.req.param("domain"));
   const body = await c.req.parseBody();
   const testUrl = body.testUrl as string;
 

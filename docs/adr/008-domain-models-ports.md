@@ -15,12 +15,17 @@ The engine must be testable and maintainable. Concrete implementations (Puppetee
 
 ```typescript
 interface BrowserPort {
-  open(): Promise<void>;
   close(): Promise<void>;
+  closePage(pageId: string): Promise<void>;
   loadPage(url: string, options?: LoadPageOptions): Promise<{ pageId: string }>;
-  evaluateXPath(pageId: string, xpath: string): Promise<ElementDetails | null>;
+  evaluateXPath(pageId: string, xpath: string): Promise<string[] | null>;
   getPageHtml(pageId: string): Promise<string>;
-  detectCaptcha(pageId: string): Promise<'none' | 'generic' | 'datadome'>;
+  detectCaptcha(pageId: string): Promise<CaptchaDetectionResult>;
+  getElementDetails(pageId: string, xpath: string): Promise<ElementDetails | null>;
+  getCookies(pageId: string): Promise<string>;
+  setCookies(pageId: string, cookies: string): Promise<void>;
+  reload(pageId: string, timeoutMs?: number): Promise<void>;
+  injectTurnstileToken(pageId: string, token: string): Promise<void>;
 }
 ```
 

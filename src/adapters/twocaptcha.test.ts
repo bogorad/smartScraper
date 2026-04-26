@@ -37,7 +37,7 @@ describe('TwoCaptchaAdapter', () => {
         .mockResolvedValueOnce({ data: { status: 1, request: 'captcha-123' } })
         .mockResolvedValueOnce({ data: { status: 1, request: 'solution-token' } });
 
-      const result = await adapter.solveIfPresent({
+      await adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
         captchaTypeHint: CAPTCHA_TYPES.GENERIC,
@@ -62,7 +62,7 @@ describe('TwoCaptchaAdapter', () => {
         .mockResolvedValueOnce({ data: { taskId: 'task-123' } })
         .mockResolvedValueOnce({ data: { status: 'ready', solution: { cookie: 'datadome=abc' } } });
 
-      const result = await adapter.solveIfPresent({
+      await adapter.solveIfPresent({
         pageId: 'page-123',
         pageUrl: 'https://example.com',
         captchaTypeHint: CAPTCHA_TYPES.DATADOME

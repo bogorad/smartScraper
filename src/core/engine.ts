@@ -877,7 +877,6 @@ export class CoreScraperEngine {
       !options?.proxyDetails &&
       !headers &&
       !options?.debug &&
-      !context.siteConfig?.needsFlaresolverr &&
       context.siteConfig?.needsProxy !==
         PROXY_MODES.DATADOME
     );
