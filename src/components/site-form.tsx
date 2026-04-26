@@ -25,7 +25,7 @@ export const SiteForm: FC<SiteFormProps> = ({ site, isNew }) => {
 
       {isNew && (
         <div class="form-group">
-          <label for="domainPattern">Domain Pattern</label>
+          <label for="domainPattern">Domain</label>
           <input
             type="text"
             id="domainPattern"
@@ -34,7 +34,7 @@ export const SiteForm: FC<SiteFormProps> = ({ site, isNew }) => {
             placeholder="example.com"
             required
           />
-          <div class="form-hint">Enter the domain without www prefix</div>
+          <div class="form-hint">Enter the root domain without www; it also applies to subdomains. Wildcards are not supported.</div>
         </div>
       )}
 

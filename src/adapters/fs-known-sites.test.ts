@@ -10,6 +10,7 @@ import {
   it,
   vi,
 } from "vitest";
+import type { SiteConfig } from "../domain/models.js";
 
 const testState = vi.hoisted(() => ({
   dataDir: "",
@@ -20,6 +21,17 @@ vi.mock("../config.js", () => ({
   getLogLevel: () => "NONE",
   isDebugMode: () => false,
 }));
+
+function siteConfig(
+  domainPattern: string,
+  xpathMainContent = "//main",
+): SiteConfig {
+  return {
+    domainPattern,
+    xpathMainContent,
+    failureCountSinceLastSuccess: 0,
+  };
+}
 
 describe("FsKnownSitesAdapter", () => {
   beforeEach(async () => {
@@ -113,5 +125,75 @@ describe("FsKnownSitesAdapter", () => {
       ),
     ) as unknown;
     expect(Array.isArray(sites)).toBe(true);
+  });
+
+  it("normalizes www domains before saving and lookup", async () => {
+    const { FsKnownSitesAdapter } =
+      await import("./fs-known-sites.js");
+    const adapter = new FsKnownSitesAdapter();
+
+    await adapter.saveConfig(
+      siteConfig("WWW.Example.COM.", "//article"),
+    );
+
+    await expect(
+      adapter.getConfig("example.com"),
+    ).resolves.toMatchObject({
+      domainPattern: "example.com",
+      xpathMainContent: "//article",
+    });
+    await expect(
+      adapter.getConfig("www.example.com"),
+    ).resolves.toMatchObject({
+      domainPattern: "example.com",
+      xpathMainContent: "//article",
+    });
+  });
+
+  it("uses root domain configs for subdomains", async () => {
+    const { FsKnownSitesAdapter } =
+      await import("./fs-known-sites.js");
+    const adapter = new FsKnownSitesAdapter();
+
+    await adapter.saveConfig(siteConfig("example.com"));
+
+    await expect(
+      adapter.getConfig("news.example.com"),
+    ).resolves.toMatchObject({
+      domainPattern: "example.com",
+    });
+  });
+
+  it("prefers an exact subdomain config over a root domain config", async () => {
+    const { FsKnownSitesAdapter } =
+      await import("./fs-known-sites.js");
+    const adapter = new FsKnownSitesAdapter();
+
+    await adapter.saveConfig(siteConfig("example.com", "//main"));
+    await adapter.saveConfig(
+      siteConfig("news.example.com", "//article"),
+    );
+
+    await expect(
+      adapter.getConfig("news.example.com"),
+    ).resolves.toMatchObject({
+      domainPattern: "news.example.com",
+      xpathMainContent: "//article",
+    });
+  });
+
+  it("does not match unrelated domains", async () => {
+    const { FsKnownSitesAdapter } =
+      await import("./fs-known-sites.js");
+    const adapter = new FsKnownSitesAdapter();
+
+    await adapter.saveConfig(siteConfig("example.com"));
+
+    await expect(
+      adapter.getConfig("notexample.com"),
+    ).resolves.toBeUndefined();
+    await expect(
+      adapter.getConfig("example.com.evil.test"),
+    ).resolves.toBeUndefined();
   });
 });

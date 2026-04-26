@@ -17,6 +17,33 @@ function getTempFile(targetFile: string): string {
   return `${targetFile}.${process.pid}-${Date.now()}-${randomUUID()}.tmp`;
 }
 
+function normalizeKnownSiteDomain(domain: string): string {
+  return domain.trim().toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+}
+
+function domainMatchesConfig(domain: string, configDomain: string): boolean {
+  return domain === configDomain || domain.endsWith(`.${configDomain}`);
+}
+
+function findMatchingConfig(
+  configs: SiteConfig[],
+  domain: string,
+): SiteConfig | undefined {
+  const normalizedDomain = normalizeKnownSiteDomain(domain);
+  return configs
+    .filter((config) =>
+      domainMatchesConfig(
+        normalizedDomain,
+        normalizeKnownSiteDomain(config.domainPattern),
+      ),
+    )
+    .sort(
+      (a, b) =>
+        normalizeKnownSiteDomain(b.domainPattern).length -
+        normalizeKnownSiteDomain(a.domainPattern).length,
+    )[0];
+}
+
 async function quarantineCorruptSitesFile(
   sitesFile: string,
   error: unknown,
@@ -91,21 +118,29 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
     domain: string,
   ): Promise<SiteConfig | undefined> {
     const configs = await this.load();
-    return configs.find((c) => c.domainPattern === domain);
+    return findMatchingConfig(configs, domain);
   }
 
   // Writes go through queue for serialization
   async saveConfig(config: SiteConfig): Promise<void> {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
+      const normalizedConfig = {
+        ...config,
+        domainPattern: normalizeKnownSiteDomain(
+          config.domainPattern,
+        ),
+      };
       const index = configs.findIndex(
-        (c) => c.domainPattern === config.domainPattern,
+        (c) =>
+          normalizeKnownSiteDomain(c.domainPattern) ===
+          normalizedConfig.domainPattern,
       );
 
       if (index >= 0) {
-        configs[index] = config;
+        configs[index] = normalizedConfig;
       } else {
-        configs.push(config);
+        configs.push(normalizedConfig);
       }
 
       await this.flush(configs);
@@ -115,9 +150,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   async incrementFailure(domain: string): Promise<void> {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
-      const config = configs.find(
-        (c) => c.domainPattern === domain,
-      );
+      const config = findMatchingConfig(configs, domain);
 
       if (config) {
         config.failureCountSinceLastSuccess++;
@@ -129,9 +162,7 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   async markSuccess(domain: string): Promise<void> {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
-      const config = configs.find(
-        (c) => c.domainPattern === domain,
-      );
+      const config = findMatchingConfig(configs, domain);
 
       if (config) {
         config.failureCountSinceLastSuccess = 0;
@@ -144,8 +175,11 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   async deleteConfig(domain: string): Promise<void> {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
+      const normalizedDomain = normalizeKnownSiteDomain(domain);
       const filtered = configs.filter(
-        (c) => c.domainPattern !== domain,
+        (c) =>
+          normalizeKnownSiteDomain(c.domainPattern) !==
+          normalizedDomain,
       );
       await this.flush(filtered);
     });
