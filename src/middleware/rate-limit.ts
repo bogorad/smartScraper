@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createMiddleware } from "hono/factory";
+import { getTrustProxyHeaders } from "../config.js";
 import { logger } from "../utils/logger.js";
 
 interface RateLimitEntry {
@@ -50,17 +51,20 @@ function getRateLimitIdentifier(headers: {
   authorization?: string;
   xForwardedFor?: string;
   xRealIp?: string;
-}): string {
+}, trustProxyHeaders = false): string {
   const bearerToken = getBearerToken(headers.authorization);
   if (bearerToken) {
     return hashIdentifier("auth", bearerToken);
   }
 
+  const trustedProxyIp = trustProxyHeaders
+    ? getForwardedIp(headers.xForwardedFor) ||
+      headers.xRealIp
+    : undefined;
+
   return hashIdentifier(
     "ip",
-    getForwardedIp(headers.xForwardedFor) ||
-      headers.xRealIp ||
-      "unknown",
+    trustedProxyIp || "unknown",
   );
 }
 
@@ -80,7 +84,7 @@ export const rateLimitMiddleware = (
       authorization: c.req.header("Authorization"),
       xForwardedFor: c.req.header("x-forwarded-for"),
       xRealIp: c.req.header("x-real-ip"),
-    });
+    }, getTrustProxyHeaders());
 
     const now = Date.now();
     const key = `${identifier}:${Math.floor(now / windowMs)}`;

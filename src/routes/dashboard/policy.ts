@@ -1,4 +1,5 @@
 import type { Context, Hono } from "hono";
+import type { Env } from "hono";
 import { except } from "hono/combine";
 import { dashboardAuthMiddleware } from "../../middleware/auth.js";
 import { csrfMiddleware } from "../../middleware/csrf.js";
@@ -13,8 +14,8 @@ function isCsrfExemptDashboardRequest(c: Context): boolean {
   return c.req.path === "/dashboard/events";
 }
 
-export function applyDashboardRoutePolicy(
-  router: Hono,
+export function applyDashboardRoutePolicy<E extends Env>(
+  router: Hono<E>,
 ): void {
   router.use(
     "/*",

@@ -8,17 +8,28 @@ import { dashboardRouter } from "./routes/dashboard/index.js";
 import { loginRouter } from "./routes/dashboard/login.js";
 import { sitesRouter } from "./routes/dashboard/sites.js";
 import { statsRouter } from "./routes/dashboard/stats.js";
+import type { CoreScraperEngine } from "./core/engine.js";
+
+export type AppEngine = Pick<CoreScraperEngine, "scrapeUrl">;
 
 export interface AppFactoryOptions {
   enableRequestLogger?: boolean;
+  engine?: AppEngine;
 }
 
-export function createApp(
-  options: AppFactoryOptions = {},
-): Hono {
-  const app = new Hono();
+export function createApp(options: AppFactoryOptions = {}) {
+  const app = new Hono<{
+    Variables: { scraperEngine?: AppEngine };
+  }>();
   const enableRequestLogger =
     options.enableRequestLogger ?? true;
+
+  if (options.engine) {
+    app.use("*", async (c, next) => {
+      c.set("scraperEngine", options.engine);
+      await next();
+    });
+  }
 
   if (enableRequestLogger) {
     app.use("*", honoLogger());

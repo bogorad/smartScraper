@@ -25,10 +25,12 @@ We use `sops` with `secrets.yaml` to encrypt local development secrets.
 
 ### 3. Cookie Security
 To support both local development (often HTTP) and production (HTTPS) without manual configuration toggles, we implement adaptive cookie security:
-- **Rule**: `secure: true` (HTTPS only) is enforced if `NODE_ENV=production` AND the hostname is NOT a local loopback address (`localhost`, `127.0.0.1`, `0.0.0.0`).
+- **Rule**: `secure: true` (HTTPS only) is enforced when `NODE_ENV=production` and either:
+    - the request host is not a local loopback address (`localhost`, `127.0.0.1`, `0.0.0.0`), or
+    - `TRUST_PROXY_HEADERS=true` and the trusted reverse proxy reports `X-Forwarded-Proto=https`.
 - **Impact**: 
     - Developers can run the "production" build locally on HTTP without auth failing.
-    - Production deployments automatically enforce HTTPS security.
+    - Reverse-proxy deployments make HTTPS cookie behavior explicit by enabling trusted proxy headers only after the proxy strips untrusted forwarded headers.
 
 ### 4. Configuration Loading
 Configuration is centralized in `src/config.ts`. It loads:

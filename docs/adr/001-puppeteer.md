@@ -23,6 +23,7 @@ SmartScraper requires a headless browser for scraping JavaScript-heavy sites and
 |----------|----------|---------|-------------|
 | `EXECUTABLE_PATH` | No | `/usr/lib/chromium/chromium` | Path to Chromium/Chrome binary |
 | `EXTENSION_PATHS` | No | - | Comma-separated paths to unpacked extensions |
+| `BROWSER_UNSAFE_NO_SANDBOX` | No | `false` | Opt in to Chromium no-sandbox flags for trusted isolated containers only |
 | `PROXY_SERVER` | No | - | Proxy server (e.g., `socks5://host:port`) |
 
 ### Session Management
@@ -206,10 +207,6 @@ Complete launch configuration:
 
 ```typescript
 const launchArgs = [
-  // Security/sandbox
-  '--no-sandbox',
-  '--disable-setuid-sandbox',
-  
   // Performance
   '--disable-dev-shm-usage',
   '--disable-accelerated-2d-canvas',
@@ -232,7 +229,12 @@ const launchArgs = [
   '--disable-notifications',
   '--no-first-run',
   '--no-default-browser-check',
-  '--disable-web-security',
+  // Unsafe sandbox disablement (only if BROWSER_UNSAFE_NO_SANDBOX=true)
+  ...(process.env.BROWSER_UNSAFE_NO_SANDBOX === 'true' ? [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-web-security'
+  ] : []),
   
   // Proxy (if configured)
   ...(process.env.PROXY_SERVER ? [`--proxy-server=${proxyHostPort}`] : []),
@@ -358,4 +360,8 @@ if (error.name === 'TimeoutError' ||
 - Extensions must be unpacked (not CRX files)
 - Use `puppeteer-core` with system Chromium for extension support
 - Run with Xvfb on headless servers (`xvfb-run` or `DISPLAY=:99`)
+- Keep Chromium sandboxing enabled for untrusted scraping. Containers must
+  provide Chromium sandbox support, such as user namespaces, or a compatible
+  setuid sandbox. `BROWSER_UNSAFE_NO_SANDBOX=true` is only for trusted,
+  isolated containers where the host cannot support Chromium sandboxing.
 - Validate `EXECUTABLE_PATH` exists on startup

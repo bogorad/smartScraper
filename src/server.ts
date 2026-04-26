@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import type { Hono } from "hono";
+import type { Env } from "hono";
 
 import type { BrowserPort } from "./ports/index.js";
 import { logger } from "./utils/logger.js";
@@ -79,7 +80,10 @@ export function registerProcessHandlers(
   });
 }
 
-export function startServer(app: Hono, port: number): void {
+export function startServer<E extends Env>(
+  app: Hono<E>,
+  port: number,
+): void {
   logger.info(`[SERVER] Starting on port ${port}`);
 
   serve(

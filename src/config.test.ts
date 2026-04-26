@@ -24,12 +24,14 @@ const envKeys = [
   'PROXY_SERVER',
   'DEFAULT_SOCKS5_PROXY',
   'HTTP_PROXY',
+  'TRUST_PROXY_HEADERS',
   'BROWSER_DUMPIO',
   'BROWSER_CONSOLE_CAPTURE',
   'BROWSER_EXTENSION_INIT_WAIT_MS',
   'BROWSER_EXTENSION_CONTENT_MAX_WAIT_MS',
   'BROWSER_EXTENSION_CONTENT_MIN_LENGTH',
   'BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS',
+  'BROWSER_UNSAFE_NO_SANDBOX',
   'CAPTCHA_DEFAULT_TIMEOUT',
   'CAPTCHA_POLLING_INTERVAL',
   'DATADOME_PROXY_HOST',
@@ -81,17 +83,45 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getLlmModel()).toBe(DEFAULTS.LLM_MODEL);
     expect(config.getLlmTemperature()).toBe(DEFAULTS.LLM_TEMPERATURE);
     expect(config.getExecutablePath()).toBe(DEFAULTS.EXECUTABLE_PATH);
+    expect(config.getTrustProxyHeaders()).toBe(false);
     expect(config.getBrowserDumpio()).toBe(DEFAULTS.BROWSER_DUMPIO);
     expect(config.getBrowserConsoleCapture()).toBe(DEFAULTS.BROWSER_CONSOLE_CAPTURE);
     expect(config.getBrowserExtensionInitWaitMs()).toBe(DEFAULTS.BROWSER_EXTENSION_INIT_WAIT_MS);
     expect(config.getBrowserExtensionContentMaxWaitMs()).toBe(DEFAULTS.BROWSER_EXTENSION_CONTENT_MAX_WAIT_MS);
     expect(config.getBrowserExtensionContentMinLength()).toBe(DEFAULTS.BROWSER_EXTENSION_CONTENT_MIN_LENGTH);
     expect(config.getBrowserNonExtensionPostNavWaitMs()).toBe(DEFAULTS.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS);
+    expect(config.getBrowserUnsafeNoSandbox()).toBe(false);
     expect(config.getCaptchaDefaultTimeout()).toBe(DEFAULTS.CAPTCHA_TIMEOUT);
     expect(config.getCaptchaPollingInterval()).toBe(DEFAULTS.CAPTCHA_POLLING_INTERVAL);
     expect(config.getLogLevel()).toBe(DEFAULTS.LOG_LEVEL);
     expect(config.getDomStructureMaxTextLength()).toBe(DEFAULTS.DOM_STRUCTURE_MAX_TEXT_LENGTH);
     expect(config.getDomStructureMinTextSizeToAnnotate()).toBe(DEFAULTS.DOM_STRUCTURE_MIN_TEXT_SIZE_TO_ANNOTATE);
+  });
+
+  it('does not load .env values when importing config', async () => {
+    fs.writeFileSync('.env', 'PORT=4321\nAPI_TOKEN=token-from-dotenv\n');
+
+    const config = await import('./config.js');
+
+    expect(process.env.PORT).toBeUndefined();
+    expect(process.env.API_TOKEN).toBeUndefined();
+
+    config.initConfig();
+
+    expect(config.getPort()).toBe(DEFAULTS.PORT);
+    expect(config.getApiToken()).toBeNull();
+  });
+
+  it('loads .env values only through explicit setup', async () => {
+    fs.writeFileSync('.env', 'PORT=4321\nAPI_TOKEN=token-from-dotenv\n');
+
+    const config = await import('./config.js');
+
+    config.loadDotenvConfig();
+    config.initConfig();
+
+    expect(config.getPort()).toBe(4321);
+    expect(config.getApiToken()).toBe('token-from-dotenv');
   });
 
   it('keeps VictoriaLogs OTLP enabled by default', async () => {
@@ -149,6 +179,18 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getProxyServer()).toBe('http://explicit.example:8080');
   });
 
+  it('requires explicit config before trusting proxy headers', async () => {
+    let config = await import('./config.js');
+    config.initConfig();
+    expect(config.getTrustProxyHeaders()).toBe(false);
+
+    vi.resetModules();
+    process.env.TRUST_PROXY_HEADERS = 'true';
+    config = await import('./config.js');
+    config.initConfig();
+    expect(config.getTrustProxyHeaders()).toBe(true);
+  });
+
   it('does not parse secrets.yaml at runtime', async () => {
     fs.writeFileSync(
       'secrets.yaml',
@@ -203,6 +245,16 @@ describe('config VictoriaLogs OTLP settings', () => {
     expect(config.getBrowserExtensionContentMaxWaitMs()).toBe(16000);
     expect(config.getBrowserExtensionContentMinLength()).toBe(1200);
     expect(config.getBrowserNonExtensionPostNavWaitMs()).toBe(3500);
+  });
+
+  it('requires an explicit opt-in before disabling the Chromium sandbox', async () => {
+    process.env.BROWSER_UNSAFE_NO_SANDBOX = 'true';
+
+    const config = await import('./config.js');
+
+    config.initConfig();
+
+    expect(config.getBrowserUnsafeNoSandbox()).toBe(true);
   });
 
   it('rejects browser waits below ADR-017 safeguards', async () => {

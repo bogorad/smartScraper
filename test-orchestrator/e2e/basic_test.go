@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"strings"
 	"testing"
 )
@@ -148,14 +147,8 @@ func TestDashboardSitesRenders(t *testing.T) {
 	}
 	client := &http.Client{Jar: jar}
 
-	// Login via POST
-	loginURL := baseURL + "/login"
-	form := url.Values{}
-	form.Set("token", token)
-	resp, err := client.PostForm(loginURL, form)
-	if err != nil {
-		t.Fatalf("Login request failed: %v", err)
-	}
+	// Login through the CSRF-protected form flow.
+	resp := LoginDashboardSession(t, client, baseURL, token)
 	resp.Body.Close()
 
 	if resp.StatusCode != 200 && resp.StatusCode != 302 {

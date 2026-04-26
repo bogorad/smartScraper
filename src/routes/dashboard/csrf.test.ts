@@ -3,12 +3,17 @@ import {
   it,
   expect,
   beforeEach,
+  afterEach,
   vi,
 } from "vitest";
 import { Hono } from "hono";
 import { createSession } from "../../middleware/auth.js";
 import { dashboardRouter } from "./index.js";
-import { sitesRouter } from "./sites.js";
+import {
+  resetSitesRouteEngine,
+  setSitesRouteEngine,
+  sitesRouter,
+} from "./sites.js";
 import { statsRouter } from "./stats.js";
 
 const mocks = vi.hoisted(() => {
@@ -23,6 +28,7 @@ const mocks = vi.hoisted(() => {
     saveConfig: vi.fn(),
     deleteConfig: vi.fn(),
     scrapeUrl: vi.fn(),
+    validateScrapeTargetUrl: vi.fn(),
     site,
   };
 });
@@ -31,6 +37,7 @@ vi.mock("../../config.js", () => ({
   getApiToken: () => "test-api-token",
   getNodeEnv: () => "test",
   getLogLevel: () => "NONE",
+  getTrustProxyHeaders: () => false,
 }));
 
 vi.mock("../../services/stats-storage.js", () => ({
@@ -52,6 +59,12 @@ vi.mock("../../services/stats-storage.js", () => ({
 
 vi.mock("../../services/log-storage.js", () => ({
   readTodayLogs: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../../middleware/rate-limit.js", () => ({
+  rateLimitMiddleware:
+    () => async (_c: unknown, next: () => Promise<void>) =>
+      next(),
 }));
 
 vi.mock("../../adapters/fs-known-sites.js", () => ({
@@ -79,9 +92,13 @@ vi.mock("../../core/engine.js", () => ({
   workerEvents: {
     on: vi.fn(),
   },
-  getDefaultEngine: () => ({
-    scrapeUrl: mocks.scrapeUrl,
-  }),
+  getDefaultEngine: () => {
+    throw new Error("default engine should not be used");
+  },
+}));
+
+vi.mock("../../utils/url.js", () => ({
+  validateScrapeTargetUrl: mocks.validateScrapeTargetUrl,
 }));
 
 function buildApp(): Hono {
@@ -135,20 +152,48 @@ async function getPageCsrf(
   app: Hono,
   path: string,
   sessionCookie: string,
+  csrfCookie?: string,
 ) {
   const res = await app.request(path, {
     headers: {
-      Cookie: sessionCookie,
+      Cookie: csrfCookie
+        ? `${sessionCookie}; ${csrfCookie}`
+        : sessionCookie,
     },
   });
   const html = await res.text();
-  const csrfCookie = readCookie(
-    res.headers.get("Set-Cookie"),
-    "csrf_token",
-  );
-  const csrfToken = csrfCookie.split("=")[1];
+  const nextCsrfCookie = res.headers.get("Set-Cookie")
+    ? readCookie(
+        res.headers.get("Set-Cookie"),
+        "csrf_token",
+      )
+    : csrfCookie;
 
-  return { res, html, csrfCookie, csrfToken };
+  if (!nextCsrfCookie) {
+    throw new Error("Missing csrf_token cookie");
+  }
+
+  const csrfToken = nextCsrfCookie.split("=")[1];
+
+  return {
+    res,
+    html,
+    csrfCookie: nextCsrfCookie,
+    csrfToken,
+  };
+}
+
+async function getFreshPageCsrf(
+  app: Hono,
+  path: string,
+  sessionCookie: string,
+) {
+  const page = await getPageCsrf(app, path, sessionCookie);
+
+  expect(page.res.headers.get("Set-Cookie")).toContain(
+    "csrf_token=",
+  );
+  return page;
 }
 
 describe("dashboard CSRF coverage", () => {
@@ -156,7 +201,17 @@ describe("dashboard CSRF coverage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.validateScrapeTargetUrl.mockResolvedValue({
+      safe: true,
+    });
+    setSitesRouteEngine({
+      scrapeUrl: mocks.scrapeUrl,
+    });
     app = buildApp();
+  });
+
+  afterEach(() => {
+    resetSitesRouteEngine();
   });
 
   it.each([
@@ -172,11 +227,8 @@ describe("dashboard CSRF coverage", () => {
     "renders inherited HTMX CSRF headers for %s",
     async (path, title) => {
       const sessionCookie = await createSessionCookie(app);
-      const { res, html, csrfToken } = await getPageCsrf(
-        app,
-        path,
-        sessionCookie,
-      );
+      const { res, html, csrfToken } =
+        await getFreshPageCsrf(app, path, sessionCookie);
 
       expect(res.status).toBe(200);
       expect(html).toContain(title);
@@ -199,7 +251,7 @@ describe("dashboard CSRF coverage", () => {
     "renders no inline scripts or event handlers for %s",
     async (path, title) => {
       const sessionCookie = await createSessionCookie(app);
-      const { res, html } = await getPageCsrf(
+      const { res, html } = await getFreshPageCsrf(
         app,
         path,
         sessionCookie,
@@ -216,11 +268,12 @@ describe("dashboard CSRF coverage", () => {
 
   it("protects dashboard theme POST with CSRF", async () => {
     const sessionCookie = await createSessionCookie(app);
-    const { csrfCookie, csrfToken } = await getPageCsrf(
-      app,
-      "/dashboard",
-      sessionCookie,
-    );
+    const { csrfCookie, csrfToken } =
+      await getFreshPageCsrf(
+        app,
+        "/dashboard",
+        sessionCookie,
+      );
 
     const invalid = await app.request("/dashboard/theme", {
       method: "POST",
@@ -235,6 +288,38 @@ describe("dashboard CSRF coverage", () => {
       headers: {
         Cookie: `${sessionCookie}; ${csrfCookie}`,
         "X-CSRF-Token": csrfToken,
+      },
+    });
+    expect(valid.status).toBe(200);
+    expect(valid.headers.get("HX-Refresh")).toBe("true");
+  });
+
+  it("keeps existing dashboard CSRF tokens valid across GET requests", async () => {
+    const sessionCookie = await createSessionCookie(app);
+    const firstPage = await getFreshPageCsrf(
+      app,
+      "/dashboard",
+      sessionCookie,
+    );
+    const secondPage = await getPageCsrf(
+      app,
+      "/dashboard/sites",
+      sessionCookie,
+      firstPage.csrfCookie,
+    );
+
+    expect(secondPage.res.status).toBe(200);
+    expect(
+      secondPage.res.headers.get("Set-Cookie"),
+    ).toBeNull();
+    expect(secondPage.html).toContain(firstPage.csrfToken);
+    expect(secondPage.csrfToken).toBe(firstPage.csrfToken);
+
+    const valid = await app.request("/dashboard/theme", {
+      method: "POST",
+      headers: {
+        Cookie: `${sessionCookie}; ${firstPage.csrfCookie}`,
+        "X-CSRF-Token": firstPage.csrfToken,
       },
     });
     expect(valid.status).toBe(200);
@@ -268,11 +353,12 @@ describe("dashboard CSRF coverage", () => {
 
   it("protects stats reset POST with CSRF", async () => {
     const sessionCookie = await createSessionCookie(app);
-    const { csrfCookie, csrfToken } = await getPageCsrf(
-      app,
-      "/dashboard/stats",
-      sessionCookie,
-    );
+    const { csrfCookie, csrfToken } =
+      await getFreshPageCsrf(
+        app,
+        "/dashboard/stats",
+        sessionCookie,
+      );
 
     const invalid = await app.request(
       "/dashboard/stats/reset",
@@ -309,11 +395,12 @@ describe("dashboard CSRF coverage", () => {
     });
 
     const sessionCookie = await createSessionCookie(app);
-    const { csrfCookie, csrfToken } = await getPageCsrf(
-      app,
-      "/dashboard/sites/example.com",
-      sessionCookie,
-    );
+    const { csrfCookie, csrfToken } =
+      await getFreshPageCsrf(
+        app,
+        "/dashboard/sites/example.com",
+        sessionCookie,
+      );
 
     const invalidSave = await app.request(
       "/dashboard/sites/example.com",
@@ -399,24 +486,67 @@ describe("dashboard CSRF coverage", () => {
     );
   });
 
+  it("blocks private-network dashboard test URLs before scraping", async () => {
+    mocks.validateScrapeTargetUrl.mockResolvedValueOnce({
+      safe: false,
+      error:
+        "Target URL resolves to a private or local network address",
+    });
+
+    const sessionCookie = await createSessionCookie(app);
+    const { csrfCookie, csrfToken } =
+      await getFreshPageCsrf(
+        app,
+        "/dashboard/sites/example.com",
+        sessionCookie,
+      );
+
+    const res = await app.request(
+      "/dashboard/sites/example.com/test",
+      {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: new URLSearchParams({
+          testUrl: "http://127.0.0.1:3000",
+        }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Failed");
+    expect(html).toContain(
+      "Target URL resolves to a private or local network address",
+    );
+    expect(mocks.scrapeUrl).not.toHaveBeenCalled();
+  });
+
   it("posts the new site form to the dedicated create route", async () => {
     const sessionCookie = await createSessionCookie(app);
-    const { html } = await getPageCsrf(
+    const { html } = await getFreshPageCsrf(
       app,
       "/dashboard/sites/new",
       sessionCookie,
     );
 
-    expect(html).toContain('hx-post="/dashboard/sites/new"');
+    expect(html).toContain(
+      'hx-post="/dashboard/sites/new"',
+    );
   });
 
   it("creates a new site through the dedicated route", async () => {
     const sessionCookie = await createSessionCookie(app);
-    const { csrfCookie, csrfToken } = await getPageCsrf(
-      app,
-      "/dashboard/sites/new",
-      sessionCookie,
-    );
+    const { csrfCookie, csrfToken } =
+      await getFreshPageCsrf(
+        app,
+        "/dashboard/sites/new",
+        sessionCookie,
+      );
 
     const res = await app.request("/dashboard/sites/new", {
       method: "POST",
@@ -453,12 +583,18 @@ describe("dashboard CSRF coverage", () => {
   it.each([
     [
       "bad domain",
-      { domainPattern: "*.example.com", xpathMainContent: "//main" },
+      {
+        domainPattern: "*.example.com",
+        xpathMainContent: "//main",
+      },
       "Domain must be a hostname",
     ],
     [
       "bad XPath",
-      { domainPattern: "example.org", xpathMainContent: "main" },
+      {
+        domainPattern: "example.org",
+        xpathMainContent: "main",
+      },
       "XPath main content must start",
     ],
     [
@@ -483,22 +619,26 @@ describe("dashboard CSRF coverage", () => {
     "rejects invalid site save input: %s",
     async (_name, values, expectedMessage) => {
       const sessionCookie = await createSessionCookie(app);
-      const { csrfCookie, csrfToken } = await getPageCsrf(
-        app,
-        "/dashboard/sites/new",
-        sessionCookie,
-      );
+      const { csrfCookie, csrfToken } =
+        await getFreshPageCsrf(
+          app,
+          "/dashboard/sites/new",
+          sessionCookie,
+        );
 
-      const res = await app.request("/dashboard/sites/new", {
-        method: "POST",
-        headers: {
-          Cookie: `${sessionCookie}; ${csrfCookie}`,
-          "Content-Type":
-            "application/x-www-form-urlencoded",
-          "X-CSRF-Token": csrfToken,
+      const res = await app.request(
+        "/dashboard/sites/new",
+        {
+          method: "POST",
+          headers: {
+            Cookie: `${sessionCookie}; ${csrfCookie}`,
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+            "X-CSRF-Token": csrfToken,
+          },
+          body: new URLSearchParams(values),
         },
-        body: new URLSearchParams(values),
-      });
+      );
       const html = await res.text();
 
       expect(res.status).toBe(400);

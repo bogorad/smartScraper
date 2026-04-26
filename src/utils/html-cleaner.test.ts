@@ -83,6 +83,15 @@ describe('html-cleaner', () => {
       expect(result).toContain('Content');
     });
 
+    it('should treat malicious site cleanup classes as XPath literals', () => {
+      const html = '<article><p>Keep this content</p></article>';
+      const result = cleanHtml(html, {
+        siteCleanupClasses: ['")] | //* | //* [contains(@class, "'],
+      });
+
+      expect(result).toContain('Keep this content');
+    });
+
     it('should allow additional tags when specified', () => {
       const html = '<video>Video content</video><p>Text</p>';
       const result = cleanHtml(html, { keepTags: ['video'] });

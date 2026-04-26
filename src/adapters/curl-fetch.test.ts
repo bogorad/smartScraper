@@ -55,6 +55,59 @@ describe("CurlFetchAdapter", () => {
     });
   });
 
+  it("rejects curl option-looking input before invoking curl", async () => {
+    const { CurlFetchAdapter } =
+      await import("./curl-fetch.js");
+
+    const result = await new CurlFetchAdapter().fetchHtml(
+      "--output",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "curl_error",
+      message: "Curl fetch URL must use http or https",
+    });
+    expect(mockedExecFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects file URLs before invoking curl", async () => {
+    const { CurlFetchAdapter } =
+      await import("./curl-fetch.js");
+
+    const result = await new CurlFetchAdapter().fetchHtml(
+      "file:///etc/passwd",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "curl_error",
+      message: "Curl fetch URL must use http or https",
+    });
+    expect(mockedExecFile).not.toHaveBeenCalled();
+  });
+
+  it("passes valid https URLs after curl option terminator", async () => {
+    mockCurlResult(
+      null,
+      "<html>ok</html>\nSMARTSCRAPER_CURL_STATUS:200",
+      "",
+    );
+    const { CurlFetchAdapter } =
+      await import("./curl-fetch.js");
+
+    await new CurlFetchAdapter().fetchHtml(
+      "https://example.com/article",
+    );
+
+    const args = mockedExecFile.mock
+      .calls[0][1] as string[];
+    expect(args.slice(-2)).toEqual([
+      "--",
+      "https://example.com/article",
+    ]);
+  });
+
   it("passes timeout, headers, user-agent, and configured proxy to curl", async () => {
     mocks.proxyServer = "socks5://proxy.example:1080";
     mockCurlResult(

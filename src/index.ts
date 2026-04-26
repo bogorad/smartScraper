@@ -27,10 +27,12 @@ registerProcessHandlers(() => ({
 }));
 
 async function main() {
-  const app = createApp();
   const bootstrap = await bootstrapApplication();
   runtimeDependencies = bootstrap.dependencies;
   cleanupInterval = bootstrap.cleanupInterval;
+  const app = createApp({
+    engine: runtimeDependencies.engine,
+  });
 
   startServer(app, bootstrap.port);
 }

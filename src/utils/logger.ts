@@ -200,6 +200,11 @@ function initOtlpDiagnostics() {
 function initLogFile() {
   if (logFileStream) return;
 
+  debugEnabled = isDebugFileLoggingEnabled();
+  if (!debugEnabled) {
+    return;
+  }
+
   try {
     const dataDir = getDataDir();
     const logDir = path.join(dataDir, "logs");
@@ -226,23 +231,10 @@ function initLogFile() {
       logFileStream = null; // Disable file logging, continue with console
     });
 
-    // Check if DEBUG env var is set (can be checked before config is initialized)
-    debugEnabled = configIsDebugMode();
-    // Also check LOG_LEVEL if config is available
-    try {
-      if (getLogLevel() === "DEBUG") {
-        debugEnabled = true;
-      }
-    } catch {
-      // Config not initialized yet, use env var only
-    }
-
-    if (debugEnabled) {
-      writeInternal(
-        "INFO",
-        `Debug mode enabled, logging to: ${logFile}`,
-      );
-    }
+    writeInternal(
+      "INFO",
+      `Debug mode enabled, logging to: ${logFile}`,
+    );
   } catch (error) {
     const message =
       error instanceof Error
@@ -258,6 +250,18 @@ function initLogFile() {
         message,
       );
     }
+  }
+}
+
+function isDebugFileLoggingEnabled(): boolean {
+  if (configIsDebugMode()) {
+    return true;
+  }
+
+  try {
+    return getLogLevel() === "DEBUG";
+  } catch {
+    return false;
   }
 }
 
@@ -353,11 +357,15 @@ function initOtlpLogger() {
 }
 
 function writeToFile(entry: LogEntry) {
+  if (!debugEnabled && !isDebugFileLoggingEnabled()) {
+    return;
+  }
+
   if (!logFileStream) {
     initLogFile();
   }
 
-  if (logFileStream && debugEnabled) {
+  if (logFileStream) {
     try {
       logFileStream.write(JSON.stringify(entry) + "\n");
     } catch (error) {

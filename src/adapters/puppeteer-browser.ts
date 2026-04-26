@@ -12,12 +12,14 @@ import {
   getBrowserExtensionContentMinLength,
   getBrowserExtensionInitWaitMs,
   getBrowserNonExtensionPostNavWaitMs,
+  getBrowserUnsafeNoSandbox,
   getExecutablePath,
   getExtensionPaths,
   getProxyServer
 } from '../config.js';
 import { logger } from '../utils/logger.js';
 import { buildChromiumProxyServer, redactProxyUrl } from '../utils/proxy.js';
+import { isValidXPath } from '../utils/xpath-parser.js';
 
 interface PageSession {
   page: Page;
@@ -222,10 +224,6 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     
     // Base args matching reference implementation
     const args = [
-      // Security/sandbox
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      
       // Performance
       '--disable-dev-shm-usage',
       '--disable-accelerated-2d-canvas',
@@ -248,14 +246,20 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
       '--disable-notifications',
       '--no-first-run',
       '--no-default-browser-check',
-      '--disable-web-security',
-      
+
       // Suppress D-Bus errors in headless Linux environments
       '--disable-features=Translate,OptimizationHints,MediaRouter',
       
       // Disable images for speed
       '--blink-settings=imagesEnabled=false'
     ];
+
+    if (getBrowserUnsafeNoSandbox()) {
+      args.push('--no-sandbox');
+      args.push('--disable-setuid-sandbox');
+      args.push('--disable-web-security');
+      logger.warn('Chromium sandbox disabled by BROWSER_UNSAFE_NO_SANDBOX', {}, 'BROWSER');
+    }
 
     // Add extension loading flags if extensions are configured
     // Use Chrome's native --disable-extensions-except and --load-extension flags
@@ -280,18 +284,9 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
     return args;
   }
 
-  // XPath validation constants
-  private static readonly MAX_XPATH_LENGTH = 500;
-  private static readonly ALLOWED_XPATH_PATTERN = /^[\w\-\/\[\]@="'\s\.\(\)\|\*\:,]+$/;
-
-  private validateXPath(xpath: string): boolean {
-    if (!xpath || xpath.length > PuppeteerBrowserAdapter.MAX_XPATH_LENGTH) return false;
-    return PuppeteerBrowserAdapter.ALLOWED_XPATH_PATTERN.test(xpath);
-  }
-
   async evaluateXPath(pageId: string, xpath: string): Promise<string[] | null> {
     // Validate XPath before processing
-    if (!this.validateXPath(xpath)) {
+    if (!isValidXPath(xpath)) {
       logger.warn('[BROWSER] Invalid XPath rejected', { xpath: xpath.slice(0, 50) });
       return null;
     }
@@ -431,6 +426,11 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
   }
 
   async getElementDetails(pageId: string, xpath: string): Promise<ElementDetails | null> {
+    if (!isValidXPath(xpath)) {
+      logger.warn('[BROWSER] Invalid XPath rejected', { xpath: xpath.slice(0, 50) });
+      return null;
+    }
+
     const session = this.sessions.get(pageId);
     if (!session) return null;
 

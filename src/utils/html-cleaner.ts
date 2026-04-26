@@ -76,7 +76,7 @@ export function cleanHtml(html: string, options: CleanerOptions = {}): string {
     ...(options.additionalSelectors || [])
   ];
 
-  const classSelectors = classesToRemove.map(cls => `//*[contains(@class, "${cls}")]`);
+  const classSelectors = classesToRemove.map(cls => `//*[contains(@class, ${toXPathStringLiteral(cls)})]`);
   const allSelectors = [...classSelectors, ...selectorsToRemove];
 
   const { document } = parseHTML(`<!DOCTYPE html><html><body>${sanitized}</body></html>`);
@@ -105,6 +105,22 @@ function collapseWhitespace(html: string): string {
     .replace(/\s+/g, ' ')
     .replace(/>\s+</g, '><')
     .replace(/^\s+|\s+$/g, '');
+}
+
+function toXPathStringLiteral(value: string): string {
+  if (!value.includes("'")) {
+    return `'${value}'`;
+  }
+
+  if (!value.includes('"')) {
+    return `"${value}"`;
+  }
+
+  return `concat(${value
+    .split("'")
+    .flatMap((part, index) => index === 0 ? [`'${part}'`] : [`"'"`, `'${part}'`])
+    .filter(part => part !== "''")
+    .join(', ')})`;
 }
 
 export function extractText(html: string, options: CleanerOptions = {}): string {

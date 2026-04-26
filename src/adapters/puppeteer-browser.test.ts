@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => {
     browserExtensionContentMinLength: 1000,
     browserExtensionInitWaitMs: 2000,
     browserNonExtensionPostNavWaitMs: 3000,
+    browserUnsafeNoSandbox: false,
     extensionPaths: [] as string[],
     proxyServer: undefined as string | undefined
   };
@@ -49,6 +50,7 @@ vi.mock('../config.js', () => ({
   getBrowserExtensionContentMinLength: () => mocks.config.browserExtensionContentMinLength,
   getBrowserExtensionInitWaitMs: () => mocks.config.browserExtensionInitWaitMs,
   getBrowserNonExtensionPostNavWaitMs: () => mocks.config.browserNonExtensionPostNavWaitMs,
+  getBrowserUnsafeNoSandbox: () => mocks.config.browserUnsafeNoSandbox,
   getExecutablePath: () => '/usr/bin/chromium',
   getExtensionPaths: () => mocks.config.extensionPaths,
   getProxyServer: () => mocks.config.proxyServer
@@ -73,6 +75,7 @@ describe('PuppeteerBrowserAdapter', () => {
     mocks.config.browserExtensionContentMinLength = 1000;
     mocks.config.browserExtensionInitWaitMs = 2000;
     mocks.config.browserNonExtensionPostNavWaitMs = 3000;
+    mocks.config.browserUnsafeNoSandbox = false;
     mocks.config.extensionPaths = [];
     mocks.config.proxyServer = undefined;
     mocks.page.content.mockResolvedValue('');
@@ -149,6 +152,38 @@ describe('PuppeteerBrowserAdapter', () => {
 
     expect(mocks.launch).toHaveBeenCalledWith(expect.objectContaining({
       args: expect.arrayContaining(['--proxy-server=socks5://r5s.bruc:10801'])
+    }));
+  });
+
+  it('keeps Chromium sandbox and web security enabled by default', async () => {
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    await adapter.loadPage('https://example.com/article');
+
+    expect(mocks.launch).toHaveBeenCalledWith(expect.objectContaining({
+      args: expect.not.arrayContaining([
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-web-security'
+      ])
+    }));
+  });
+
+  it('allows explicit unsafe Chromium sandbox disablement', async () => {
+    mocks.config.browserUnsafeNoSandbox = true;
+
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    await adapter.loadPage('https://example.com/article');
+
+    expect(mocks.launch).toHaveBeenCalledWith(expect.objectContaining({
+      args: expect.arrayContaining([
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-web-security'
+      ])
     }));
   });
 
@@ -267,5 +302,57 @@ describe('PuppeteerBrowserAdapter', () => {
       type: CAPTCHA_TYPES.HCAPTCHA,
       siteKey: 'hcaptcha-key'
     });
+  });
+
+  it('uses shared XPath validation for accepted xpath values', async () => {
+    const acceptedXPaths = [
+      "//article[@class='post-content']",
+      "//div[contains(@class, 'article-body')]",
+      "//main/descendant::section[1]"
+    ];
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+    const { pageId } = await adapter.loadPage('https://example.com/article');
+
+    for (const xpath of acceptedXPaths) {
+      mocks.page.evaluate.mockClear();
+      mocks.page.evaluate.mockResolvedValueOnce(['<article>content</article>']);
+
+      const result = await adapter.evaluateXPath(pageId, xpath);
+
+      expect(result).toEqual(['<article>content</article>']);
+      expect(mocks.page.evaluate).toHaveBeenCalledWith(expect.any(Function), xpath);
+    }
+  });
+
+  it('uses shared XPath validation for rejected xpath values', async () => {
+    const rejectedXPaths = [
+      '',
+      '//div<script>',
+      "//article[@class='content'",
+      '//article" trailing',
+      'not an xpath'
+    ];
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    for (const xpath of rejectedXPaths) {
+      mocks.page.evaluate.mockClear();
+
+      const result = await adapter.evaluateXPath('page-1', xpath);
+
+      expect(result).toBeNull();
+      expect(mocks.page.evaluate).not.toHaveBeenCalled();
+    }
+  });
+
+  it('uses shared XPath validation before reading element details', async () => {
+    const { PuppeteerBrowserAdapter } = await import('./puppeteer-browser.js');
+    const adapter = new PuppeteerBrowserAdapter();
+
+    const result = await adapter.getElementDetails('page-1', '//div<script>');
+
+    expect(result).toBeNull();
+    expect(mocks.page.evaluate).not.toHaveBeenCalled();
   });
 });

@@ -5,11 +5,6 @@ import dotenv from 'dotenv';
 import { DEFAULTS } from './constants.js';
 import { logger } from './utils/logger.js';
 
-// Load .env file first if it exists
-if (fs.existsSync('.env')) {
-  dotenv.config();
-}
-
 /**
  * Centralized configuration schema for SmartScraper
  * All environment variables and secrets are validated here at startup
@@ -44,6 +39,7 @@ const ConfigSchema = z.object({
   executablePath: z.string().default(DEFAULTS.EXECUTABLE_PATH),
   extensionPaths: z.string().default(DEFAULTS.EXTENSION_PATHS),
   proxyServer: z.string().default(DEFAULTS.PROXY_SERVER),
+  trustProxyHeaders: booleanFromEnv.default(DEFAULTS.TRUST_PROXY_HEADERS),
   browserDumpio: booleanFromEnv.default(DEFAULTS.BROWSER_DUMPIO),
   browserConsoleCapture: booleanFromEnv.default(DEFAULTS.BROWSER_CONSOLE_CAPTURE),
   browserExtensionInitWaitMs: z.coerce
@@ -62,6 +58,7 @@ const ConfigSchema = z.object({
     .number()
     .min(DEFAULTS.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS)
     .default(DEFAULTS.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS),
+  browserUnsafeNoSandbox: booleanFromEnv.default(DEFAULTS.BROWSER_UNSAFE_NO_SANDBOX),
 
   // CAPTCHA solver configuration
   twocaptchaApiKey: z.string().default(''),
@@ -132,12 +129,14 @@ function mapEnvVars(): Record<string, string | undefined> {
       process.env.PROXY_SERVER ||
       process.env.DEFAULT_SOCKS5_PROXY ||
       process.env.HTTP_PROXY,
+    trustProxyHeaders: process.env.TRUST_PROXY_HEADERS,
     browserDumpio: process.env.BROWSER_DUMPIO,
     browserConsoleCapture: process.env.BROWSER_CONSOLE_CAPTURE,
     browserExtensionInitWaitMs: process.env.BROWSER_EXTENSION_INIT_WAIT_MS,
     browserExtensionContentMaxWaitMs: process.env.BROWSER_EXTENSION_CONTENT_MAX_WAIT_MS,
     browserExtensionContentMinLength: process.env.BROWSER_EXTENSION_CONTENT_MIN_LENGTH,
     browserNonExtensionPostNavWaitMs: process.env.BROWSER_NON_EXTENSION_POST_NAV_WAIT_MS,
+    browserUnsafeNoSandbox: process.env.BROWSER_UNSAFE_NO_SANDBOX,
 
     // CAPTCHA
     twocaptchaApiKey: process.env.TWOCAPTCHA_API_KEY || process.env.TWOCAPTCHA,
@@ -214,6 +213,12 @@ function parseConfig(): Config {
 // Initialize config
 let config: Config | null = null;
 
+export function loadDotenvConfig(): void {
+  if (fs.existsSync('.env')) {
+    dotenv.config();
+  }
+}
+
 export function initConfig(): Config {
   if (config !== null) {
     return config;
@@ -279,6 +284,10 @@ export function getProxyServer(): string {
   return getConfig().proxyServer;
 }
 
+export function getTrustProxyHeaders(): boolean {
+  return getConfig().trustProxyHeaders;
+}
+
 export function getBrowserDumpio(): boolean {
   return getConfig().browserDumpio;
 }
@@ -301,6 +310,10 @@ export function getBrowserExtensionContentMinLength(): number {
 
 export function getBrowserNonExtensionPostNavWaitMs(): number {
   return getConfig().browserNonExtensionPostNavWaitMs;
+}
+
+export function getBrowserUnsafeNoSandbox(): boolean {
+  return getConfig().browserUnsafeNoSandbox;
 }
 
 export function getLlmModel(): string {

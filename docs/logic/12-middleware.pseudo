@@ -13,12 +13,16 @@ FUNCTION getConfiguredApiToken() -> string | null:
     token = getApiToken()
     RETURN token ? token : null
 
-FUNCTION getSessionSecret() -> string:
+FUNCTION getSessionSecret() -> string | null:
     token = getConfiguredApiToken()
-    RETURN token ? sha256(token).slice(0, 32) : 'fallback-secret'
+    RETURN token ? sha256(token).slice(0, 32) : null
 
-FUNCTION hashToken(token: string) -> string:
-    RETURN sha256(token + getSessionSecret())
+FUNCTION hashToken(token: string) -> string | null:
+    sessionSecret = getSessionSecret()
+    IF NOT sessionSecret:
+        RETURN null
+
+    RETURN sha256(token + sessionSecret)
 
 
 # ============================================================================

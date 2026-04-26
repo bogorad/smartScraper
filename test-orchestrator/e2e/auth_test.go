@@ -3,7 +3,6 @@ package e2e
 import (
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"strings"
 	"testing"
 )
@@ -67,15 +66,8 @@ func TestDashboardWithSession(t *testing.T) {
 	}
 	client := &http.Client{Jar: jar}
 
-	// Step 1: Login via POST to /login
-	loginURL := baseURL + "/login"
-	form := url.Values{}
-	form.Set("token", token)
-
-	resp, err := client.PostForm(loginURL, form)
-	if err != nil {
-		t.Fatalf("Login request failed: %v", err)
-	}
+	// Step 1: Login through the CSRF-protected form flow.
+	resp := LoginDashboardSession(t, client, baseURL, token)
 	defer resp.Body.Close()
 
 	// Login should redirect (302) to dashboard

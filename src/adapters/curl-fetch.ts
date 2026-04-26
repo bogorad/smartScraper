@@ -21,6 +21,15 @@ export class CurlFetchAdapter implements CurlFetchPort {
     url: string,
     options: CurlFetchOptions = {},
   ): Promise<CurlFetchResult> {
+    const validatedUrl = validateHttpUrl(url);
+    if (!validatedUrl) {
+      return {
+        ok: false,
+        reason: "curl_error",
+        message: "Curl fetch URL must use http or https",
+      };
+    }
+
     const timeoutMs =
       options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const proxy =
@@ -37,7 +46,7 @@ export class CurlFetchAdapter implements CurlFetchPort {
     }
 
     const args = buildCurlArgs(
-      url,
+      validatedUrl,
       options,
       timeoutMs,
       proxy || undefined,
@@ -80,6 +89,7 @@ function buildCurlArgs(
     secondsForCurl(timeoutMs),
     "--write-out",
     `\n${STATUS_MARKER}%{http_code}`,
+    "--",
     url,
   ];
 
@@ -108,6 +118,22 @@ function buildCurlArgs(
   }
 
   return args;
+}
+
+function validateHttpUrl(url: string): string | null {
+  try {
+    const parsedUrl = new URL(url);
+    if (
+      parsedUrl.protocol !== "http:" &&
+      parsedUrl.protocol !== "https:"
+    ) {
+      return null;
+    }
+
+    return parsedUrl.href;
+  } catch {
+    return null;
+  }
 }
 
 function secondsForCurl(timeoutMs: number): string {

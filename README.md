@@ -233,6 +233,7 @@ See `.env.example` for all available options including:
 - `LLM_TEMPERATURE` - LLM temperature (default: 0)
 - `EXECUTABLE_PATH` - Chrome/Chromium path
 - `EXTENSION_PATHS` - Browser extensions to load
+- `BROWSER_UNSAFE_NO_SANDBOX` - Opt in to unsafe Chromium no-sandbox flags for trusted isolated containers only
 - `PROXY_SERVER` - HTTP proxy for scraping
 - `VICTORIALOGS_OTLP_ENABLED` - Enable OTLP logging to VictoriaLogs
 - `LOG_LEVEL` - Logging level (default: INFO)

@@ -15,7 +15,7 @@ SmartScraper uses a **centralized configuration system** with the following feat
 ## Configuration Module Architecture
 
 The `src/config.ts` module:
-1. Loads `.env` file automatically via dotenv
+1. Provides explicit `.env` loading for bootstrap and test setup
 2. Maps environment variable names (supporting legacy names)
 3. Applies runtime defaults from `src/constants.ts`
 4. Validates all config against Zod schema at startup
@@ -118,6 +118,13 @@ Sensible defaults for non-critical configuration are defined in `src/constants.t
 | `PORT` | number | 5555 | Server listen port |
 | `NODE_ENV` | enum | production | Environment (development/production) |
 | `DATA_DIR` | string | ./data | Data storage directory |
+| `TRUST_PROXY_HEADERS` | boolean | false | Trust reverse-proxy client IP and protocol headers |
+
+Set `TRUST_PROXY_HEADERS=true` only when SmartScraper is behind a trusted
+reverse proxy that strips untrusted client-sent forwarding headers. With this
+enabled, dashboard session cookies use the trusted `X-Forwarded-Proto=https`
+header to set the `Secure` cookie flag even when the app receives local HTTP
+from the proxy.
 
 ### LLM Configuration (OpenRouter)
 
@@ -137,6 +144,7 @@ Sensible defaults for non-critical configuration are defined in `src/constants.t
 |----------|------|---------|-------------|
 | `EXECUTABLE_PATH` | string | /usr/lib/chromium/chromium | Chrome/Chromium executable path |
 | `EXTENSION_PATHS` | string | '' | Comma-separated browser extension paths |
+| `BROWSER_UNSAFE_NO_SANDBOX` | boolean | false | Opt in to Chromium `--no-sandbox`, `--disable-setuid-sandbox`, and `--disable-web-security` |
 | `PROXY_SERVER` | string | '' | HTTP proxy URL for scraping |
 | `DEFAULT_SOCKS5_PROXY` | string | '' | Default SOCKS5 proxy URL for normal scraping when `PROXY_SERVER` is not set |
 
@@ -148,6 +156,11 @@ Proxy precedence is:
 `PROXY_SERVER` → `DEFAULT_SOCKS5_PROXY` → `HTTP_PROXY`. Per-request proxy
 details and DataDome site proxy settings still override the default proxy for
 their own scrape.
+
+Chromium sandboxing is enabled by default for untrusted scraping. Containers
+must provide Chromium sandbox support, such as user namespaces, or run with a
+compatible setuid sandbox. Set `BROWSER_UNSAFE_NO_SANDBOX=true` only inside a
+trusted, isolated container when the host cannot support Chromium sandboxing.
 
 ### CAPTCHA Configuration
 

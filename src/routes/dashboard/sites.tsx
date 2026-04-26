@@ -13,6 +13,7 @@ import {
 } from "../../components/test-form.js";
 import { knownSitesAdapter } from "../../adapters/fs-known-sites.js";
 import { getDefaultEngine } from "../../core/engine.js";
+import type { CoreScraperEngine } from "../../core/engine.js";
 import type {
   SiteConfig,
   SiteConfigCaptcha,
@@ -20,7 +21,41 @@ import type {
   SiteConfigProxy,
 } from "../../domain/models.js";
 import { logger } from "../../utils/logger.js";
+import { validateScrapeTargetUrl } from "../../utils/url.js";
 import { applyDashboardRoutePolicy } from "./policy.js";
+
+export type SitesRouteEngine = Pick<
+  CoreScraperEngine,
+  "scrapeUrl"
+>;
+
+export interface SitesRouteBindings {
+  Variables: {
+    scraperEngine?: SitesRouteEngine;
+  };
+}
+
+let routeEngine: SitesRouteEngine | null = null;
+
+export function setSitesRouteEngine(
+  engine: SitesRouteEngine,
+): void {
+  routeEngine = engine;
+}
+
+export function resetSitesRouteEngine(): void {
+  routeEngine = null;
+}
+
+function getSitesRouteEngine(
+  c: Context<SitesRouteBindings>,
+): SitesRouteEngine {
+  return (
+    c.get("scraperEngine") ??
+    routeEngine ??
+    getDefaultEngine()
+  );
+}
 
 // Query parameter validation schema
 const querySchema = z.object({
@@ -44,7 +79,7 @@ const querySchema = z.object({
     .default(1),
 });
 
-export const sitesRouter = new Hono();
+export const sitesRouter = new Hono<SitesRouteBindings>();
 
 applyDashboardRoutePolicy(sitesRouter);
 
@@ -88,7 +123,11 @@ function parseOptionalStrategy<T extends string>(
 }
 
 function normalizeSubmittedDomain(domain: string): string {
-  return domain.trim().toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+  return domain
+    .trim()
+    .toLowerCase()
+    .replace(/\.$/, "")
+    .replace(/^www\./, "");
 }
 
 function validateDomain(domain: string): string | null {
@@ -96,7 +135,11 @@ function validateDomain(domain: string): string | null {
   if (domain.includes("*") || domain.includes("/")) {
     return "Domain must be a hostname without wildcards or paths.";
   }
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(domain)) {
+  if (
+    !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(
+      domain,
+    )
+  ) {
     return "Domain must be a valid hostname such as example.com.";
   }
   return null;
@@ -110,7 +153,9 @@ function validateXPath(xpath: string): string | null {
   return null;
 }
 
-function parseHeaders(headersText: string): Record<string, string> {
+function parseHeaders(
+  headersText: string,
+): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const line of headersText.split("\n")) {
     const trimmed = line.trim();
@@ -118,13 +163,20 @@ function parseHeaders(headersText: string): Record<string, string> {
 
     const separatorIndex = trimmed.indexOf(":");
     if (separatorIndex === -1) {
-      throw new Error("Custom headers must use Name: Value format.");
+      throw new Error(
+        "Custom headers must use Name: Value format.",
+      );
     }
 
     const key = trimmed.slice(0, separatorIndex).trim();
     const value = trimmed.slice(separatorIndex + 1).trim();
-    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) || !value) {
-      throw new Error("Custom headers must include a valid name and value.");
+    if (
+      !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) ||
+      !value
+    ) {
+      throw new Error(
+        "Custom headers must include a valid name and value.",
+      );
     }
     headers[key] = value;
   }
@@ -502,7 +554,8 @@ async function saveSiteConfig(
   const body = await c.req.parseBody();
 
   const rawDomain =
-    typeof body.domainPattern === "string" && body.domainPattern.trim()
+    typeof body.domainPattern === "string" &&
+    body.domainPattern.trim()
       ? body.domainPattern
       : domain;
   const actualDomain = normalizeSubmittedDomain(rawDomain);
@@ -518,12 +571,22 @@ async function saveSiteConfig(
 
   const domainError = validateDomain(actualDomain);
   if (domainError) {
-    return renderSiteFormError(c, submittedSite, domainError, isNew);
+    return renderSiteFormError(
+      c,
+      submittedSite,
+      domainError,
+      isNew,
+    );
   }
 
   const xpathError = validateXPath(xpathMainContent);
   if (xpathError) {
-    return renderSiteFormError(c, submittedSite, xpathError, isNew);
+    return renderSiteFormError(
+      c,
+      submittedSite,
+      xpathError,
+      isNew,
+    );
   }
 
   const headersText =
@@ -538,7 +601,12 @@ async function saveSiteConfig(
       error instanceof Error
         ? error.message
         : "Invalid custom headers.";
-    return renderSiteFormError(c, submittedSite, message, isNew);
+    return renderSiteFormError(
+      c,
+      submittedSite,
+      message,
+      isNew,
+    );
   }
 
   const cleanupText =
@@ -574,7 +642,12 @@ async function saveSiteConfig(
       error instanceof Error
         ? error.message
         : "Invalid site strategy.";
-    return renderSiteFormError(c, submittedSite, message, isNew);
+    return renderSiteFormError(
+      c,
+      submittedSite,
+      message,
+      isNew,
+    );
   }
 
   const needsProxy =
@@ -600,7 +673,8 @@ async function saveSiteConfig(
         ? siteCleanupClasses
         : undefined,
     userAgent:
-      typeof body.userAgent === "string" && body.userAgent.trim()
+      typeof body.userAgent === "string" &&
+      body.userAgent.trim()
         ? body.userAgent.trim()
         : undefined,
     method,
@@ -655,7 +729,18 @@ sitesRouter.post("/:domain/test", async (c) => {
   }
 
   try {
-    const engine = getDefaultEngine();
+    const urlSafety =
+      await validateScrapeTargetUrl(testUrl);
+    if (!urlSafety.safe) {
+      return c.html(
+        <TestResult
+          success={false}
+          message={urlSafety.error ?? "Invalid URL"}
+        />,
+      );
+    }
+
+    const engine = getSitesRouteEngine(c);
     const startTime = Date.now();
     const result = await engine.scrapeUrl(testUrl);
     const duration = Date.now() - startTime;

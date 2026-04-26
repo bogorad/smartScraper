@@ -1,19 +1,22 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { apiAuthMiddleware } from "../../middleware/auth.js";
 import { rateLimitMiddleware } from "../../middleware/rate-limit.js";
 import { getDefaultEngine } from "../../core/engine.js";
+import type { CoreScraperEngine } from "../../core/engine.js";
 import { DEFAULTS, OUTPUT_TYPES } from "../../constants.js";
 import {
   sanitizeErrorForClient,
   sanitizeScrapeResultForClient,
 } from "../../utils/error-sanitizer.js";
 import { logger } from "../../utils/logger.js";
+import { validateScrapeTargetUrl } from "../../utils/url.js";
+import { isValidXPath } from "../../utils/xpath-parser.js";
 
 const MAX_PROXY_SERVER_LENGTH = 2048;
 const MAX_USER_AGENT_LENGTH = 512;
-const MAX_XPATH_LENGTH = 500;
 const MIN_TIMEOUT_MS = 1000;
 const MAX_TIMEOUT_MS = DEFAULTS.TIMEOUT_MS;
 const ALLOWED_PROXY_PROTOCOLS = new Set([
@@ -22,8 +25,39 @@ const ALLOWED_PROXY_PROTOCOLS = new Set([
   "socks4:",
   "socks5:",
 ]);
-const ALLOWED_XPATH_PATTERN =
-  /^[\w\-\/\[\]@="'\s\.\(\)\|\*\:,]+$/;
+
+export type ScrapeRouteEngine = Pick<
+  CoreScraperEngine,
+  "scrapeUrl"
+>;
+
+export interface ScrapeRouteBindings {
+  Variables: {
+    scraperEngine?: ScrapeRouteEngine;
+  };
+}
+
+let routeEngine: ScrapeRouteEngine | null = null;
+
+export function setScrapeRouteEngine(
+  engine: ScrapeRouteEngine,
+): void {
+  routeEngine = engine;
+}
+
+export function resetScrapeRouteEngine(): void {
+  routeEngine = null;
+}
+
+function getScrapeRouteEngine(
+  c: Context<ScrapeRouteBindings>,
+): ScrapeRouteEngine {
+  return (
+    c.get("scraperEngine") ??
+    routeEngine ??
+    getDefaultEngine()
+  );
+}
 
 function isHttpUrl(value: string): boolean {
   try {
@@ -55,17 +89,6 @@ function isValidProxyServer(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-function isValidXPath(value: string): boolean {
-  const trimmed = value.trim();
-
-  return (
-    trimmed.length > 0 &&
-    trimmed.length <= MAX_XPATH_LENGTH &&
-    (trimmed.startsWith("/") || trimmed.startsWith("./")) &&
-    ALLOWED_XPATH_PATTERN.test(trimmed)
-  );
 }
 
 const scrapeSchema = z.object({
@@ -102,7 +125,7 @@ const scrapeSchema = z.object({
   debug: z.boolean().optional(),
 });
 
-export const scrapeRouter = new Hono();
+export const scrapeRouter = new Hono<ScrapeRouteBindings>();
 
 // Rate limit: 10 requests per minute per client
 scrapeRouter.use(
@@ -127,8 +150,22 @@ scrapeRouter.post(
   async (c) => {
     const body = c.req.valid("json");
 
-    const engine = getDefaultEngine();
+    const engine = getScrapeRouteEngine(c);
     try {
+      const urlSafety = await validateScrapeTargetUrl(
+        body.url,
+      );
+      if (!urlSafety.safe) {
+        return c.json(
+          {
+            success: false,
+            errorType: "CONFIGURATION",
+            error: urlSafety.error,
+          },
+          400,
+        );
+      }
+
       const result = await engine.scrapeUrl(body.url, {
         outputType:
           body.outputType as (typeof OUTPUT_TYPES)[keyof typeof OUTPUT_TYPES],

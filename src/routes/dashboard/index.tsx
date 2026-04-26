@@ -37,15 +37,31 @@ dashboardRouter.post("/theme", (c) => {
   return c.body(null);
 });
 
-interface Client {
-  controller: ReadableStreamDefaultController;
+export interface DashboardSseClient {
+  controller: ReadableStreamDefaultController<Uint8Array>;
   id: symbol;
   connectedAt: number;
+  cleanup: () => void;
 }
 
-const clients = new Set<Client>();
+const clients = new Set<DashboardSseClient>();
 const MAX_SSE_CLIENTS = 100;
 const SSE_CONNECTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+function removeClient(client: DashboardSseClient) {
+  if (clients.delete(client)) {
+    client.cleanup();
+  }
+}
+
+function closeClient(client: DashboardSseClient) {
+  removeClient(client);
+  try {
+    client.controller.close();
+  } catch {
+    // The stream may already be closed or errored.
+  }
+}
 
 // Periodic cleanup of stale connections
 setInterval(() => {
@@ -56,7 +72,7 @@ setInterval(() => {
       now - client.connectedAt >
       SSE_CONNECTION_TIMEOUT_MS
     ) {
-      clients.delete(client);
+      closeClient(client);
       cleaned++;
     }
   }
@@ -110,16 +126,26 @@ function broadcast(data: {
   );
   const event = `event: workers\ndata: ${html}\n\n`;
   logger.debug(`[SSE] Sending to ${clients.size} clients`);
+  const encoded = new TextEncoder().encode(event);
   for (const client of clients) {
-    try {
-      client.controller.enqueue(
-        new TextEncoder().encode(event),
+    if (
+      client.controller.desiredSize !== null &&
+      client.controller.desiredSize <= 0
+    ) {
+      logger.debug(
+        `[SSE] Client backpressured, closing connection`,
       );
+      closeClient(client);
+      continue;
+    }
+
+    try {
+      client.controller.enqueue(encoded);
     } catch (error) {
       logger.debug(
         `[SSE] Client disconnected, removing from broadcast list`,
       );
-      clients.delete(client);
+      closeClient(client);
     }
   }
 }
@@ -157,11 +183,18 @@ dashboardRouter.get("/events", async (c) => {
   const stream = new ReadableStream({
     start(controller) {
       clientId = Symbol("client");
-      clients.add({
+      const client: DashboardSseClient = {
         controller,
         id: clientId,
         connectedAt: Date.now(),
-      });
+        cleanup: () => {
+          if (keepaliveInterval) {
+            clearInterval(keepaliveInterval);
+            keepaliveInterval = null;
+          }
+        },
+      };
+      clients.add(client);
       logger.debug(
         `[SSE] Client connected, total clients: ${clients.size}`,
       );
@@ -185,18 +218,15 @@ dashboardRouter.get("/events", async (c) => {
             new TextEncoder().encode(": keepalive\n\n"),
           );
         } catch {
-          if (keepaliveInterval)
-            clearInterval(keepaliveInterval);
+          closeClient(client);
         }
       }, 30000);
     },
     cancel() {
-      if (keepaliveInterval)
-        clearInterval(keepaliveInterval);
       if (clientId) {
         for (const client of clients) {
           if (client.id === clientId) {
-            clients.delete(client);
+            removeClient(client);
             logger.debug(
               `[SSE] Client disconnected, total clients: ${clients.size}`,
             );
@@ -215,6 +245,11 @@ dashboardRouter.get("/events", async (c) => {
     },
   });
 });
+
+export const dashboardSseTestHooks = {
+  broadcast,
+  clients,
+};
 
 dashboardRouter.get("/", async (c) => {
   const theme = getCookie(c, "theme") || "light";

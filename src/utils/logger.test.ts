@@ -7,6 +7,7 @@ import {
   vi,
 } from "vitest";
 import { diag } from "@opentelemetry/api";
+import fs from "fs";
 
 type LoggerModule = typeof import("./logger.js");
 
@@ -95,6 +96,44 @@ describe("logger OTLP export", () => {
       "[WARN] [TEST]",
       "visible warning",
     );
+  });
+
+  it("does not open a log file stream when debug file logging is disabled", async () => {
+    const createWriteStreamSpy = vi.spyOn(
+      fs,
+      "createWriteStream",
+    );
+    const loggerModule = await loadLogger(false, "INFO");
+
+    loggerModule.logger.info("info", undefined, "TEST");
+    loggerModule.logger.warn("warn", undefined, "TEST");
+    loggerModule.logger.error("error", undefined, "TEST");
+
+    expect(createWriteStreamSpy).not.toHaveBeenCalled();
+  });
+
+  it("opens and writes to the log file stream when debug file logging is enabled", async () => {
+    const streamMock = {
+      end: vi.fn(),
+      on: vi.fn(),
+      write: vi.fn(),
+    };
+    streamMock.on.mockReturnValue(streamMock);
+    const createWriteStreamSpy = vi
+      .spyOn(fs, "createWriteStream")
+      .mockReturnValue(
+        streamMock as unknown as fs.WriteStream,
+      );
+    const loggerModule = await loadLogger(false, "DEBUG");
+
+    loggerModule.logger.info("info", undefined, "TEST");
+
+    expect(createWriteStreamSpy).toHaveBeenCalledOnce();
+    expect(streamMock.write).toHaveBeenCalledWith(
+      expect.stringContaining('"message":"info"'),
+    );
+
+    loggerModule.logger.close();
   });
 
   it("exports structured logs to OTLP with redacted secret fields", async () => {
@@ -254,7 +293,7 @@ describe("logger OTLP export", () => {
   });
 
   it("reports enabled OTLP with an empty endpoint as an error", async () => {
-    const loggerModule = await loadLogger(true, "DEBUG", {
+    const loggerModule = await loadLogger(true, "INFO", {
       endpoint: "",
     });
 
@@ -269,7 +308,7 @@ describe("logger OTLP export", () => {
   });
 
   it("reports OTLP exporter initialization failures locally", async () => {
-    const loggerModule = await loadLogger(true, "DEBUG", {
+    const loggerModule = await loadLogger(true, "INFO", {
       exporterFailure: new Error("exporter failed"),
     });
 
@@ -300,7 +339,7 @@ describe("logger OTLP export", () => {
 
   async function loadLogger(
     otlpEnabled: boolean,
-    logLevel = "DEBUG",
+    logLevel = "INFO",
     options: {
       endpoint?: string;
       exporterFailure?: Error;

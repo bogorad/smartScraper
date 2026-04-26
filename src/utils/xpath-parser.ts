@@ -1,5 +1,5 @@
-const MAX_XPATH_LENGTH = 500;
-const DISALLOWED_XPATH_CHARS =
+export const MAX_XPATH_LENGTH = 500;
+export const DISALLOWED_XPATH_CHARS =
   /[\u0000-\u001f\u007f`;<>{}]/;
 const XPATH_START_PATTERN = /(?:\.?\/\/|\.?\/|\(\/\/)/g;
 

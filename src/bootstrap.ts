@@ -11,15 +11,18 @@ import {
   getExtensionPaths,
   getPort,
   initConfig,
+  loadDotenvConfig,
 } from "./config.js";
 import { VERSION } from "./constants.js";
 import { initializeEngine } from "./core/engine.js";
+import type { CoreScraperEngine } from "./core/engine.js";
 import { cleanupOldLogs } from "./services/log-storage.js";
 import { logger } from "./utils/logger.js";
 
 export interface RuntimeDependencies {
   browserAdapter: PuppeteerBrowserAdapter;
   curlFetchAdapter: CurlFetchAdapter;
+  engine: CoreScraperEngine;
 }
 
 export interface BootstrapResult {
@@ -33,15 +36,7 @@ export function createRuntimeDependencies(): RuntimeDependencies {
   const llmAdapter = new OpenRouterLlmAdapter();
   const captchaAdapter = new TwoCaptchaAdapter();
   const curlFetchAdapter = new CurlFetchAdapter();
-  const initializeEngineWithCurl = initializeEngine as (
-    browserAdapter: PuppeteerBrowserAdapter,
-    llmAdapter: OpenRouterLlmAdapter,
-    captchaAdapter: TwoCaptchaAdapter,
-    knownSites: typeof knownSitesAdapter,
-    curlFetchAdapter: CurlFetchAdapter,
-  ) => ReturnType<typeof initializeEngine>;
-
-  initializeEngineWithCurl(
+  const engine = initializeEngine(
     browserAdapter,
     llmAdapter,
     captchaAdapter,
@@ -49,10 +44,11 @@ export function createRuntimeDependencies(): RuntimeDependencies {
     curlFetchAdapter,
   );
 
-  return { browserAdapter, curlFetchAdapter };
+  return { browserAdapter, curlFetchAdapter, engine };
 }
 
 export async function bootstrapApplication(): Promise<BootstrapResult> {
+  loadDotenvConfig();
   const config = initConfig();
   const port = getPort();
   const dataDir = getDataDir();

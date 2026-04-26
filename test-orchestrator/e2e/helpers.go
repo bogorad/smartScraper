@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 )
@@ -67,6 +68,41 @@ func NewTestClient(apiToken string) *TestClient {
 		},
 		token: apiToken,
 	}
+}
+
+var csrfInputPattern = regexp.MustCompile(`<input[^>]+name="_csrf"[^>]+value="([^"]+)"|<input[^>]+value="([^"]+)"[^>]+name="_csrf"`)
+
+// LoginDashboardSession performs the browser-equivalent dashboard login flow.
+// It first fetches /login so the CSRF cookie and hidden form token are present,
+// then posts the API token and CSRF token using the same cookie jar.
+func LoginDashboardSession(t *testing.T, client *http.Client, baseURL string, token string) *http.Response {
+	t.Helper()
+
+	loginURL := baseURL + "/login"
+	loginPage, err := client.Get(loginURL)
+	if err != nil {
+		t.Fatalf("Login page request failed: %v", err)
+	}
+	loginBody := ReadBody(t, loginPage)
+
+	match := csrfInputPattern.FindStringSubmatch(loginBody)
+	if match == nil {
+		t.Fatalf("Login page did not include a CSRF form token")
+	}
+	csrfToken := match[1]
+	if csrfToken == "" {
+		csrfToken = match[2]
+	}
+
+	form := url.Values{}
+	form.Set("token", token)
+	form.Set("_csrf", csrfToken)
+
+	resp, err := client.PostForm(loginURL, form)
+	if err != nil {
+		t.Fatalf("Login request failed: %v", err)
+	}
+	return resp
 }
 
 // Get performs a GET request with auth header.

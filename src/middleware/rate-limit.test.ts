@@ -10,7 +10,12 @@ import {
   rateLimitMiddleware,
   rateLimitTestUtils,
 } from "./rate-limit.js";
+import { getTrustProxyHeaders } from "../config.js";
 import { logger } from "../utils/logger.js";
+
+vi.mock("../config.js", () => ({
+  getTrustProxyHeaders: vi.fn(() => false),
+}));
 
 vi.mock("../utils/logger.js", () => ({
   logger: {
@@ -31,6 +36,7 @@ function createTestApp(maxRequests = 1) {
 describe("rateLimitMiddleware", () => {
   beforeEach(() => {
     rateLimitTestUtils.clearStore();
+    vi.mocked(getTrustProxyHeaders).mockReturnValue(false);
     vi.mocked(logger.warn).mockClear();
   });
 
@@ -86,7 +92,30 @@ describe("rateLimitMiddleware", () => {
     expect(repeatedFirstTokenResponse.status).toBe(429);
   });
 
-  it("uses the first x-forwarded-for address without storing or logging it raw", async () => {
+  it("ignores x-forwarded-for without trusted proxy config", async () => {
+    const app = createTestApp();
+
+    const firstResponse = await app.request("/test", {
+      headers: {
+        "x-forwarded-for": "203.0.113.10",
+      },
+    });
+    const secondResponse = await app.request("/test", {
+      headers: {
+        "x-forwarded-for": "203.0.113.11",
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(429);
+
+    const storeKeys = rateLimitTestUtils.getStoreKeys();
+    expect(storeKeys).toHaveLength(1);
+    expect(storeKeys[0]).not.toContain("203.0.113");
+  });
+
+  it("uses the first x-forwarded-for address when proxy headers are trusted", async () => {
+    vi.mocked(getTrustProxyHeaders).mockReturnValue(true);
     const app = createTestApp();
     const clientIp = "203.0.113.10";
 

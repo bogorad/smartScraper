@@ -1,14 +1,23 @@
 import {
+  afterEach,
   describe,
   it,
   expect,
   beforeEach,
   vi,
 } from "vitest";
-import { scrapeRouter } from "./scrape.js";
+import {
+  resetScrapeRouteEngine,
+  scrapeRouter,
+  setScrapeRouteEngine,
+} from "./scrape.js";
 
 const engineMock = vi.hoisted(() => ({
   scrapeUrl: vi.fn(),
+}));
+
+const urlSafetyMock = vi.hoisted(() => ({
+  validateScrapeTargetUrl: vi.fn(),
 }));
 
 vi.mock("../../config.js", () => ({
@@ -24,20 +33,37 @@ vi.mock("../../middleware/rate-limit.js", () => ({
 }));
 
 vi.mock("../../core/engine.js", () => ({
-  getDefaultEngine: () => ({
-    scrapeUrl: engineMock.scrapeUrl,
-  }),
+  getDefaultEngine: () => {
+    throw new Error("default engine should not be used");
+  },
+}));
+
+vi.mock("../../utils/url.js", () => ({
+  validateScrapeTargetUrl:
+    urlSafetyMock.validateScrapeTargetUrl,
 }));
 
 describe("scrape route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    urlSafetyMock.validateScrapeTargetUrl.mockResolvedValue(
+      {
+        safe: true,
+      },
+    );
     engineMock.scrapeUrl.mockResolvedValue({
       success: true,
       method: "chrome",
       xpath: "//article",
       data: "Extracted content",
     });
+    setScrapeRouteEngine({
+      scrapeUrl: engineMock.scrapeUrl,
+    });
+  });
+
+  afterEach(() => {
+    resetScrapeRouteEngine();
   });
 
   function authorizedJsonRequest(body: unknown): Request {
@@ -107,6 +133,31 @@ describe("scrape route", () => {
       success: false,
       error: "Invalid request body",
     });
+  });
+
+  it("should reject private-network target URLs before scraping", async () => {
+    urlSafetyMock.validateScrapeTargetUrl.mockResolvedValueOnce(
+      {
+        safe: false,
+        error:
+          "Target URL resolves to a private or local network address",
+      },
+    );
+
+    const res = await scrapeRouter.request(
+      authorizedJsonRequest({
+        url: "http://127.0.0.1:3000",
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      success: false,
+      errorType: "CONFIGURATION",
+      error:
+        "Target URL resolves to a private or local network address",
+    });
+    expect(engineMock.scrapeUrl).not.toHaveBeenCalled();
   });
 
   it("should accept optional parameters", async () => {
@@ -205,6 +256,50 @@ describe("scrape route", () => {
       error: "Invalid request body",
     });
     expect(JSON.stringify(json)).not.toContain(xpath);
+  });
+
+  it("should use shared XPath validation for accepted xpath values", async () => {
+    const acceptedXPaths = [
+      "//article[@class='post-content']",
+      "//div[contains(@class, 'article-body')]",
+      "//main/descendant::section[1]",
+    ];
+
+    for (const xpath of acceptedXPaths) {
+      const res = await scrapeRouter.request(
+        authorizedJsonRequest({
+          url: "https://example.com",
+          xpath,
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(engineMock.scrapeUrl).toHaveBeenLastCalledWith(
+        "https://example.com",
+        expect.objectContaining({ xpathOverride: xpath }),
+      );
+    }
+  });
+
+  it("should use shared XPath validation for rejected xpath values", async () => {
+    const rejectedXPaths = [
+      "",
+      "//div<script>",
+      "//article[@class='content'",
+      '//article" trailing',
+      "not an xpath",
+    ];
+
+    for (const xpath of rejectedXPaths) {
+      const res = await scrapeRouter.request(
+        authorizedJsonRequest({
+          url: "https://example.com",
+          xpath,
+        }),
+      );
+
+      expect(res.status).toBe(400);
+    }
   });
 
   it("should handle all valid outputType values", async () => {

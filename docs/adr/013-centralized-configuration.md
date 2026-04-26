@@ -43,7 +43,7 @@ Implement a single, authoritative configuration module using Zod for validation 
 
 3. **Supports explicit runtime configuration sources**
    - Environment variables (highest priority)
-   - `.env` file via dotenv (loaded automatically)
+   - `.env` file via dotenv during explicit bootstrap or test setup
    - Development `secrets.yaml` only through `scripts/with-secrets.sh`, which
      exports environment variables before app startup
    - Default values (lowest priority)
@@ -64,9 +64,11 @@ Implement a single, authoritative configuration module using Zod for validation 
 ```typescript
 // src/config.ts
 
-// 1. Load .env file automatically
-if (fs.existsSync('.env')) {
-  dotenv.config();
+// 1. Load .env file during explicit bootstrap/test setup
+export function loadDotenvConfig(): void {
+  if (fs.existsSync('.env')) {
+    dotenv.config();
+  }
 }
 
 // 2. Define schema with Zod
@@ -245,7 +247,7 @@ Configuration is tested by:
 
 ## Dependencies Added
 
-- `dotenv` - Load `.env` file automatically
+- `dotenv` - Load `.env` files during explicit bootstrap/test setup
 
 ## Related Documentation
 
