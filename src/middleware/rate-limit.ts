@@ -1,5 +1,6 @@
-import { createMiddleware } from 'hono/factory';
-import { logger } from '../utils/logger.js';
+import { createHash } from "node:crypto";
+import { createMiddleware } from "hono/factory";
+import { logger } from "../utils/logger.js";
 
 interface RateLimitEntry {
   count: number;
@@ -10,7 +11,7 @@ interface RateLimitEntry {
 const store = new Map<string, RateLimitEntry>();
 
 // Cleanup expired entries every minute
-setInterval(() => {
+const cleanupInterval = setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of store) {
     if (entry.resetTime < now) {
@@ -18,10 +19,49 @@ setInterval(() => {
     }
   }
 }, 60000);
+cleanupInterval.unref?.();
 
 interface RateLimitOptions {
   maxRequests: number;
   windowMs: number;
+}
+
+function hashIdentifier(
+  type: string,
+  value: string,
+): string {
+  return `${type}:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function getBearerToken(
+  authorization: string | undefined,
+): string | undefined {
+  const match = authorization?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || undefined;
+}
+
+function getForwardedIp(
+  xForwardedFor: string | undefined,
+): string | undefined {
+  return xForwardedFor?.split(",")[0]?.trim() || undefined;
+}
+
+function getRateLimitIdentifier(headers: {
+  authorization?: string;
+  xForwardedFor?: string;
+  xRealIp?: string;
+}): string {
+  const bearerToken = getBearerToken(headers.authorization);
+  if (bearerToken) {
+    return hashIdentifier("auth", bearerToken);
+  }
+
+  return hashIdentifier(
+    "ip",
+    getForwardedIp(headers.xForwardedFor) ||
+      headers.xRealIp ||
+      "unknown",
+  );
 }
 
 /**
@@ -29,14 +69,18 @@ interface RateLimitOptions {
  * @param maxRequests Maximum number of requests allowed in the window
  * @param windowMs Time window in milliseconds
  */
-export const rateLimitMiddleware = (options: RateLimitOptions) => {
+export const rateLimitMiddleware = (
+  options: RateLimitOptions,
+) => {
   const { maxRequests, windowMs } = options;
 
   return createMiddleware(async (c, next) => {
-    // Identify client by Authorization header or IP
-    const identifier = c.req.header('Authorization')?.replace('Bearer ', '') ||
-                      c.req.header('x-forwarded-for') ||
-                      'unknown';
+    // Identify client by a stable digest so credentials are never stored or logged.
+    const identifier = getRateLimitIdentifier({
+      authorization: c.req.header("Authorization"),
+      xForwardedFor: c.req.header("x-forwarded-for"),
+      xRealIp: c.req.header("x-real-ip"),
+    });
 
     const now = Date.now();
     const key = `${identifier}:${Math.floor(now / windowMs)}`;
@@ -45,7 +89,10 @@ export const rateLimitMiddleware = (options: RateLimitOptions) => {
 
     if (!entry) {
       // First request in this window
-      store.set(key, { count: 1, resetTime: now + windowMs });
+      store.set(key, {
+        count: 1,
+        resetTime: now + windowMs,
+      });
     } else {
       entry.count++;
     }
@@ -53,28 +100,52 @@ export const rateLimitMiddleware = (options: RateLimitOptions) => {
     // Check if limit exceeded
     const currentEntry = store.get(key)!;
     if (currentEntry.count > maxRequests) {
-      logger.warn('[RATE_LIMIT] Rate limit exceeded', {
-        identifier: identifier.slice(0, 20),
+      logger.warn("[RATE_LIMIT] Rate limit exceeded", {
+        identifier,
         count: currentEntry.count,
-        maxRequests
+        maxRequests,
       });
 
-      return c.json({
-        error: 'Rate limit exceeded',
-        retryAfter: Math.ceil((currentEntry.resetTime - now) / 1000)
-      }, 429, {
-        'Retry-After': String(Math.ceil((currentEntry.resetTime - now) / 1000)),
-        'X-RateLimit-Limit': String(maxRequests),
-        'X-RateLimit-Remaining': '0',
-        'X-RateLimit-Reset': String(Math.ceil(currentEntry.resetTime / 1000))
-      });
+      return c.json(
+        {
+          error: "Rate limit exceeded",
+          retryAfter: Math.ceil(
+            (currentEntry.resetTime - now) / 1000,
+          ),
+        },
+        429,
+        {
+          "Retry-After": String(
+            Math.ceil(
+              (currentEntry.resetTime - now) / 1000,
+            ),
+          ),
+          "X-RateLimit-Limit": String(maxRequests),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(
+            Math.ceil(currentEntry.resetTime / 1000),
+          ),
+        },
+      );
     }
 
     // Add rate limit headers to response
-    c.header('X-RateLimit-Limit', String(maxRequests));
-    c.header('X-RateLimit-Remaining', String(Math.max(0, maxRequests - currentEntry.count)));
-    c.header('X-RateLimit-Reset', String(Math.ceil(currentEntry.resetTime / 1000)));
+    c.header("X-RateLimit-Limit", String(maxRequests));
+    c.header(
+      "X-RateLimit-Remaining",
+      String(Math.max(0, maxRequests - currentEntry.count)),
+    );
+    c.header(
+      "X-RateLimit-Reset",
+      String(Math.ceil(currentEntry.resetTime / 1000)),
+    );
 
     await next();
   });
+};
+
+export const rateLimitTestUtils = {
+  clearStore: () => store.clear(),
+  getStoreKeys: () => Array.from(store.keys()),
+  getRateLimitIdentifier,
 };

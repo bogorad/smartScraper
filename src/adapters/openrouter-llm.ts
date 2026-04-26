@@ -1,10 +1,19 @@
-import axios from 'axios';
-import type { LlmPort, LlmSuggestInput } from '../ports/llm.js';
-import type { LlmXPathSuggestion } from '../domain/models.js';
-import { parseXPathResponse } from '../utils/xpath-parser.js';
-import { DEFAULTS } from '../constants.js';
-import { getOpenrouterApiKey, getLlmModel, getLlmTemperature, getLlmHttpReferer, getLlmXTitle } from '../config.js';
-import { logger } from '../utils/logger.js';
+import axios from "axios";
+import type {
+  LlmPort,
+  LlmSuggestInput,
+} from "../ports/llm.js";
+import type { LlmXPathSuggestion } from "../domain/models.js";
+import { parseXPathResponse } from "../utils/xpath-parser.js";
+import { DEFAULTS } from "../constants.js";
+import {
+  getOpenrouterApiKey,
+  getLlmModel,
+  getLlmTemperature,
+  getLlmHttpReferer,
+  getLlmXTitle,
+} from "../config.js";
+import { logger } from "../utils/logger.js";
 
 const SYSTEM_PROMPT = `You are an expert web scraper. Your task is to analyze HTML structure and identify the XPath selector for the main article content.
 
@@ -19,6 +28,26 @@ Rules:
 Output format:
 ["//article[@class='post-content']", "//div[@id='article-body']", "//main//div[@class='entry']"]`;
 
+function headerValueToText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.join(", ");
+  }
+
+  if (
+    value === undefined ||
+    value === null ||
+    value === false
+  ) {
+    return "";
+  }
+
+  return String(value);
+}
+
 export class OpenRouterLlmAdapter implements LlmPort {
   private apiKey: string;
   private model: string;
@@ -30,9 +59,11 @@ export class OpenRouterLlmAdapter implements LlmPort {
     this.temperature = getLlmTemperature();
   }
 
-  async suggestXPaths(input: LlmSuggestInput): Promise<LlmXPathSuggestion[]> {
+  async suggestXPaths(
+    input: LlmSuggestInput,
+  ): Promise<LlmXPathSuggestion[]> {
     if (!this.apiKey) {
-      console.warn('[LLM] OPENROUTER_API_KEY not set');
+      console.warn("[LLM] OPENROUTER_API_KEY not set");
       return [];
     }
 
@@ -40,64 +71,81 @@ export class OpenRouterLlmAdapter implements LlmPort {
 
     try {
       const response = await axios.post(
-        'https://openrouter.ai/api/v1/chat/completions',
+        "https://openrouter.ai/api/v1/chat/completions",
         {
           model: this.model,
           temperature: this.temperature,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userContent }
-          ]
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: userContent },
+          ],
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': getLlmHttpReferer(),
-            'X-Title': getLlmXTitle()
+            Authorization: `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": getLlmHttpReferer(),
+            "X-Title": getLlmXTitle(),
           },
-          timeout: 30000
-        }
+          timeout: 30000,
+        },
       );
 
       // Validate response content type (skip if headers missing in test mocks)
-      const contentType = response.headers?.['content-type'] || '';
-      if (contentType && !contentType.includes('application/json')) {
-        logger.warn('[LLM] Unexpected response content type', {
-          contentType,
-          status: response.status
-        });
+      const contentType = headerValueToText(
+        response.headers?.["content-type"],
+      );
+      if (
+        contentType &&
+        !contentType.includes("application/json")
+      ) {
+        logger.warn(
+          "[LLM] Unexpected response content type",
+          {
+            contentType,
+            status: response.status,
+          },
+        );
         return [];
       }
 
-      const content = response.data?.choices?.[0]?.message?.content;
+      const content =
+        response.data?.choices?.[0]?.message?.content;
       if (!content) {
-        logger.debug('[LLM] Empty content in response', {
-          hasChoices: !!response.data?.choices
+        logger.debug("[LLM] Empty content in response", {
+          hasChoices: !!response.data?.choices,
         });
         return [];
       }
 
       const xpaths = parseXPathResponse(content);
-      return xpaths.map(xpath => ({ xpath }));
+      return xpaths.map((xpath) => ({ xpath }));
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        const retryAfter = error.response?.headers?.['retry-after'];
+        const retryAfter =
+          error.response?.headers?.["retry-after"];
         if (retryAfter) {
-          console.warn(`[LLM] Rate limited, retry after ${retryAfter}s`);
+          console.warn(
+            `[LLM] Rate limited, retry after ${retryAfter}s`,
+          );
         }
-        console.error('[LLM] API error:', error.response?.status, error.response?.data);
+        console.error(
+          "[LLM] API error:",
+          error.response?.status,
+          error.response?.data,
+        );
       } else {
-        console.error('[LLM] Error:', error);
+        console.error("[LLM] Error:", error);
       }
       return [];
     }
   }
 
   private buildUserPrompt(input: LlmSuggestInput): string {
-    const snippetsText = input.snippets.length > 0
-      ? `Sample text from the article:\n${input.snippets.map(s => `"${s}"`).join('\n\n')}`
-      : '';
+    const snippetsText =
+      input.snippets.length > 0
+        ? `Sample text from the article:\n${input.snippets.map((s) => `"${s}"`).join("\n\n")}`
+        : "";
 
     let prompt = `Analyze this HTML and suggest XPath selectors for the main article content.
 
