@@ -1,15 +1,32 @@
-import fs from 'fs/promises';
-import path from 'path';
-import PQueue from 'p-queue';
-import { parse, stringify } from 'comment-json';
-import type { KnownSitesPort } from '../ports/known-sites.js';
-import type { SiteConfig } from '../domain/models.js';
-import { utcNow } from '../utils/date.js';
-import { getDataDir } from '../config.js';
-import { logger } from '../utils/logger.js';
+import fs from "fs/promises";
+import path from "path";
+import PQueue from "p-queue";
+import { parse, stringify } from "comment-json";
+import type { KnownSitesPort } from "../ports/known-sites.js";
+import type { SiteConfig } from "../domain/models.js";
+import { utcNow } from "../utils/date.js";
+import { getDataDir } from "../config.js";
+import { logger } from "../utils/logger.js";
 
 function getSitesFile(): string {
-  return path.join(getDataDir(), 'sites.jsonc');
+  return path.join(getDataDir(), "sites.jsonc");
+}
+
+async function quarantineCorruptSitesFile(
+  sitesFile: string,
+  error: unknown,
+): Promise<void> {
+  const corruptFile = `${sitesFile}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  await fs.rename(sitesFile, corruptFile);
+  await fs.writeFile(sitesFile, "[]");
+  logger.warn("[SITES] Recovered from corrupt sites file", {
+    file: sitesFile,
+    corruptFile,
+    error:
+      error instanceof Error
+        ? error.message
+        : String(error),
+  });
 }
 
 export class FsKnownSitesAdapter implements KnownSitesPort {
@@ -22,22 +39,41 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
       await fs.access(sitesFile);
     } catch {
       await fs.mkdir(getDataDir(), { recursive: true });
-      await fs.writeFile(sitesFile, '[]');
+      await fs.writeFile(sitesFile, "[]");
     }
   }
 
   private async load(): Promise<SiteConfig[]> {
     if (this.cache) return [...this.cache]; // Return copy to prevent external mutation
     await this.ensureFile();
-    const content = await fs.readFile(getSitesFile(), 'utf-8');
-    this.cache = parse(content) as unknown as SiteConfig[];
-    logger.debug(`[SITES] Loaded ${this.cache.length} site configs`);
+    const content = await fs.readFile(
+      getSitesFile(),
+      "utf-8",
+    );
+    try {
+      const parsed = parse(content) as unknown;
+      if (!Array.isArray(parsed)) {
+        throw new Error("sites file must contain an array");
+      }
+      this.cache = parsed as SiteConfig[];
+    } catch (error) {
+      await quarantineCorruptSitesFile(
+        getSitesFile(),
+        error,
+      );
+      this.cache = [];
+    }
+    logger.debug(
+      `[SITES] Loaded ${this.cache.length} site configs`,
+    );
     return [...this.cache];
   }
 
-  private async flush(configs: SiteConfig[]): Promise<void> {
+  private async flush(
+    configs: SiteConfig[],
+  ): Promise<void> {
     await this.ensureFile();
-    const tempFile = getSitesFile() + '.tmp';
+    const tempFile = getSitesFile() + ".tmp";
     const content = stringify(configs, null, 2);
     await fs.writeFile(tempFile, content);
     await fs.rename(tempFile, getSitesFile());
@@ -45,23 +81,27 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   }
 
   // Reads use cache directly - no queue needed
-  async getConfig(domain: string): Promise<SiteConfig | undefined> {
+  async getConfig(
+    domain: string,
+  ): Promise<SiteConfig | undefined> {
     const configs = await this.load();
-    return configs.find(c => c.domainPattern === domain);
+    return configs.find((c) => c.domainPattern === domain);
   }
 
   // Writes go through queue for serialization
   async saveConfig(config: SiteConfig): Promise<void> {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
-      const index = configs.findIndex(c => c.domainPattern === config.domainPattern);
-      
+      const index = configs.findIndex(
+        (c) => c.domainPattern === config.domainPattern,
+      );
+
       if (index >= 0) {
         configs[index] = config;
       } else {
         configs.push(config);
       }
-      
+
       await this.flush(configs);
     });
   }
@@ -69,8 +109,10 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   async incrementFailure(domain: string): Promise<void> {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
-      const config = configs.find(c => c.domainPattern === domain);
-      
+      const config = configs.find(
+        (c) => c.domainPattern === domain,
+      );
+
       if (config) {
         config.failureCountSinceLastSuccess++;
         await this.flush(configs);
@@ -81,8 +123,10 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   async markSuccess(domain: string): Promise<void> {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
-      const config = configs.find(c => c.domainPattern === domain);
-      
+      const config = configs.find(
+        (c) => c.domainPattern === domain,
+      );
+
       if (config) {
         config.failureCountSinceLastSuccess = 0;
         config.lastSuccessfulScrapeTimestamp = utcNow();
@@ -94,7 +138,9 @@ export class FsKnownSitesAdapter implements KnownSitesPort {
   async deleteConfig(domain: string): Promise<void> {
     return this.writeQueue.add(async () => {
       const configs = await this.load();
-      const filtered = configs.filter(c => c.domainPattern !== domain);
+      const filtered = configs.filter(
+        (c) => c.domainPattern !== domain,
+      );
       await this.flush(filtered);
     });
   }
