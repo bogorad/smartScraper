@@ -1,28 +1,29 @@
-import { Hono } from 'hono';
-import { getCookie } from 'hono/cookie';
-import { dashboardAuthMiddleware } from '../../middleware/auth.js';
-import { rateLimitMiddleware } from '../../middleware/rate-limit.js';
-import { csrfMiddleware, getCsrfToken } from '../../middleware/csrf.js';
-import { Layout } from '../../components/layout.js';
-import { StatsCard } from '../../components/stats-card.js';
-import { loadStats, getTopDomains, resetStats } from '../../services/stats-storage.js';
-import { readTodayLogs } from '../../services/log-storage.js';
-import { formatDuration } from '../../utils/date.js';
+import { Hono } from "hono";
+import { getCookie } from "hono/cookie";
+import { getCsrfToken } from "../../middleware/csrf.js";
+import { Layout } from "../../components/layout.js";
+import { StatsCard } from "../../components/stats-card.js";
+import {
+  loadStats,
+  getTopDomains,
+  resetStats,
+} from "../../services/stats-storage.js";
+import { readTodayLogs } from "../../services/log-storage.js";
+import { formatDuration } from "../../utils/date.js";
+import { applyDashboardRoutePolicy } from "./policy.js";
 
 export const statsRouter = new Hono();
 
-statsRouter.use('/*', rateLimitMiddleware({ maxRequests: 60, windowMs: 60000 }));
-statsRouter.use('/*', csrfMiddleware);
-statsRouter.use('/*', dashboardAuthMiddleware);
+applyDashboardRoutePolicy(statsRouter);
 
-statsRouter.post('/reset', async (c) => {
+statsRouter.post("/reset", async (c) => {
   await resetStats();
-  c.header('HX-Refresh', 'true');
+  c.header("HX-Refresh", "true");
   return c.body(null);
 });
 
-statsRouter.get('/', async (c) => {
-  const theme = getCookie(c, 'theme') || 'light';
+statsRouter.get("/", async (c) => {
+  const theme = getCookie(c, "theme") || "light";
   const csrfToken = getCsrfToken(c);
   const stats = await loadStats();
   const topDomains = await getTopDomains(10);
@@ -30,16 +31,31 @@ statsRouter.get('/', async (c) => {
 
   const recentLogs = todayLogs.slice(-20).reverse();
 
-  const successRate = stats.scrapeTotal > 0
-    ? ((stats.scrapeTotal - stats.failTotal) / stats.scrapeTotal * 100).toFixed(1)
-    : '0';
+  const successRate =
+    stats.scrapeTotal > 0
+      ? (
+          ((stats.scrapeTotal - stats.failTotal) /
+            stats.scrapeTotal) *
+          100
+        ).toFixed(1)
+      : "0";
 
-  const todaySuccessRate = stats.scrapeToday > 0
-    ? ((stats.scrapeToday - stats.failToday) / stats.scrapeToday * 100).toFixed(1)
-    : '0';
+  const todaySuccessRate =
+    stats.scrapeToday > 0
+      ? (
+          ((stats.scrapeToday - stats.failToday) /
+            stats.scrapeToday) *
+          100
+        ).toFixed(1)
+      : "0";
 
   return c.html(
-    <Layout title="Stats - SmartScraper" activePath="/dashboard/stats" theme={theme} csrfToken={csrfToken}>
+    <Layout
+      title="Stats - SmartScraper"
+      activePath="/dashboard/stats"
+      theme={theme}
+      csrfToken={csrfToken}
+    >
       <div class="flex justify-between items-center mb-4">
         <h1 class="mb-0">Statistics</h1>
         <button
@@ -53,10 +69,24 @@ statsRouter.get('/', async (c) => {
       </div>
 
       <div class="stats-grid">
-        <StatsCard title="Total Scrapes" value={stats.scrapeTotal} subtitle={`${successRate}% success`} />
-        <StatsCard title="Today" value={stats.scrapeToday} subtitle={`${todaySuccessRate}% success`} />
-        <StatsCard title="Total Failures" value={stats.failTotal} />
-        <StatsCard title="Failed Today" value={stats.failToday} />
+        <StatsCard
+          title="Total Scrapes"
+          value={stats.scrapeTotal}
+          subtitle={`${successRate}% success`}
+        />
+        <StatsCard
+          title="Today"
+          value={stats.scrapeToday}
+          subtitle={`${todaySuccessRate}% success`}
+        />
+        <StatsCard
+          title="Total Failures"
+          value={stats.failTotal}
+        />
+        <StatsCard
+          title="Failed Today"
+          value={stats.failToday}
+        />
       </div>
 
       <div class="card">
@@ -86,7 +116,9 @@ statsRouter.get('/', async (c) => {
       </div>
 
       <div class="card">
-        <div class="card-header">Recent Activity (Today)</div>
+        <div class="card-header">
+          Recent Activity (Today)
+        </div>
         {recentLogs.length > 0 ? (
           <table>
             <thead>
@@ -100,16 +132,27 @@ statsRouter.get('/', async (c) => {
             <tbody>
               {recentLogs.map((log) => (
                 <tr>
-                  <td class="text-sm text-muted">{new Date(log.ts).toLocaleTimeString()}</td>
+                  <td class="text-sm text-muted">
+                    {new Date(log.ts).toLocaleTimeString()}
+                  </td>
                   <td class="code">{log.domain}</td>
                   <td>
                     {log.success ? (
-                      <span class="badge badge-success">OK</span>
+                      <span class="badge badge-success">
+                        OK
+                      </span>
                     ) : (
-                      <span class="badge badge-error" title={log.error}>{log.errorType}</span>
+                      <span
+                        class="badge badge-error"
+                        title={log.error}
+                      >
+                        {log.errorType}
+                      </span>
                     )}
                   </td>
-                  <td class="text-sm">{formatDuration(log.ms)}</td>
+                  <td class="text-sm">
+                    {formatDuration(log.ms)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -118,6 +161,6 @@ statsRouter.get('/', async (c) => {
           <p class="text-muted">No activity today.</p>
         )}
       </div>
-    </Layout>
+    </Layout>,
   );
 });

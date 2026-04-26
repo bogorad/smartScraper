@@ -1,8 +1,6 @@
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
-import { dashboardAuthMiddleware } from "../../middleware/auth.js";
-import { rateLimitMiddleware } from "../../middleware/rate-limit.js";
-import { csrfMiddleware, getCsrfToken } from "../../middleware/csrf.js";
+import { getCsrfToken } from "../../middleware/csrf.js";
 import { Layout } from "../../components/layout.js";
 import { StatsCard } from "../../components/stats-card.js";
 import {
@@ -14,13 +12,11 @@ import {
   workerEvents,
 } from "../../core/engine.js";
 import { logger } from "../../utils/logger.js";
+import { applyDashboardRoutePolicy } from "./policy.js";
 
 export const dashboardRouter = new Hono();
 
-// Rate limit: 60 requests per minute per client (UI interactions)
-dashboardRouter.use("/*", rateLimitMiddleware({ maxRequests: 60, windowMs: 60000 }));
-dashboardRouter.use("/*", csrfMiddleware);
-dashboardRouter.use("/*", dashboardAuthMiddleware);
+applyDashboardRoutePolicy(dashboardRouter);
 
 dashboardRouter.post("/theme", (c) => {
   const current = getCookie(c, "theme") || "light";
@@ -56,13 +52,18 @@ setInterval(() => {
   const now = Date.now();
   let cleaned = 0;
   for (const client of clients) {
-    if (now - client.connectedAt > SSE_CONNECTION_TIMEOUT_MS) {
+    if (
+      now - client.connectedAt >
+      SSE_CONNECTION_TIMEOUT_MS
+    ) {
       clients.delete(client);
       cleaned++;
     }
   }
   if (cleaned > 0) {
-    logger.debug(`[SSE] Cleaned up ${cleaned} stale connections`);
+    logger.debug(
+      `[SSE] Cleaned up ${cleaned} stale connections`,
+    );
   }
 }, 60000); // Run every minute
 
@@ -82,8 +83,11 @@ function renderWorkersHtml(stats: {
 }): string {
   if (stats.active > 0 && stats.activeUrls.length > 0) {
     const urlList = stats.activeUrls
-      .map(url => `<p class="code text-sm" style="margin: 0 0 4px 0; word-break: break-all;">${escapeHtml(url)}</p>`)
-      .join('');
+      .map(
+        (url) =>
+          `<p class="code text-sm" style="margin: 0 0 4px 0; word-break: break-all;">${escapeHtml(url)}</p>`,
+      )
+      .join("");
     return `<div class="card-header">Scraping (${stats.active}/${stats.max})</div>${urlList}`;
   }
   if (stats.active > 0) {
@@ -120,19 +124,31 @@ function broadcast(data: {
   }
 }
 
-workerEvents.on("change", (data: { activeUrls: string[]; active: number; max: number }) => {
-  broadcast({
-    active: data.active,
-    max: data.max,
-    activeUrls: data.activeUrls,
-  });
-});
+workerEvents.on(
+  "change",
+  (data: {
+    activeUrls: string[];
+    active: number;
+    max: number;
+  }) => {
+    broadcast({
+      active: data.active,
+      max: data.max,
+      activeUrls: data.activeUrls,
+    });
+  },
+);
 
 dashboardRouter.get("/events", async (c) => {
   // Check connection limit
   if (clients.size >= MAX_SSE_CLIENTS) {
-    logger.warn(`[SSE] Connection limit reached: ${MAX_SSE_CLIENTS}`);
-    return c.json({ error: 'Server connection limit reached' }, 503);
+    logger.warn(
+      `[SSE] Connection limit reached: ${MAX_SSE_CLIENTS}`,
+    );
+    return c.json(
+      { error: "Server connection limit reached" },
+      503,
+    );
   }
 
   let clientId: symbol | null = null;
@@ -141,7 +157,11 @@ dashboardRouter.get("/events", async (c) => {
   const stream = new ReadableStream({
     start(controller) {
       clientId = Symbol("client");
-      clients.add({ controller, id: clientId, connectedAt: Date.now() });
+      clients.add({
+        controller,
+        id: clientId,
+        connectedAt: Date.now(),
+      });
       logger.debug(
         `[SSE] Client connected, total clients: ${clients.size}`,
       );
@@ -240,9 +260,13 @@ dashboardRouter.get("/", async (c) => {
         sse-connect="/dashboard/events"
         sse-swap="workers"
       >
-        {queueStats.active > 0 && queueStats.activeUrls.length > 0 ? (
+        {queueStats.active > 0 &&
+        queueStats.activeUrls.length > 0 ? (
           <>
-            <div class="card-header">Scraping ({queueStats.active}/{queueStats.max})</div>
+            <div class="card-header">
+              Scraping ({queueStats.active}/{queueStats.max}
+              )
+            </div>
             {queueStats.activeUrls.map((url) => (
               <p
                 class="code text-sm"
@@ -255,14 +279,20 @@ dashboardRouter.get("/", async (c) => {
         ) : queueStats.active > 0 ? (
           <>
             <div class="card-header">Status</div>
-            <p class="text-muted text-sm" style="margin: 0;">
+            <p
+              class="text-muted text-sm"
+              style="margin: 0;"
+            >
               Starting...
             </p>
           </>
         ) : (
           <>
             <div class="card-header">Status</div>
-            <p class="text-muted text-sm" style="margin: 0;">
+            <p
+              class="text-muted text-sm"
+              style="margin: 0;"
+            >
               Idle (0/{queueStats.max})
             </p>
           </>
