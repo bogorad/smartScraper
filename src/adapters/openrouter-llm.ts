@@ -47,6 +47,33 @@ function headerValueToText(value: unknown): string {
   return String(value);
 }
 
+function sanitizedProviderError(
+  data: unknown,
+): Record<string, unknown> {
+  if (!data || typeof data !== "object") {
+    return {};
+  }
+
+  const providerData = data as Record<string, any>;
+  const providerError =
+    providerData.error &&
+    typeof providerData.error === "object"
+      ? providerData.error
+      : providerData;
+
+  if (typeof providerData.error === "string") {
+    return { message: providerData.error };
+  }
+
+  return {
+    ...(providerError.code && { code: providerError.code }),
+    ...(providerError.type && { type: providerError.type }),
+    ...(providerError.message && {
+      message: String(providerError.message),
+    }),
+  };
+}
+
 export class OpenRouterLlmAdapter implements LlmPort {
   private apiKey: string;
   private model: string;
@@ -62,7 +89,7 @@ export class OpenRouterLlmAdapter implements LlmPort {
     input: LlmSuggestInput,
   ): Promise<LlmXPathSuggestion[]> {
     if (!this.apiKey) {
-      console.warn("[LLM] OPENROUTER_API_KEY not set");
+      logger.warn("[LLM] OPENROUTER_API_KEY not set");
       return [];
     }
 
@@ -123,18 +150,20 @@ export class OpenRouterLlmAdapter implements LlmPort {
       if (axios.isAxiosError(error)) {
         const retryAfter =
           error.response?.headers?.["retry-after"];
-        if (retryAfter) {
-          console.warn(
-            `[LLM] Rate limited, retry after ${retryAfter}s`,
-          );
-        }
-        console.error(
-          "[LLM] API error:",
-          error.response?.status,
-          error.response?.data,
-        );
+        logger.error("[LLM] API error", {
+          status: error.response?.status,
+          retryAfter: headerValueToText(retryAfter),
+          providerError: sanitizedProviderError(
+            error.response?.data,
+          ),
+        });
       } else {
-        console.error("[LLM] Error:", error);
+        logger.error("[LLM] Error", {
+          error:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        });
       }
       return [];
     }

@@ -8,13 +8,27 @@ import {
 import axios from "axios";
 import { OpenRouterLlmAdapter } from "./openrouter-llm.js";
 
+const mockConfig = vi.hoisted(() => ({
+  openrouterApiKey: "test-api-key",
+}));
+
+const loggerMock = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+
 vi.mock("axios");
 vi.mock("../config.js", () => ({
-  getOpenrouterApiKey: () => "test-api-key",
+  getOpenrouterApiKey: () => mockConfig.openrouterApiKey,
   getLlmModel: () => "test-model",
   getLlmTemperature: () => 0,
   getLlmHttpReferer: () => "https://example.com",
   getLlmXTitle: () => "Test App",
+}));
+vi.mock("../utils/logger.js", () => ({
+  logger: loggerMock,
 }));
 
 describe("OpenRouterLlmAdapter", () => {
@@ -23,6 +37,7 @@ describe("OpenRouterLlmAdapter", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockConfig.openrouterApiKey = "test-api-key";
     adapter = new OpenRouterLlmAdapter();
   });
 
@@ -261,6 +276,76 @@ describe("OpenRouterLlmAdapter", () => {
       });
 
       expect(result).toEqual([]);
+      expect(loggerMock.error).toHaveBeenCalledWith(
+        "[LLM] API error",
+        {
+          status: 429,
+          retryAfter: "60",
+          providerError: {
+            message: "Rate limited",
+          },
+        },
+      );
+    });
+
+    it("should log sanitized provider errors without raw response data", async () => {
+      const error = {
+        isAxiosError: true,
+        response: {
+          status: 400,
+          headers: {},
+          data: {
+            error: {
+              code: "invalid_request",
+              message: "Bad request",
+              prompt: "raw prompt must not be logged",
+            },
+          },
+        },
+      };
+
+      mockAxios.post = vi.fn().mockRejectedValue(error);
+      (mockAxios.isAxiosError as any) = vi
+        .fn()
+        .mockReturnValue(true);
+
+      const result = await adapter.suggestXPaths({
+        simplifiedDom:
+          "<html><body><article>Content</article></body></html>",
+        snippets: [],
+        url: "https://example.com/article",
+      });
+
+      expect(result).toEqual([]);
+      expect(loggerMock.error).toHaveBeenCalledWith(
+        "[LLM] API error",
+        {
+          status: 400,
+          retryAfter: "",
+          providerError: {
+            code: "invalid_request",
+            message: "Bad request",
+          },
+        },
+      );
+    });
+
+    it("should log missing API key through the centralized logger", async () => {
+      mockConfig.openrouterApiKey = "";
+      adapter = new OpenRouterLlmAdapter();
+
+      const result = await adapter.suggestXPaths({
+        simplifiedDom:
+          "<html><body><article>Content</article></body></html>",
+        snippets: [],
+        url: "https://example.com/article",
+      });
+
+      expect(result).toEqual([]);
+      expect(loggerMock.warn).toHaveBeenCalledWith(
+        "[LLM] OPENROUTER_API_KEY not set",
+      );
+      expect(mockAxios.post).not.toHaveBeenCalled();
     });
 
     it("should handle timeout errors", async () => {
