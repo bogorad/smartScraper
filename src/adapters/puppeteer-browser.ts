@@ -100,7 +100,10 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
           logger.debug(`[BROWSER] ${text}`);
         }
       });
-      await page.setUserAgent(DEFAULTS.USER_AGENT);
+      await page.setUserAgent(options?.userAgentString || DEFAULTS.USER_AGENT);
+      if (options?.headers && Object.keys(options.headers).length > 0) {
+        await page.setExtraHTTPHeaders(options.headers);
+      }
       await page.setViewport({ width: DEFAULTS.VIEWPORT_WIDTH, height: DEFAULTS.VIEWPORT_HEIGHT });
 
       if (hasExtensions) {

@@ -18,6 +18,7 @@ export interface ScrapeOptions {
   methodHint?: MethodValue;
   proxyDetails?: { server: string };
   userAgentString?: string;
+  requestHeaders?: Record<string, string>;
   timeoutMs?: number;
   debugContextId?: string;
   xpathOverride?: string;
@@ -67,6 +68,8 @@ export interface LoadPageOptions {
   timeout?: number;
   waitUntil?: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2';
   proxy?: string;
+  userAgentString?: string;
+  headers?: Record<string, string>;
 }
 
 export interface CaptchaSolveInput {

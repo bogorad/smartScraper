@@ -93,7 +93,66 @@ describe('CoreScraperEngine', () => {
 
       expect(mockBrowser.loadPage).toHaveBeenCalledWith('https://example.com/article', {
         timeout: expect.any(Number),
-        proxy: 'http://proxy.example:8080'
+        proxy: 'http://proxy.example:8080',
+        userAgentString: undefined,
+        headers: undefined
+      });
+    });
+
+    it('should forward site headers and user-agent to browser page loads', async () => {
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue({
+        domainPattern: 'example.com',
+        xpathMainContent: '//article',
+        failureCountSinceLastSuccess: 0,
+        siteSpecificHeaders: {
+          'Accept-Language': 'en-US,en;q=0.9',
+          'X-Site': 'saved'
+        },
+        userAgent: 'Saved Site UA'
+      });
+
+      await engine.scrapeUrl('https://example.com/article');
+
+      expect(mockBrowser.loadPage).toHaveBeenCalledWith('https://example.com/article', {
+        timeout: expect.any(Number),
+        proxy: undefined,
+        userAgentString: 'Saved Site UA',
+        headers: {
+          'Accept-Language': 'en-US,en;q=0.9',
+          'X-Site': 'saved'
+        }
+      });
+    });
+
+    it('should let request user-agent and headers override saved site values', async () => {
+      mockKnownSites.getConfig = vi.fn().mockResolvedValue({
+        domainPattern: 'example.com',
+        xpathMainContent: '//article',
+        failureCountSinceLastSuccess: 0,
+        siteSpecificHeaders: {
+          'Accept-Language': 'en-US,en;q=0.9',
+          'X-Site': 'saved'
+        },
+        userAgent: 'Saved Site UA'
+      });
+
+      await engine.scrapeUrl('https://example.com/article', {
+        userAgentString: 'Request UA',
+        requestHeaders: {
+          'X-Site': 'request',
+          'X-Request': 'yes'
+        }
+      });
+
+      expect(mockBrowser.loadPage).toHaveBeenCalledWith('https://example.com/article', {
+        timeout: expect.any(Number),
+        proxy: undefined,
+        userAgentString: 'Request UA',
+        headers: {
+          'Accept-Language': 'en-US,en;q=0.9',
+          'X-Site': 'request',
+          'X-Request': 'yes'
+        }
       });
     });
 

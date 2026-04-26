@@ -148,6 +148,13 @@ export class CoreScraperEngine {
     try {
       context.siteConfig = await this.knownSitesPort.getConfig(domain);
       logger.debug(`Site config lookup for ${domain}`, { found: !!context.siteConfig, needsProxy: context.siteConfig?.needsProxy }, 'ENGINE');
+      const userAgentString = options?.userAgentString ?? context.siteConfig?.userAgent;
+      context.userAgentString = userAgentString;
+      const headers = {
+        ...context.siteConfig?.siteSpecificHeaders,
+        ...options?.requestHeaders
+      };
+      const pageLoadHeaders = Object.keys(headers).length > 0 ? headers : undefined;
 
       // Check if site needs DataDome residential proxy
       let proxyUrl: string | undefined;
@@ -170,7 +177,9 @@ export class CoreScraperEngine {
 
       const { pageId: pid } = await this.browserPort.loadPage(url, {
         timeout: options?.timeoutMs || DEFAULTS.TIMEOUT_MS,
-        proxy: pageLoadProxy
+        proxy: pageLoadProxy,
+        userAgentString,
+        headers: pageLoadHeaders
       });
       pageId = pid;
 
