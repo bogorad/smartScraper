@@ -1,143 +1,143 @@
 # AGENTS.md - SmartScraper
 
+## Scope
+
+This file adds SmartScraper-specific rules on top of the global
+`~/.dotfiles/opencode/AGENTS.md` baseline.
+
+- Treat `/home/chuck/git/smartScraper` as the project root.
+- This is a single TypeScript project, not a monorepo.
+- For source-code patterns, also read `src/AGENTS.md` before editing files under
+  `src/`.
+
 ## Project Snapshot
 
-- **Type**: Single TypeScript project (not monorepo)
-- **Stack**: TypeScript + Hono + Puppeteer + Nix + Vitest
-- **Architecture**: Ports & Adapters (Hexagonal)
-- **Sub-guides**: See [src/AGENTS.md](src/AGENTS.md) for detailed source code patterns
+- **Stack**: TypeScript, Hono, Puppeteer, Nix, Vitest.
+- **Architecture**: Ports and adapters, also called hexagonal architecture.
+- **Entry point**: `src/index.ts`.
+- **Configuration**: `src/config.ts`.
+- **Core scraper**: `src/core/engine.ts`.
 
----
+## Required Workflow
 
-## Justfile is THE source of truth, beads is your issue tracker
+Before starting work:
 
-Before attempting ANYTHING check the .justfile, it might contain guidance.
-Before acting, checkout/create beads issue, consult beads for all actions.
-Use beads, instead of nativ todos. Read /home/chuck/.dotfiles/opencode/BEADS.md
+1. Read `.justfile`; it is the source of truth for project commands.
+2. Read `/home/chuck/.dotfiles/opencode/BEADS.md`.
+3. Use Beads for issue tracking. Do not use native todo lists.
+4. Inspect existing Beads work before creating a new issue.
+5. Claim or create the Beads issue for the task before editing files.
 
-## Root Setup Commands
+Session completion requires:
+
+1. `git status`
+2. `git add <files>`
+3. `git commit -m "<conventional commit message>"`
+4. `git push`
+
+Work is not complete until `git push` succeeds.
+
+## Commands
+
+Run project commands through the Nix dev shell:
+
+```bash
+nix develop --command <command>
+```
+
+Root commands:
 
 ```bash
 just dev          # Development with secrets loaded
 just build        # Build TypeScript
 just check        # Typecheck
-just test         # Run tests (Go orchestrator)
+just test         # Run tests through the Go orchestrator
 just test-urls    # E2E tests against real URLs
 ```
 
----
+## Code Style
 
-## Universal Conventions
+- TypeScript strict mode is enabled.
+- Modules use ESM with `"type": "module"`.
+- Target runtime is ES2022 with NodeNext resolution.
+- Formatting is handled by Prettier through the Nix dev shell.
+- Match the existing local style before introducing a new pattern.
 
-### Code Style
+## Versioning
 
-- **TypeScript**: Strict mode enabled (`strict: true`)
-- **Modules**: ESM (`"type": "module"`)
-- **Target**: ES2022 / NodeNext
-- **Formatting**: Prettier (via Nix devShell)
+- After each code change, bump the patch version in `package.json`.
+- Example: `0.1.90` becomes `0.1.91`.
+- This is required for code changes, including small fixes.
 
-### Commits
+## Commits
 
-- Use conventional commits: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
-- Reference issues when applicable
+- Use conventional commits: `feat:`, `fix:`, `chore:`, `refactor:`,
+  `test:`, or `docs:`.
+- Reference Beads issues when the commit is tied to an issue.
 
-### Versioning
+## Runtime Model
 
-- **AFTER EACH CODE CHANGE**: Bump patch version in `package.json` (`xx.yy.zz` → `xx.yy.zz+1`)
-- Version bump is mandatory even for small fixes
+- `CONCURRENCY` controls scrape concurrency.
+- Default concurrency is `1`.
+- Maximum concurrency is `20`.
+- Queue management uses `PQueue` with `concurrency: N`.
+- Each scrape gets a fresh browser instance.
+- Browser launch, scrape, and cleanup must be paired.
+- Browser and temporary profile cleanup belongs in `finally`.
+- Plan for about 400 MB of memory per concurrent browser.
 
-### Concurrency & Performance
+## Dashboard Rules
 
-- **Execution Model**: Configurable concurrency via `CONCURRENCY` env var (default: 1, max: 20)
-- **Queue Management**: `PQueue` with `concurrency: N`
-- **Browser Lifecycle**: Fresh browser instance per scrape; launch → scrape → destroy
-- **Resource Cleanup**: Browser and temp profile destroyed in `finally` block
-- **Memory Planning**: ~400MB per concurrent browser; size server accordingly
+- Dashboard uses HTMX and the HTMX SSE extension.
+- Escape user-provided data in SSE fragments with `escapeHtml()`.
+- SSE streams must include a `: keepalive\n\n` heartbeat every 30 seconds.
+- Do not use inline JavaScript such as `onclick` or `<script>`.
+- Prefer HTMX attributes for dashboard behavior.
 
-### Dashboard (HTMX + SSE)
+## Security
 
-- **Real-time Updates**: HTMX SSE extension for server-push
-- **Security**: Always use `escapeHtml()` for user-provided data in SSE fragments
-- **Keepalive**: SSE streams include `: keepalive\n\n` heartbeat (every 30s)
-- **No Inline JS**: Use HTMX attributes, not `onclick` or `<script>`
+Never commit:
 
-### Branch Strategy
+- API tokens or keys.
+- `.env` files, except `.env.example`.
+- Decrypted `secrets.yaml`.
 
-- `main` is the default branch
-- Feature branches: `feat/description` or `fix/description`
+Secrets:
 
-### Development Commands
+- Development uses SOPS-encrypted `secrets.yaml`, decrypted by `just dev`.
+- Production uses the NixOS `sops-nix` module.
+- Runtime configuration comes from environment variables.
 
-- Use `nix develop --command <command>` to run commands with the devShell environment
+## Architecture Map
 
----
-
-## Security & Secrets
-
-### NEVER commit:
-
-- API tokens or keys
-- `.env` files (only `.env.example`)
-- Decrypted `secrets.yaml`
-
-### Secrets Management
-
-- **Development**: SOPS-encrypted `secrets.yaml` (decrypted via `just dev`)
-- **Production**: NixOS sops-nix module
-- **Pattern**: Environment variables loaded at runtime
-
----
-
-## Architecture Layers
-
-```
-src/ports/       # Interfaces (BrowserPort, LlmPort, CaptchaPort, KnownSitesPort)
-src/adapters/    # Implementations (puppeteer, openrouter, twocaptcha, fs)
-src/core/        # Business logic (engine.ts, scoring.ts)
-src/domain/      # Domain models (models.ts)
-src/routes/      # HTTP endpoints (api/, dashboard/)
-src/middleware/  # Auth, rate limiting, CSRF protection
-src/components/  # Hono JSX UI
-src/services/    # App services (stats, logs)
-src/utils/       # Utilities
+```text
+src/ports/       Interfaces: BrowserPort, LlmPort, CaptchaPort, KnownSitesPort
+src/adapters/    Implementations: Puppeteer, OpenRouter, TwoCaptcha, filesystem
+src/core/        Business logic: engine.ts, scoring.ts
+src/domain/      Domain models
+src/routes/      HTTP endpoints: API and dashboard
+src/middleware/  Auth, rate limiting, CSRF protection
+src/components/  Hono JSX UI
+src/services/    Stats and log services
+src/utils/       Utilities
 ```
 
-### Key Entry Points
+## Branches
 
-- `src/index.ts` - Application entry point
-- `src/config.ts` - Centralized configuration
-- `src/core/engine.ts` - Core scraping logic
-
----
+- `main` is the default branch.
+- Use `feat/<description>` or `fix/<description>` for feature branches.
 
 ## Definition of Done
 
 Before submitting a PR:
 
-1. `just check` - No type errors
-2. `just test` - All tests pass
-3. `just build` - Build succeeds
-4. No tokens/keys in diff
+1. `just check`
+2. `just test`
+3. `just build`
+4. Confirm the diff contains no tokens or keys.
 
----
+## Project References
 
-## Additional Resources
-
-- **ADRs**: `docs/adr/*.md` - Architecture decisions
-- **Config Guide**: `docs/CONFIGURATION.md`
-- **Just Commands**: `.justfile`
-
----
-
-## Session Completion
-
-**Work is NOT complete until `git push` succeeds.**
-
-```bash
-git status              # Check changes
-git add <files>
-git commit -m "..."
-git push
-```
-
----
+- ADRs: `docs/adr/*.md`.
+- Configuration guide: `docs/CONFIGURATION.md`.
+- Commands: `.justfile`.
