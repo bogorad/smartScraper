@@ -47,6 +47,16 @@ describe('logger OTLP export', () => {
     expect(emitMock).not.toHaveBeenCalled();
   });
 
+  it('filters logs below the configured level', async () => {
+    const loggerModule = await loadLogger(false, 'WARN');
+
+    loggerModule.logger.info('too noisy', undefined, 'TEST');
+    loggerModule.logger.warn('visible warning', undefined, 'TEST');
+
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+    expect(consoleWarnSpy).toHaveBeenCalledWith('[WARN] [TEST]', 'visible warning');
+  });
+
   it('exports structured logs to OTLP with redacted secret fields', async () => {
     const loggerModule = await loadLogger(true);
 
@@ -108,10 +118,10 @@ describe('logger OTLP export', () => {
     expect(shutdownMock).toHaveBeenCalledOnce();
   });
 
-  async function loadLogger(otlpEnabled: boolean): Promise<LoggerModule> {
+  async function loadLogger(otlpEnabled: boolean, logLevel = 'DEBUG'): Promise<LoggerModule> {
     vi.doMock('../config.js', () => ({
       getDataDir: () => './data',
-      getLogLevel: () => 'DEBUG',
+      getLogLevel: () => logLevel,
       getNodeEnv: () => 'production',
       getVictoriaLogsOtlpBatchDelayMs: () => 1000,
       getVictoriaLogsOtlpEndpoint: () => 'http://victorialogs:9428/insert/opentelemetry/v1/logs',

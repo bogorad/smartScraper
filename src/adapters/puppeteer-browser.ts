@@ -285,15 +285,13 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
 
     try {
       return await session.page.evaluate((xpathSelector) => {
-        console.log(`Evaluating XPath: ${xpathSelector}`);
         const body = document.querySelector('body');
-        console.log(`Body check: ${!!body}`);
+        if (!body) return [];
 
         try {
             // XPathResult.ORDERED_NODE_SNAPSHOT_TYPE = 7
             const result = document.evaluate(xpathSelector, document, null, 7, null);
             const results: string[] = [];
-            console.log(`Snapshot length: ${result.snapshotLength}`);
 
             for (let i = 0; i < result.snapshotLength; i++) {
                 const node = result.snapshotItem(i);
@@ -306,8 +304,7 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
                 if (val) results.push(val);
             }
             return results;
-        } catch (e) {
-            console.error('Evaluate error:', e instanceof Error ? e.message : String(e));
+        } catch {
             return [];
         }
       }, xpath);
@@ -562,9 +559,6 @@ export class PuppeteerBrowserAdapter implements BrowserPort {
               }
             } catch (e) {
               // JSON-LD parse error - continue to next script
-              if (typeof console !== 'undefined' && console.debug) {
-                console.debug('[SmartScraper] JSON-LD parse error:', e);
-              }
             }
           }
 

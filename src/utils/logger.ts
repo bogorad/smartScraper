@@ -51,6 +51,22 @@ let otelLoggerProvider: LoggerProvider | null = null;
 let otelLogger: OtelLogger | null = null;
 let otlpInitialized = false;
 
+function writeConsole(level: LogLevel, prefix: string, message: string, data?: unknown) {
+  const args = data === undefined ? [prefix, message] : [prefix, message, data];
+
+  if (level === 'ERROR') {
+    console.error(...args);
+  } else if (level === 'WARN') {
+    console.warn(...args);
+  } else {
+    console.log(...args);
+  }
+}
+
+function writeInternal(level: LogLevel, message: string, data?: unknown) {
+  writeConsole(level, '[LOGGER]', message, data);
+}
+
 function initLogFile() {
   if (logFileStream) return;
 
@@ -67,7 +83,7 @@ function initLogFile() {
     });
 
     logFileStream.on('error', (err) => {
-      console.error('[LOGGER] File stream error:', err.message);
+      writeInternal('ERROR', 'File stream error:', err.message);
       logFileStream = null; // Disable file logging, continue with console
     });
 
@@ -83,10 +99,13 @@ function initLogFile() {
     }
 
     if (debugEnabled) {
-      console.log(`[LOGGER] Debug mode enabled, logging to: ${logFile}`);
+      writeInternal('INFO', `Debug mode enabled, logging to: ${logFile}`);
     }
   } catch (error) {
-    console.error('[LOGGER] Failed to initialize log file:', error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    if (message !== 'Config not initialized. Call initConfig() first.') {
+      writeInternal('ERROR', 'Failed to initialize log file:', message);
+    }
   }
 }
 
@@ -112,7 +131,7 @@ function initOtlpLogger() {
 
     const endpoint = getVictoriaLogsOtlpEndpoint();
     if (!endpoint) {
-      console.warn('[LOGGER] VICTORIALOGS_OTLP_ENABLED is true but VICTORIALOGS_OTLP_ENDPOINT is empty.');
+      writeInternal('WARN', 'VICTORIALOGS_OTLP_ENABLED is true but VICTORIALOGS_OTLP_ENDPOINT is empty.');
       return;
     }
 
@@ -141,10 +160,7 @@ function initOtlpLogger() {
     });
     otelLogger = otelLoggerProvider.getLogger('smart-scraper', VERSION);
   } catch (error) {
-    console.error(
-      '[LOGGER] Failed to initialize OTLP logging:',
-      error instanceof Error ? error.message : String(error)
-    );
+    writeInternal('ERROR', 'Failed to initialize OTLP logging:', error instanceof Error ? error.message : String(error));
     otelLoggerProvider = null;
     otelLogger = null;
   }
@@ -159,7 +175,7 @@ function writeToFile(entry: LogEntry) {
     try {
       logFileStream.write(JSON.stringify(entry) + '\n');
     } catch (error) {
-      console.error('[LOGGER] Write error:', error instanceof Error ? error.message : String(error));
+      writeInternal('ERROR', 'Write error:', error instanceof Error ? error.message : String(error));
     }
   }
 }
@@ -253,27 +269,8 @@ function log(level: LogLevel, module: string | undefined, message: string, data?
     })
   };
 
-  // Console output
   const prefix = module ? `[${level}] [${module}]` : `[${level}]`;
-  if (data !== undefined) {
-    if (level === 'ERROR') {
-      console.error(prefix, message, entry.data);
-    } else if (level === 'WARN') {
-      console.warn(prefix, message, entry.data);
-    } else {
-      console.log(prefix, message, entry.data);
-    }
-  } else {
-    if (level === 'ERROR') {
-      console.error(prefix, message);
-    } else if (level === 'WARN') {
-      console.warn(prefix, message);
-    } else {
-      console.log(prefix, message);
-    }
-  }
-
-  // File output (JSONL)
+  writeConsole(level, prefix, message, entry.data);
   writeToFile(entry);
   writeToOtlp(entry);
 }
@@ -297,86 +294,48 @@ export const logger = {
 
   // Specialized logging methods for scraping
   scrapeStart: (scrapeId: string, url: string, domain: string, config?: any) => {
-    const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
-      level: 'INFO',
-      module: 'SCRAPE',
-      message: 'Scrape started',
+    log('INFO', 'SCRAPE', `${scrapeId} - Starting: ${url}`, {
       scrapeId,
       url,
       domain,
-      data: redactSecrets(config)
-    };
-    console.log(`[INFO] [SCRAPE] ${scrapeId} - Starting: ${url}`);
-    writeToFile(entry);
-    writeToOtlp(entry);
+      config
+    });
   },
 
   scrapeEnd: (scrapeId: string, url: string, domain: string, success: boolean, duration: number, error?: string) => {
-    const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
-      level: success ? 'INFO' : 'ERROR',
-      module: 'SCRAPE',
-      message: success ? 'Scrape completed' : 'Scrape failed',
+    log(success ? 'INFO' : 'ERROR', 'SCRAPE', `${scrapeId} - ${success ? 'Scrape completed' : 'Scrape failed'} in ${duration}ms`, {
       scrapeId,
       url,
       domain,
       duration,
       ...(error && { error })
-    };
-    console.log(`[${entry.level}] [SCRAPE] ${scrapeId} - ${entry.message} in ${duration}ms`);
-    writeToFile(entry);
-    writeToOtlp(entry);
+    });
   },
 
   proxySession: (scrapeId: string, sessionUrl: string, sessionId: string, minutes: number) => {
-    const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
-      level: 'DEBUG',
-      module: 'PROXY',
-      message: 'Generated proxy session',
+    log('DEBUG', 'PROXY', `${scrapeId} - Session ${sessionId} (${minutes}min sticky)`, {
       scrapeId,
-      data: {
-        sessionId,
-        stickyMinutes: minutes,
-        // Redact credentials from log
-        sessionUrl: sessionUrl.replace(/:([^:@]+)@/, ':***@')
-      }
-    };
-    console.log(`[DEBUG] [PROXY] ${scrapeId} - Session ${sessionId} (${minutes}min sticky)`);
-    writeToFile(entry);
-    writeToOtlp(entry);
+      sessionId,
+      stickyMinutes: minutes,
+      sessionUrl: sessionUrl.replace(/:([^:@]+)@/, ':***@')
+    });
   },
 
   captchaDetected: (scrapeId: string, url: string, captchaType: string) => {
-    const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
-      level: 'WARN',
-      module: 'CAPTCHA',
-      message: 'CAPTCHA detected',
+    log('WARN', 'CAPTCHA', `${scrapeId} - Detected: ${captchaType}`, {
       scrapeId,
       url,
-      data: { captchaType }
-    };
-    console.warn(`[WARN] [CAPTCHA] ${scrapeId} - Detected: ${captchaType}`);
-    writeToFile(entry);
-    writeToOtlp(entry);
+      captchaType
+    });
   },
 
   captchaSolved: (scrapeId: string, url: string, success: boolean, duration: number, reason?: string) => {
-    const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
-      level: success ? 'INFO' : 'ERROR',
-      module: 'CAPTCHA',
-      message: success ? 'CAPTCHA solved' : 'CAPTCHA solve failed',
+    log(success ? 'INFO' : 'ERROR', 'CAPTCHA', `${scrapeId} - ${success ? 'CAPTCHA solved' : 'CAPTCHA solve failed'} in ${duration}ms`, {
       scrapeId,
       url,
       duration,
       ...(reason && { error: reason })
-    };
-    console.log(`[${entry.level}] [CAPTCHA] ${scrapeId} - ${entry.message} in ${duration}ms`);
-    writeToFile(entry);
-    writeToOtlp(entry);
+    });
   },
 
   close: () => {

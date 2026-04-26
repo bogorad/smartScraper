@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import YAML from 'yaml';
+import { logger } from './utils/logger.js';
 
 // Load .env file first if it exists
 if (fs.existsSync('.env')) {
@@ -123,7 +124,7 @@ function loadSecretsFromYaml(): Record<string, string> {
 
     return apiKeys;
   } catch (error) {
-    console.warn('[CONFIG] Failed to load secrets.yaml:', error instanceof Error ? error.message : error);
+    logger.warn('Failed to load secrets.yaml', { error }, 'CONFIG');
     return {};
   }
 }
@@ -209,9 +210,10 @@ function parseConfig(): Config {
   if (rawConcurrency !== undefined) {
     const numVal = Number(rawConcurrency);
     if (!isNaN(numVal) && (numVal < 1 || numVal > 20)) {
-      console.warn(
-        `[CONFIG] CONCURRENCY=${numVal} is outside valid range (1-20), will be clamped to ${Math.max(1, Math.min(20, numVal))}`
-      );
+      logger.warn('CONCURRENCY is outside valid range (1-20)', {
+        concurrency: numVal,
+        clampedTo: Math.max(1, Math.min(20, numVal))
+      }, 'CONFIG');
     }
   }
 
@@ -229,7 +231,7 @@ function parseConfig(): Config {
           return `${key}: Validation failed`;
         })
         .join('\n');
-      console.error('[CONFIG] Validation failed:\n' + messages);
+      logger.error('Validation failed', { messages }, 'CONFIG');
       throw new Error(`Configuration validation failed:\n${messages}`);
     }
     throw error;
