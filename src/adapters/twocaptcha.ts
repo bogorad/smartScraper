@@ -18,81 +18,37 @@ export class TwoCaptchaAdapter implements CaptchaPort {
   }
 
   async solveIfPresent(input: CaptchaSolveInput): Promise<CaptchaSolveResult> {
-    if (!this.apiKey) {
-      return { solved: false, reason: 'TWOCAPTCHA_API_KEY not configured' };
-    }
-
     if (input.captchaTypeHint === CAPTCHA_TYPES.DATADOME) {
+      if (!this.apiKey) {
+        return {
+          solved: false,
+          reason: 'TWOCAPTCHA_API_KEY not configured'
+        };
+      }
+
       return this.solveDataDome(input);
     }
 
-    if (input.captchaTypeHint === CAPTCHA_TYPES.CLOUDFLARE) {
-      return this.solveTurnstile(input);
+    const unsupportedCaptchaType = this.unsupportedCaptchaType(input.captchaTypeHint);
+    if (unsupportedCaptchaType) {
+      return {
+        solved: false,
+        reason: `${unsupportedCaptchaType} CAPTCHA solving is unsupported in this pass`
+      };
     }
 
-    if (input.captchaTypeHint === CAPTCHA_TYPES.GENERIC) {
-      return this.solveGeneric(input);
-    }
-
-    return { solved: false, reason: 'Unknown CAPTCHA type' };
-  }
-
-  private async solveGeneric(input: CaptchaSolveInput): Promise<CaptchaSolveResult> {
-    if (!input.siteKey) {
-      return { solved: false, reason: 'Generic CAPTCHA requires siteKey extraction (not yet implemented)' };
-    }
-
-    try {
-      const submitResponse = await axios.get('https://2captcha.com/in.php', {
-        params: {
-          key: this.apiKey,
-          method: 'userrecaptcha',
-          googlekey: input.siteKey,
-          pageurl: input.pageUrl,
-          json: 1
-        }
-      });
-
-      if (submitResponse.data?.status !== 1) {
-        return { solved: false, reason: submitResponse.data?.request || 'Submit failed' };
-      }
-
-      const captchaId = submitResponse.data.request;
-      const startTime = Date.now();
-
-      while (Date.now() - startTime < this.timeout * 1000) {
-        await new Promise(r => setTimeout(r, this.pollingInterval));
-
-        const resultResponse = await axios.get('https://2captcha.com/res.php', {
-          params: {
-            key: this.apiKey,
-            action: 'get',
-            id: captchaId,
-            json: 1
-          }
-        });
-
-        if (resultResponse.data?.status === 1) {
-          return { solved: true, updatedCookie: resultResponse.data.request };
-        }
-
-        if (resultResponse.data?.request !== 'CAPCHA_NOT_READY') {
-          return { solved: false, reason: resultResponse.data?.request || 'Unknown error' };
-        }
-      }
-
-      return { solved: false, reason: 'Timeout waiting for solution' };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      return { solved: false, reason: message };
-    }
+    return {
+      solved: false,
+      reason: 'Unknown CAPTCHA type'
+    };
   }
 
   private async solveDataDome(input: CaptchaSolveInput): Promise<CaptchaSolveResult> {
     if (!input.proxyDetails?.server) {
       return {
         solved: false,
-        reason: 'DataDome solver proxy configuration error: DATADOME_PROXY_* credentials are required for DataDome CAPTCHA solving'
+        reason:
+          'DataDome solver proxy configuration error: DATADOME_PROXY_* credentials are required for DataDome CAPTCHA solving'
       };
     }
 
@@ -104,7 +60,7 @@ export class TwoCaptchaAdapter implements CaptchaPort {
           reason: 'DataDome solver proxy configuration error: failed to parse DataDome proxy URL'
         };
       }
-      
+
       const taskPayload = {
         clientKey: this.apiKey,
         task: {
@@ -127,7 +83,9 @@ export class TwoCaptchaAdapter implements CaptchaPort {
 
       const createResponse = await axios.post('https://api.2captcha.com/createTask', taskPayload);
 
-      logger.debug('[2CAPTCHA] Create response:', { data: createResponse.data });
+      logger.debug('[2CAPTCHA] Create response:', {
+        data: createResponse.data
+      });
 
       const taskId = createResponse.data?.taskId;
       if (!taskId) {
@@ -139,7 +97,7 @@ export class TwoCaptchaAdapter implements CaptchaPort {
 
       const startTime = Date.now();
       while (Date.now() - startTime < this.timeout * 1000) {
-        await new Promise(r => setTimeout(r, this.pollingInterval));
+        await new Promise((r) => setTimeout(r, this.pollingInterval));
 
         const resultResponse = await axios.post('https://api.2captcha.com/getTaskResult', {
           clientKey: this.apiKey,
@@ -154,13 +112,17 @@ export class TwoCaptchaAdapter implements CaptchaPort {
           if (cookie) {
             return { solved: true, updatedCookie: cookie };
           }
-          return { solved: false, reason: 'Solution missing cookie' };
+          return {
+            solved: false,
+            reason: 'Solution missing cookie'
+          };
         }
 
         // Check for fatal errors (including errorCode regardless of status)
-        const hasError = resultResponse.data?.status === 'error' ||
-                        (resultResponse.data?.errorId && resultResponse.data.errorId !== 0) ||
-                        resultResponse.data?.errorCode;
+        const hasError =
+          resultResponse.data?.status === 'error' ||
+          (resultResponse.data?.errorId && resultResponse.data.errorId !== 0) ||
+          resultResponse.data?.errorCode;
 
         if (hasError) {
           const errorCode = resultResponse.data?.errorCode;
@@ -173,88 +135,29 @@ export class TwoCaptchaAdapter implements CaptchaPort {
         }
       }
 
-      return { solved: false, reason: 'Timeout waiting for solution' };
+      return {
+        solved: false,
+        reason: 'Timeout waiting for solution'
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       return { solved: false, reason: message };
     }
   }
 
-  private async solveTurnstile(input: CaptchaSolveInput): Promise<CaptchaSolveResult> {
-    if (!input.siteKey) {
-      return { solved: false, reason: 'Turnstile requires siteKey' };
-    }
-
-    try {
-      const taskPayload = {
-        clientKey: this.apiKey,
-        task: {
-          type: 'TurnstileTaskProxyless',
-          websiteURL: input.pageUrl,
-          websiteKey: input.siteKey
-        }
-      };
-
-      logger.debug('[2CAPTCHA] Creating Turnstile task:', {
-        task: taskPayload.task
-      });
-
-      const createResponse = await axios.post('https://api.2captcha.com/createTask', taskPayload);
-
-      logger.debug('[2CAPTCHA] Turnstile create response:', { data: createResponse.data });
-
-      const taskId = createResponse.data?.taskId;
-      if (!taskId) {
-        return { solved: false, reason: createResponse.data?.errorDescription || 'Failed to create Turnstile task' };
-      }
-
-      const startTime = Date.now();
-      while (Date.now() - startTime < this.timeout * 1000) {
-        await new Promise(r => setTimeout(r, this.pollingInterval));
-
-        const resultResponse = await axios.post('https://api.2captcha.com/getTaskResult', {
-          clientKey: this.apiKey,
-          taskId
-        });
-
-        logger.debug(`[2CAPTCHA] Turnstile poll result for task ${taskId}:`, { data: resultResponse.data });
-
-        if (resultResponse.data?.status === 'ready') {
-          const token = resultResponse.data?.solution?.token;
-          if (token) {
-            return { solved: true, token };
-          }
-          return { solved: false, reason: 'Solution missing token' };
-        }
-
-        // Check for fatal errors
-        const hasError = resultResponse.data?.status === 'error' ||
-                        (resultResponse.data?.errorId && resultResponse.data.errorId !== 0) ||
-                        resultResponse.data?.errorCode;
-
-        if (hasError) {
-          const errorCode = resultResponse.data?.errorCode;
-          const errorDesc = resultResponse.data?.errorDescription;
-
-          // Map known fatal error codes (same as DataDome)
-          const fatalErrors: Record<string, string> = {
-            'ERROR_CAPTCHA_UNSOLVABLE': 'CAPTCHA could not be solved',
-            'ERROR_WRONG_CAPTCHA_ID': 'Invalid CAPTCHA ID',
-            'ERROR_BAD_TOKEN_OR_PAGEURL': 'Invalid token or page URL',
-            'ERROR_EMPTY_ACTION': 'Empty action parameter',
-            'ERROR_PROXY_CONNECTION_FAILED': 'Proxy connection failed',
-            'ERROR_PROXY_NOT_AUTHORIZED': 'Proxy authentication failed'
-          };
-
-          const reason = fatalErrors[errorCode] || errorDesc || errorCode || 'Unknown Turnstile error';
-          return { solved: false, reason };
-        }
-      }
-
-      return { solved: false, reason: 'Timeout waiting for Turnstile solution' };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      return { solved: false, reason: message };
+  private unsupportedCaptchaType(captchaTypeHint: CaptchaSolveInput['captchaTypeHint']): string | null {
+    switch (captchaTypeHint) {
+      case CAPTCHA_TYPES.GENERIC:
+        return 'Generic';
+      case CAPTCHA_TYPES.CLOUDFLARE:
+      case 'turnstile':
+        return 'Turnstile';
+      case 'recaptcha':
+        return 'reCAPTCHA';
+      case 'hcaptcha':
+        return 'hCaptcha';
+      default:
+        return null;
     }
   }
 
@@ -284,13 +187,17 @@ export class TwoCaptchaAdapter implements CaptchaPort {
   private buildProxyFields(proxyUrl: string): Record<string, string | number> | null {
     const parsed = parseProxyUrl(proxyUrl);
     if (!parsed) return null;
-    
+
     return {
       proxyType: parsed.protocol,
       proxyAddress: parsed.host,
       proxyPort: parsed.port,
-      ...(parsed.username && { proxyLogin: parsed.username }),
-      ...(parsed.password && { proxyPassword: parsed.password })
+      ...(parsed.username && {
+        proxyLogin: parsed.username
+      }),
+      ...(parsed.password && {
+        proxyPassword: parsed.password
+      })
     };
   }
 }
