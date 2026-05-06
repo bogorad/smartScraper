@@ -1,2 +1,2 @@
 dolt.database: "smartScraper"
-
+export.auto: false
